@@ -350,15 +350,20 @@ where
 /// Propagates information about monotonic inputs through views.
 pub fn optimize_dataflow_monotonic(dataflow: &mut DataflowDesc) -> Result<(), TransformError> {
     let mut monotonic = std::collections::HashSet::new();
-    for (source_id, source) in dataflow.source_imports.iter_mut() {
+    for (source_id, source) in dataflow.source_imports.iter() {
         if source.description.connection.append_only() {
             monotonic.insert(source_id.clone());
+        }
+    }
+    for (index_id, (index_desc, _, index_is_monotonic)) in dataflow.index_imports.iter() {
+        if *index_is_monotonic {
+            monotonic.insert(index_id.clone());
+            monotonic.insert(index_desc.on_id.clone());
         }
     }
 
     let monotonic_flag = MonotonicFlag::default();
 
-    // Propagate predicate information from outputs to inputs.
     for build_desc in dataflow.objects_to_build.iter_mut() {
         monotonic_flag.apply(
             build_desc.plan.as_inner_mut(),

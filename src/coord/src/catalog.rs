@@ -21,7 +21,7 @@ use once_cell::sync::Lazy;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use tokio::sync::{Mutex, MutexGuard};
-use tracing::{info, trace};
+use tracing::{warn, info, trace};
 
 use mz_audit_log::{EventDetails, EventType, FullNameV1, ObjectType, VersionedEvent};
 use mz_build_info::DUMMY_BUILD_INFO;
@@ -32,7 +32,7 @@ use mz_dataflow_types::client::{
 use mz_dataflow_types::logging::LoggingConfig as DataflowLoggingConfig;
 use mz_dataflow_types::sinks::{SinkConnection, SinkConnectionBuilder, SinkEnvelope};
 use mz_dataflow_types::sources::{ExternalSourceConnection, SourceConnection, Timeline};
-use mz_expr::{ExprHumanizer, MirScalarExpr, OptimizedMirRelationExpr};
+use mz_expr::{ExprHumanizer, Id, MirRelationExpr, MirScalarExpr, OptimizedMirRelationExpr};
 use mz_ore::collections::CollectionExt;
 use mz_ore::metrics::MetricsRegistry;
 use mz_ore::now::{to_datetime, EpochMillis, NowFn};
@@ -59,6 +59,7 @@ use mz_sql::DEFAULT_SCHEMA;
 use mz_stash::{Append, Postgres, Sqlite};
 use mz_transform::Optimizer;
 use uuid::Uuid;
+use mz_expr::visit::Visit;
 
 use crate::catalog::builtin::{
     Builtin, BuiltinLog, BuiltinTable, BuiltinType, Fingerprint, BUILTINS, BUILTIN_ROLES,
@@ -1077,6 +1078,7 @@ pub struct View {
     pub desc: RelationDesc,
     pub conn_id: Option<u32>,
     pub depends_on: Vec<GlobalId>,
+    pub monotonic: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -1316,6 +1318,18 @@ impl CatalogItem {
             connection.requires_single_materialization()
         } else {
             false
+        }
+    }
+
+    pub fn monotonic_view_or_source(&self) -> bool {
+        match self {
+            CatalogItem::View(view) => {
+                view.monotonic
+            },
+            CatalogItem::Source(source) => {
+                source.connection.append_only()
+            },
+            _ => false,
         }
     }
 }
@@ -3323,7 +3337,8 @@ impl<S: Append> Catalog<S> {
             }),
             Plan::CreateView(CreateViewPlan { view, .. }) => {
                 let mut optimizer = Optimizer::logical_optimizer();
-                let optimized_expr = optimizer.optimize(view.expr)?;
+                let mut optimized_expr = optimizer.optimize(view.expr)?;
+                let monotonic = self.monotonic_expr(&mut optimized_expr);
                 let desc = RelationDesc::new(optimized_expr.typ(), view.column_names);
                 CatalogItem::View(View {
                     create_sql: view.create_sql,
@@ -3331,6 +3346,7 @@ impl<S: Append> Catalog<S> {
                     desc,
                     conn_id: None,
                     depends_on,
+                    monotonic,
                 })
             }
             Plan::CreateIndex(CreateIndexPlan { index, .. }) => CatalogItem::Index(Index {
@@ -3420,6 +3436,45 @@ impl<S: Append> Catalog<S> {
             .await
             .expect("cannot fail to allocate system ids");
         BUILTINS::logs().zip(system_ids.into_iter()).collect()
+    }
+
+    /// Determines if an OptimizedMirRelationExpr is monotonic.
+    /// It doesn't take into account Gets to indexes, so don't call this after physical optimization
+    /// introduced index access!
+    pub fn monotonic_expr(&self, optimized_expr: &mut OptimizedMirRelationExpr) -> bool {
+        // Inspect global ids that occur in the Gets in optimized_expr, and collect the ids of
+        // monotonic views and sources (but not indexes).
+        let mut monotonic_ids = HashSet::<GlobalId>::new();
+        let recursion_result = optimized_expr.as_inner_mut().visit_post(&mut |e| {
+            match e {
+                MirRelationExpr::Get { id: Id::Global(gid) , ..} => {
+                    if self.get_entry(gid).item.monotonic_view_or_source() {
+                        monotonic_ids.insert(*gid);
+                    }
+                },
+                _ => {},
+            }
+        });
+        if recursion_result.is_err() {
+            warn!("Recursion limit reached while inspecting view definition for monotonicity");
+        }
+
+        // Use `monotonic_ids` as a starting point, and propagate monotonicity info from these Gets.
+        let monotonic_flagger = mz_transform::monotonic::MonotonicFlag::default();
+        let recursion_result = monotonic_flagger.apply(
+            optimized_expr.as_inner_mut(),
+            &monotonic_ids,
+            &mut HashSet::new(),
+        );
+        match recursion_result {
+            Ok(monotonic) => {
+                monotonic
+            }
+            Err(_recursion_limit_error) => {
+                warn!("Recursion limit reached while inspecting view definition for monotonicity");
+                false
+            }
+        }
     }
 }
 

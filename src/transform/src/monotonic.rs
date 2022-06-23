@@ -42,7 +42,7 @@ impl MonotonicFlag {
         expr: &mut MirRelationExpr,
         sources: &HashSet<GlobalId>,
         locals: &mut HashSet<LocalId>,
-    ) -> Result<bool, crate::TransformError> {
+    ) -> Result<bool, crate::RecursionLimitError> {
         self.checked_recur(|_| {
             let is_monotonic = match expr {
                 MirRelationExpr::Get { id, .. } => match id {

@@ -130,7 +130,8 @@ impl<'a> DataflowBuilder<'a, mz_repr::Timestamp> {
                                 .resolve_full_name(entry.name(), entry.conn_id()),
                         )
                         .expect("indexes can only be built on items with descs");
-                    dataflow.import_index(index_id, index_desc, desc.typ().clone());
+                    let monotonic = entry.item().monotonic_view_or_source();
+                    dataflow.import_index(index_id, index_desc, desc.typ().clone(), monotonic);
                 }
             } else {
                 drop(valid_indexes);

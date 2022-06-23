@@ -2969,9 +2969,10 @@ impl<S: Append + 'static> Coordinator<S> {
         }
         let view_id = self.catalog.allocate_user_id().await?;
         let view_oid = self.catalog.allocate_oid().await?;
-        let optimized_expr = self.view_optimizer.optimize(view.expr)?;
+        let mut optimized_expr = self.view_optimizer.optimize(view.expr)?;
+        let monotonic = self.catalog.monotonic_expr(&mut optimized_expr);
         let desc = RelationDesc::new(optimized_expr.typ(), view.column_names);
-        let view = catalog::View {
+            let view = catalog::View {
             create_sql: view.create_sql,
             optimized_expr,
             desc,
@@ -2981,6 +2982,7 @@ impl<S: Append + 'static> Coordinator<S> {
                 None
             },
             depends_on,
+            monotonic,
         };
         ops.push(catalog::Op::CreateItem {
             id: view_id,
@@ -5652,7 +5654,7 @@ pub mod fast_path_peek {
                             // An arrangement may or may not exist. If not, nothing to be done.
                             if let Some((key, permute, thinning)) = keys.arbitrary_arrangement() {
                                 // Just grab any arrangement, but be sure to de-permute the results.
-                                for (index_id, (desc, _typ)) in dataflow_plan.index_imports.iter() {
+                                for (index_id, (desc, _typ, _monotonic)) in dataflow_plan.index_imports.iter() {
                                     if Id::Global(desc.on_id) == *id && &desc.key == key {
                                         let mut map_filter_project =
                                             mz_expr::MapFilterProject::new(_typ.arity())
@@ -5688,7 +5690,7 @@ pub mod fast_path_peek {
                                 })?;
                             // We should only get excited if we can track down an index for `id`.
                             // If `keys` is non-empty, that means we think one exists.
-                            for (index_id, (desc, _typ)) in dataflow_plan.index_imports.iter() {
+                            for (index_id, (desc, _typ, _monotonic)) in dataflow_plan.index_imports.iter() {
                                 if Id::Global(desc.on_id) == *id && &desc.key == key {
                                     // Indicate an early exit with a specific index and key_val.
                                     return Ok(Plan::PeekExisting(
