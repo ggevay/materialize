@@ -18,6 +18,7 @@ use serde::{Deserialize, Serialize};
 
 use mz_lowertest::MzReflect;
 use mz_ore::collections::CollectionExt;
+use mz_ore::iter::IteratorExt;
 use mz_ore::str::separated;
 use mz_pgrepr::TypeFromOidError;
 use mz_proto::{ProtoType, RustType, TryFromProtoError};
@@ -279,6 +280,28 @@ impl MirScalarExpr {
             then: Box::new(t),
             els: Box::new(f),
         }
+    }
+
+    pub fn or(self, other: Self) -> Self {
+        MirScalarExpr::CallVariadic {
+            func: VariadicFunc::Or,
+            exprs: vec![self, other],
+        }
+    }
+
+    pub fn and(self, other: Self) -> Self {
+        MirScalarExpr::CallVariadic {
+            func: VariadicFunc::And,
+            exprs: vec![self, other],
+        }
+    }
+
+    pub fn not(self) -> Self {
+        self.call_unary(UnaryFunc::Not(func::Not))
+    }
+
+    pub fn call_is_null(self) -> Self {
+        self.call_unary(UnaryFunc::IsNull(func::IsNull))
     }
 
     /// Rewrites column indices with their value in `permutation`.
@@ -681,24 +704,6 @@ impl MirScalarExpr {
                                     ),
                                 }
                             }
-                        } else if *func == BinaryFunc::And {
-                            // If we are here, not both inputs are literals.
-                            if expr1.is_literal_false() || expr2.is_literal_true() {
-                                *e = expr1.take();
-                            } else if expr2.is_literal_false() || expr1.is_literal_true() {
-                                *e = expr2.take();
-                            } else if expr1 == expr2 {
-                                *e = expr1.take();
-                            }
-                        } else if *func == BinaryFunc::Or {
-                            // If we are here, not both inputs are literals.
-                            if expr1.is_literal_true() || expr2.is_literal_false() {
-                                *e = expr1.take();
-                            } else if expr2.is_literal_true() || expr1.is_literal_false() {
-                                *e = expr2.take();
-                            } else if expr1 == expr2 {
-                                *e = expr1.take();
-                            }
                         }
                     }
                     MirScalarExpr::CallVariadic { func, exprs } => {
@@ -773,6 +778,30 @@ impl MirScalarExpr {
                             let ind_exprs = exprs.split_off(1);
                             let top_list_create = exprs.swap_remove(0);
                             *e = reduce_list_create_list_index_literal(top_list_create, ind_exprs);
+                        } else if *func == VariadicFunc::And || *func == VariadicFunc::Or {
+                            Self::reduce_or_and(e);
+
+                            // // x AND/OR x --> x
+                            // exprs.sort();
+                            // exprs.dedup();
+                            // // AND/OR of 1 argument evaluates to that argument
+                            // if exprs.len() == 1 {
+                            //     *e = exprs.swap_remove(1);
+                            // } else {
+                            //     // (If we are here, not all inputs are literals.)
+                            //     if *func == VariadicFunc::And {
+                            //         // If any args are false, then evaluate to false
+                            //         if exprs.iter().any(|e| { e.is_literal_false() }) {
+                            //             *e = MirScalarExpr::literal_ok(Datum::False, ScalarType::Bool);
+                            //         }
+                            //     } else if *func == VariadicFunc::Or {
+                            //         // If any args are true, then evaluate to true
+                            //         if exprs.iter().any(|e| { e.is_literal_true() }) {
+                            //             *e = MirScalarExpr::literal_ok(Datum::True, ScalarType::Bool);
+                            //         }
+                            //     }
+                            // }
+
                         }
                     }
                     MirScalarExpr::If { cond, then, els } => {
@@ -799,46 +828,30 @@ impl MirScalarExpr {
                                 (Some(Ok(Datum::True)), _) => {
                                     // Rewritten as ((<cond> IS NOT NULL) AND (<cond>)) OR (<els>)
                                     // NULL <cond> results in: (FALSE AND NULL) OR (<els>) => (<els>)
-                                    *e = cond
-                                        .clone()
-                                        .call_unary(UnaryFunc::IsNull(func::IsNull))
-                                        .call_unary(UnaryFunc::Not(func::Not))
-                                        .call_binary(cond.take(), BinaryFunc::And)
-                                        .call_binary(els.take(), BinaryFunc::Or);
+                                    *e = cond.clone().call_is_null().not()
+                                        .and(cond.take())
+                                        .or(els.take());
                                 }
                                 (Some(Ok(Datum::False)), _) => {
                                     // Rewritten as ((NOT <cond>) OR (<cond> IS NULL)) AND (<els>)
                                     // NULL <cond> results in: (NULL OR TRUE) AND (<els>) => TRUE AND (<els>) => (<els>)
-                                    *e = cond
-                                        .clone()
-                                        .call_unary(UnaryFunc::Not(func::Not))
-                                        .call_binary(
-                                            cond.take().call_unary(UnaryFunc::IsNull(func::IsNull)),
-                                            BinaryFunc::Or,
-                                        )
-                                        .call_binary(els.take(), BinaryFunc::And);
+                                    *e = cond.clone().not()
+                                        .or(cond.take().call_is_null())
+                                        .and(els.take());
                                 }
                                 (_, Some(Ok(Datum::True))) => {
                                     // Rewritten as (NOT <cond>) OR (<cond> IS NULL) OR (<then>)
                                     // NULL <cond> results in: NULL OR TRUE OR (<then>) => TRUE
-                                    *e = cond
-                                        .clone()
-                                        .call_unary(UnaryFunc::Not(func::Not))
-                                        .call_binary(
-                                            cond.take().call_unary(UnaryFunc::IsNull(func::IsNull)),
-                                            BinaryFunc::Or,
-                                        )
-                                        .call_binary(then.take(), BinaryFunc::Or);
+                                    *e = cond.clone().not()
+                                        .or(cond.take().call_is_null())
+                                        .or(then.take());
                                 }
                                 (_, Some(Ok(Datum::False))) => {
                                     // Rewritten as (<cond> IS NOT NULL) AND (<cond>) AND (<then>)
                                     // NULL <cond> results in: FALSE AND NULL AND (<then>) => FALSE
-                                    *e = cond
-                                        .clone()
-                                        .call_unary(UnaryFunc::IsNull(func::IsNull))
-                                        .call_unary(UnaryFunc::Not(func::Not))
-                                        .call_binary(cond.take(), BinaryFunc::And)
-                                        .call_binary(then.take(), BinaryFunc::And);
+                                    *e = cond.clone().call_is_null().not()
+                                        .and(cond.take())
+                                        .and(then.take());
                                 }
                                 _ => {}
                             }
@@ -885,14 +898,23 @@ impl MirScalarExpr {
             &mut |e| {
                 // 3) As the second to last step, try to undistribute AND/OR
                 e.undistribute_and_or();
+                // 4) Canonically order elements so that deduplication works better.
                 if let MirScalarExpr::CallBinary { func, expr1, expr2 } = e {
                     if matches!(
                         *func,
-                        BinaryFunc::Eq | BinaryFunc::Or | BinaryFunc::And | BinaryFunc::NotEq
+                        BinaryFunc::Eq | BinaryFunc::NotEq
                     ) && expr2 < expr1
                     {
-                        // 4) Canonically order elements so that deduplication works better.
                         ::std::mem::swap(expr1, expr2);
+                    }
+                }
+                if let MirScalarExpr::CallVariadic { func, exprs } = e {
+                    if matches!(
+                        *func,
+                        VariadicFunc::Or | VariadicFunc::And
+                    )
+                    {
+                        exprs.sort();
                     }
                 }
             },
@@ -1018,6 +1040,35 @@ impl MirScalarExpr {
         /* #endregion */
     }
 
+    //ggtodo: comment
+    fn reduce_or_and(e: &mut MirScalarExpr) {
+        match e {
+            MirScalarExpr::CallVariadic { func, exprs } if *func == VariadicFunc::And || *func == VariadicFunc::Or => {
+                // x AND/OR x --> x
+                exprs.sort();
+                exprs.dedup();
+                // AND/OR of 1 argument evaluates to that argument //ggtodo: handle 0-arg case
+                if exprs.len() == 1 {
+                    *e = exprs.swap_remove(1);
+                } else {
+                    // (If we are here, not all inputs are literals.)
+                    if *func == VariadicFunc::And {
+                        // If any args are false, then evaluate to false
+                        if exprs.iter().any(|e| { e.is_literal_false() }) {
+                            *e = MirScalarExpr::literal_ok(Datum::False, ScalarType::Bool);
+                        }
+                    } else if *func == VariadicFunc::Or {
+                        // If any args are true, then evaluate to true
+                        if exprs.iter().any(|e| { e.is_literal_true() }) {
+                            *e = MirScalarExpr::literal_ok(Datum::True, ScalarType::Bool);
+                        }
+                    }
+                }
+            },
+            _ => unreachable!(),
+        }
+    }
+
     /// Decompose an IsNull expression into a disjunction of
     /// simpler expressions.
     ///
@@ -1032,7 +1083,7 @@ impl MirScalarExpr {
             if func.propagates_nulls() && !func.introduces_nulls() {
                 let expr1 = expr1.take().call_unary(UnaryFunc::IsNull(func::IsNull));
                 let expr2 = expr2.take().call_unary(UnaryFunc::IsNull(func::IsNull));
-                return Some(expr1.call_binary(expr2, BinaryFunc::Or));
+                return Some(expr1.or(expr2));
             }
         } else if let MirScalarExpr::CallUnary {
             func,
@@ -1058,40 +1109,26 @@ impl MirScalarExpr {
             func: UnaryFunc::Not(func::Not),
         } = self
         {
-            if let MirScalarExpr::CallBinary { expr1, expr2, func } = &mut **inner {
-                match func {
-                    BinaryFunc::And => {
-                        let inner0 = MirScalarExpr::CallUnary {
-                            expr: Box::new(expr1.take()),
-                            func: UnaryFunc::Not(func::Not),
-                        };
-                        let inner1 = MirScalarExpr::CallUnary {
-                            expr: Box::new(expr2.take()),
-                            func: UnaryFunc::Not(func::Not),
-                        };
-                        *self = MirScalarExpr::CallBinary {
-                            expr1: Box::new(inner0),
-                            expr2: Box::new(inner1),
-                            func: BinaryFunc::Or,
-                        }
+            match &mut **inner {
+                MirScalarExpr::CallVariadic {
+                    func: VariadicFunc::And,
+                    exprs,
+                } => {
+                    *self = MirScalarExpr::CallVariadic {
+                        func: VariadicFunc::Or,
+                        exprs: exprs.into_iter().map(|e| e.take().not()).collect(),
                     }
-                    BinaryFunc::Or => {
-                        let inner0 = MirScalarExpr::CallUnary {
-                            expr: Box::new(expr1.take()),
-                            func: UnaryFunc::Not(func::Not),
-                        };
-                        let inner1 = MirScalarExpr::CallUnary {
-                            expr: Box::new(expr2.take()),
-                            func: UnaryFunc::Not(func::Not),
-                        };
-                        *self = MirScalarExpr::CallBinary {
-                            expr1: Box::new(inner0),
-                            expr2: Box::new(inner1),
-                            func: BinaryFunc::And,
-                        }
+                },
+                MirScalarExpr::CallVariadic {
+                    func: VariadicFunc::Or,
+                    exprs,
+                } => {
+                    *self = MirScalarExpr::CallVariadic {
+                        func: VariadicFunc::And,
+                        exprs: exprs.into_iter().map(|e| e.take().not()).collect(),
                     }
-                    _ => {}
-                }
+                },
+                _ => {}
             }
         }
     }
@@ -1101,100 +1138,164 @@ impl MirScalarExpr {
     /// AND/OR undistribution to apply at each `ScalarExpr`.
     /// Transforms (a && b) || (a && c) into a && (b || c)
     /// Transforms (a || b) && (a || c) into a || (b && c)
+    /// It also does //ggtodo: move this to the end of the comment, and instead explain how the rest of reduce handles this case (copy steps from google doc)
+    ///   a || (a && c)  -->  a
+    ///   a && (a || c)  -->  a
+    /// Also works with more than 2 arguments at the top, e.g.:
+    /// (a && b) || (a && c) || (a && d)  -->  a && (b || c || d)
     fn undistribute_and_or(&mut self) {
-        if let MirScalarExpr::CallBinary { expr1, expr2, func } = self {
-            if *func == BinaryFunc::Or || *func == BinaryFunc::And {
-                // We are trying to undistribute AND when we see
-                // `(a && b) || (a && c)`. Otherwise, we are trying to
-                // undistribute OR`.
-                let undistribute_and = *func == BinaryFunc::Or;
-                let mut operands1 = Vec::new();
-                expr1.harvest_operands(&mut operands1, undistribute_and);
-                let operands1_len = operands1.len();
 
-                let mut operands2 = Vec::new();
-                expr2.harvest_operands(&mut operands2, undistribute_and);
+        //ggtodo: atteni a hivasat a loopba
 
-                let mut intersection = operands1
-                    .into_iter()
-                    .filter(|e| operands2.contains(e))
-                    .collect::<Vec<_>>();
-                intersection.sort();
-                intersection.dedup();
+        if let MirScalarExpr::CallVariadic {
+            exprs: outer_operands,
+            func: outer_func @ VariadicFunc::Or | outer_func @ VariadicFunc::And
+        } = self {
 
-                // To construct the undistributed version from
-                // `((a1 && ... && aN) & b) || ((a1 && ... && aN) && c)`, we
-                // 1) remove all copies of operands in the intersection from
-                //    `self` to get `(b || c)`
-                // 2) AND one copy of the operands in the intersection back on
-                //    to get (a1 && ... && aN) && (b || c)
-                // (a1 & ... & aN) | ((a1 & ... & aN) & b) is equal to
-                //    (a1 & ... & aN), so instead we take one of the operands in
-                //    the intersection as `self` and then AND the rest on later.
-                if intersection.len() == operands1_len || intersection.len() == operands2.len() {
-                    *self = intersection.pop().unwrap();
-                } else if !intersection.is_empty() {
-                    expr1.suppress_operands(&intersection[..], undistribute_and);
-                    expr2.suppress_operands(&intersection[..], undistribute_and);
-                    if expr2 < expr1 {
-                        ::std::mem::swap(expr1, expr2);
-                    }
-                }
+            // // We are trying to undistribute AND when we see
+            // // `(a && b) || (a && c)`. Otherwise, we are trying to
+            // // undistribute OR`.
+            // let undistribute_and = *func == BinaryFunc::Or;
 
-                for term in intersection.into_iter() {
-                    let (expr1, expr2) = if term < *self {
-                        (term, self.take())
-                    } else {
-                        (self.take(), term)
-                    };
-                    *self = MirScalarExpr::CallBinary {
-                        expr1: Box::new(expr1),
-                        expr2: Box::new(expr2),
-                        func: if undistribute_and {
-                            BinaryFunc::And
-                        } else {
-                            BinaryFunc::Or
-                        },
-                    };
-                }
+            let inner_func = outer_func.switch_or_and();
+
+            // ggtodo: comment
+            outer_operands.iter_mut().for_each(|o| if !matches!(o, MirScalarExpr::CallVariadic {func: f, ..} if *f == inner_func) {
+                *o = MirScalarExpr::CallVariadic {func: inner_func.clone(), exprs: vec![o.take()]};
+            });
+
+            // let outer_operands_decomp = outer_operands.iter_mut().map(|o| match o {
+            //     MirScalarExpr::CallVariadic {func: f, exprs} if *f == inner_func => {
+            //         (f, exprs)
+            //     }
+            //     _ => {
+            //         let call = MirScalarExpr::CallVariadic {func: inner_func.clone(), exprs: vec![o.take()]};
+            //         *o = call;
+            //         (call.func, call.exprs)
+            //     }
+            // }).collect();
+
+
+            // let mut operands1 = Vec::new();
+            // expr1.harvest_operands(&mut operands1, undistribute_and);
+            // let operands1_len = operands1.len();
+
+            // let mut operands2 = Vec::new();
+            // expr2.harvest_operands(&mut operands2, undistribute_and);
+
+            //let inner_operands: Vec<&mut Vec<MirScalarExpr>> = outer_operands.iter_mut().map(|o| o.harvest_operands(&inner_func)).collect();
+            let mut inner_operands: Vec<&mut Vec<MirScalarExpr>> = outer_operands.iter_mut().map(|o| match o {
+                MirScalarExpr::CallVariadic {func: f, exprs} if *f == inner_func => exprs,
+                _ => unreachable!(), // the wrapping made sure that we'll get a match
+            }).collect();
+
+            // let mut intersection = operands1
+            //     .into_iter()
+            //     .filter(|e| operands2.contains(e))
+            //     .collect::<Vec<_>>();
+            // intersection.sort();
+            // intersection.dedup();
+
+            // Find inner operands that are in all of the outer operands
+            let mut intersection = inner_operands.iter()
+                .map(|v|(**v).clone())
+                .reduce(|ops1, ops2| {
+                    ops1.into_iter().filter(|e| ops2.contains(e)).collect()
+                }).unwrap();
+            intersection.sort();
+            intersection.dedup();
+
+            if !intersection.is_empty() {
+                //ggtodo: comment (a regit adaptalni)
+                inner_operands.iter_mut().for_each(|ops| (**ops).retain(|o| !intersection.contains(o)));
+                //inner_operands.sort(); //ggtodo: ez nem kell, ugye? Mert a reduce-ban utana ugyis sortolunk. (Es amugy ez nem bizots, hogy a vector contentseket vagy csak a referenciakat csereli meg).
+
+                *self = MirScalarExpr::CallVariadic {
+                    func: inner_func,
+                    exprs: intersection.into_iter().chain_one((*self).clone()).collect(),
+                };
+            } else {
+                outer_operands.iter_mut().for_each(|o| Self::reduce_or_and(o));
             }
+
+            //ggtodo: unwrap (eleg akkor unwrappelni ha nem mentunk be az if-be, ugye? merthogy a nagy ciklusban leszunk, es az elintezi a tovabbiakat)
+
+
+
+            // // To construct the undistributed version from
+            // // `((a1 && ... && aN) & b) || ((a1 && ... && aN) && c)`, we
+            // // 1) remove all copies of operands in the intersection from
+            // //    `self` to get `(b || c)`
+            // // 2) AND one copy of the operands in the intersection back on
+            // //    to get (a1 && ... && aN) && (b || c)
+            // // (a1 & ... & aN) | ((a1 & ... & aN) & b) is equal to
+            // //    (a1 & ... & aN), so instead we take one of the operands in
+            // //    the intersection as `self` and then AND the rest on later.
+            // if intersection.len() == operands1_len || intersection.len() == operands2.len() {
+            //     *self = intersection.pop().unwrap();
+            // } else if !intersection.is_empty() {
+            //     expr1.suppress_operands(&intersection[..], undistribute_and);
+            //     expr2.suppress_operands(&intersection[..], undistribute_and);
+            //     if expr2 < expr1 {
+            //         ::std::mem::swap(expr1, expr2);
+            //     }
+            // }
+            //
+            // for term in intersection.into_iter() {
+            //     let (expr1, expr2) = if term < *self {
+            //         (term, self.take())
+            //     } else {
+            //         (self.take(), term)
+            //     };
+            //     *self = MirScalarExpr::CallBinary {
+            //         expr1: Box::new(expr1),
+            //         expr2: Box::new(expr2),
+            //         func: if undistribute_and {
+            //             BinaryFunc::And
+            //         } else {
+            //             BinaryFunc::Or
+            //         },
+            //     };
+            // }
         }
+
+        // ggtodo
     }
 
-    /// Collects undistributable terms from X expressions.
-    /// If `and`, X is AND. If not `and`, X is OR.
-    fn harvest_operands(&mut self, operands: &mut Vec<MirScalarExpr>, and: bool) {
-        if let MirScalarExpr::CallBinary { expr1, expr2, func } = self {
-            let operator = if and { BinaryFunc::And } else { BinaryFunc::Or };
-            if *func == operator {
-                expr1.harvest_operands(operands, and);
-                expr2.harvest_operands(operands, and);
-                return;
-            }
-        }
-        operands.push(self.clone())
-    }
-
-    /// Removes undistributed terms from AND expressions.
-    /// If `and`, X is AND. If not `and`, X is OR.
-    fn suppress_operands(&mut self, operands: &[MirScalarExpr], and: bool) {
-        if let MirScalarExpr::CallBinary { expr1, expr2, func } = self {
-            let operator = if and { BinaryFunc::And } else { BinaryFunc::Or };
-            if *func == operator {
-                // Suppress the ands in children.
-                expr1.suppress_operands(operands, and);
-                expr2.suppress_operands(operands, and);
-
-                // If either argument is in our list, replace it by `true`.
-                let tru = MirScalarExpr::literal_ok(Datum::True, ScalarType::Bool);
-                if operands.contains(expr1) {
-                    *self = std::mem::replace(expr2, tru);
-                } else if operands.contains(expr2) {
-                    *self = std::mem::replace(expr1, tru);
-                }
-            }
-        }
-    }
+    // /// Collects undistributable terms from X expressions.
+    // /// If `and`, X is AND. If not `and`, X is OR.
+    // fn harvest_operands(&mut self, operands: &mut Vec<MirScalarExpr>, and: bool) {
+    //     if let MirScalarExpr::CallBinary { expr1, expr2, func } = self {
+    //         let operator = if and { BinaryFunc::And } else { BinaryFunc::Or };
+    //         if *func == operator {
+    //             expr1.harvest_operands(operands, and);
+    //             expr2.harvest_operands(operands, and);
+    //             return;
+    //         }
+    //     }
+    //     operands.push(self.clone())
+    // }
+    //
+    // /// Removes undistributed terms from AND expressions.
+    // /// If `and`, X is AND. If not `and`, X is OR.
+    // fn suppress_operands(&mut self, operands: &[MirScalarExpr], and: bool) {
+    //     if let MirScalarExpr::CallBinary { expr1, expr2, func } = self {
+    //         let operator = if and { BinaryFunc::And } else { BinaryFunc::Or };
+    //         if *func == operator {
+    //             // Suppress the ands in children.
+    //             expr1.suppress_operands(operands, and);
+    //             expr2.suppress_operands(operands, and);
+    //
+    //             // If either argument is in our list, replace it by `true`.
+    //             let tru = MirScalarExpr::literal_ok(Datum::True, ScalarType::Bool);
+    //             if operands.contains(expr1) {
+    //                 *self = std::mem::replace(expr2, tru);
+    //             } else if operands.contains(expr2) {
+    //                 *self = std::mem::replace(expr1, tru);
+    //             }
+    //         }
+    //     }
+    // }
 
     /* #endregion */
 
