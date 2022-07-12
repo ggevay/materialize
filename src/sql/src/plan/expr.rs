@@ -19,7 +19,7 @@ use std::mem;
 use itertools::Itertools;
 use serde::{Deserialize, Serialize};
 
-use mz_expr::DummyHumanizer;
+use mz_expr::{DummyHumanizer, func};
 
 use mz_ore::collections::CollectionExt;
 use mz_ore::stack;
@@ -1492,6 +1492,40 @@ impl HirScalarExpr {
             func,
             expr1: Box::new(self),
             expr2: Box::new(other),
+        }
+    }
+
+    pub fn or(self, other: Self) -> Self {
+        HirScalarExpr::CallVariadic {
+            func: VariadicFunc::Or,
+            exprs: vec![self, other],
+        }
+    }
+
+    pub fn and(self, other: Self) -> Self {
+        HirScalarExpr::CallVariadic {
+            func: VariadicFunc::And,
+            exprs: vec![self, other],
+        }
+    }
+
+    pub fn not(self) -> Self {
+        self.call_unary(UnaryFunc::Not(func::Not))
+    }
+
+    pub fn call_is_null(self) -> Self {
+        self.call_unary(UnaryFunc::IsNull(func::IsNull))
+    }
+
+    /// Calls AND with the given arguments. Simplifies if 0 or 1 args.
+    pub fn variadic_and(mut args: Vec<HirScalarExpr>) -> HirScalarExpr {
+        match args.len() {
+            0 => HirScalarExpr::literal_true(),
+            1 => args.swap_remove(1),
+            _ => HirScalarExpr::CallVariadic {
+                func: VariadicFunc::And,
+                exprs: args,
+            }
         }
     }
 

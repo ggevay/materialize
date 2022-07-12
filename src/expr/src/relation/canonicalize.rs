@@ -16,7 +16,7 @@ use std::collections::HashSet;
 use mz_repr::{Datum, RelationType, ScalarType};
 
 use crate::visit::Visit;
-use crate::{func, BinaryFunc, MirScalarExpr, UnaryFunc};
+use crate::{func, MirScalarExpr, UnaryFunc, VariadicFunc};
 
 /// Canonicalize equivalence classes of a join and expressions contained in them.
 ///
@@ -210,14 +210,12 @@ pub fn canonicalize_predicates(predicates: &mut Vec<MirScalarExpr>, input_type: 
 
     // 2) Split "A and B" into two predicates: "A" and "B"
     while let Some(expr) = pending_predicates.pop() {
-        if let MirScalarExpr::CallBinary {
-            func: BinaryFunc::And,
-            expr1,
-            expr2,
+        if let MirScalarExpr::CallVariadic {
+            func: VariadicFunc::And,
+            exprs,
         } = expr
         {
-            pending_predicates.push(*expr1);
-            pending_predicates.push(*expr2);
+            exprs.into_iter().for_each(|e| pending_predicates.push(e));
         } else {
             predicates.push(expr);
         }
