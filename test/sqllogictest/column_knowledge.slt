@@ -8,7 +8,7 @@
 # by the Apache License, Version 2.0.
 
 #
-# Test various cases of column knowledge propragation
+# Test various cases of column knowledge propagation
 #
 
 mode cockroach
@@ -143,8 +143,6 @@ Query:
 | Get %2 (l0)
 | Project (#1)
 | Negate
-| Map 123
-| Project (#1, #0)
 
 %4 =
 | Get materialize.public.t1 (u1)

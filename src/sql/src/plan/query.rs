@@ -2888,15 +2888,7 @@ fn plan_using_constraint(
 
     both_scope = both_scope.project(&project_key);
 
-    let on = join_exprs
-        .into_iter()
-        .fold(HirScalarExpr::literal_true(), |expr1, expr2| {
-            HirScalarExpr::CallBinary {
-                func: BinaryFunc::And,
-                expr1: Box::new(expr1),
-                expr2: Box::new(expr2),
-            }
-        });
+    let on = HirScalarExpr::variadic_and(join_exprs);
     let both = left
         .join(right, on, kind)
         .map(map_exprs)
@@ -3066,10 +3058,12 @@ fn plan_and(
     right: &Expr<Aug>,
 ) -> Result<CoercibleScalarExpr, PlanError> {
     let ecx = ecx.with_name("AND argument");
-    Ok(HirScalarExpr::CallBinary {
-        func: BinaryFunc::And,
-        expr1: Box::new(plan_expr(&ecx, left)?.type_as(&ecx, &ScalarType::Bool)?),
-        expr2: Box::new(plan_expr(&ecx, right)?.type_as(&ecx, &ScalarType::Bool)?),
+    Ok(HirScalarExpr::CallVariadic {
+        func: VariadicFunc::And,
+        exprs: vec![
+            plan_expr(&ecx, left)?.type_as(&ecx, &ScalarType::Bool)?,
+            plan_expr(&ecx, right)?.type_as(&ecx, &ScalarType::Bool)?,
+        ],
     }
     .into())
 }
@@ -3080,10 +3074,12 @@ fn plan_or(
     right: &Expr<Aug>,
 ) -> Result<CoercibleScalarExpr, PlanError> {
     let ecx = ecx.with_name("OR argument");
-    Ok(HirScalarExpr::CallBinary {
-        func: BinaryFunc::Or,
-        expr1: Box::new(plan_expr(&ecx, left)?.type_as(&ecx, &ScalarType::Bool)?),
-        expr2: Box::new(plan_expr(&ecx, right)?.type_as(&ecx, &ScalarType::Bool)?),
+    Ok(HirScalarExpr::CallVariadic {
+        func: VariadicFunc::Or,
+        exprs: vec![
+            plan_expr(&ecx, left)?.type_as(&ecx, &ScalarType::Bool)?,
+            plan_expr(&ecx, right)?.type_as(&ecx, &ScalarType::Bool)?,
+        ],
     }
     .into())
 }
