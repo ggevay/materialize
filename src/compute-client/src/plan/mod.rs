@@ -894,7 +894,7 @@ impl<T: timely::progress::Timestamp> Plan<T> {
         debug_info: LirDebugInfo<'_>,
     ) -> Result<(Self, AvailableCollections), ()> {
         // We don't want to trace recursive calls, which is why the public `from_mir`
-        // is annotated and delecates the work to a private (recursive) from_mir_inner.
+        // is annotated and delegates the work to a private (recursive) from_mir_inner.
         Plan::from_mir_inner(expr, arrangements, debug_info)
     }
 
@@ -1059,21 +1059,89 @@ impl<T: timely::progress::Timestamp> Plan<T> {
                     let mut in_keys = arrangements
                         .get(&Id::Global(*id))
                         .cloned()
-                        .unwrap_or_else(AvailableCollections::new_raw);
+                        .unwrap_or_else(AvailableCollections::new_raw); //todo: expect instead of unwrap_or_else
 
                     let (_, permutation, thinning) =
                         in_keys.arranged.iter().find(|(k, _, _)| k == key).unwrap();
 
                     mfp.permute(permutation.clone(), thinning.len() + key.len());
                     in_keys.arranged = vec![(key.clone(), permutation.clone(), thinning.clone())];
+
+
+
+                    let get_typ = inputs.clone().swap_remove(0).typ();
+                    let get_arity = get_typ.arity();
+
+                    let key_arity = key.len();
+
+                    let lookup_list = Plan::Constant {
+                        rows: Ok(vec![((*val).clone(), T::minimum(), 1)]),
+                    };
+
+                    let mut lookup_list_forms = AvailableCollections::new_raw();
+
+                    let all_cols_lookup_list = MirScalarExpr::columns(&(0..key.len()).collect::<Vec<usize>>()[..]);
+                    let (permutation, thinning) = permutation_for_arrangement(&all_cols_lookup_list, key_arity);
+                    lookup_list_forms.arranged.push((all_cols_lookup_list, permutation, thinning));
+
+                    let lookup_list_arranged = Plan::ArrangeBy {
+                        input: Box::new(lookup_list),
+                        forms: lookup_list_forms.clone(),
+                        input_key: None,
+                        input_mfp: MapFilterProject::new(key_arity),
+                    };
+
+                    let get = Plan::Get {
+                        id: Id::Global(*id),
+                        keys: in_keys.clone(),
+                        plan: GetPlan::PassArrangements,
+                    };
+
+                    let equivalences: Vec<Vec<MirScalarExpr>> = key.iter().enumerate().map(|(i, e)|
+                        vec![(*e).clone(), MirScalarExpr::column(i + get_typ.arity())]
+                    ).collect();
+
+                    let order = vec![(0, (*key).clone())];
+
+                    let join_input_forms = vec![in_keys, lookup_list_forms.clone()];
+
+                    println!("get_arity: {}, key_arity: {}", get_arity, key_arity);
+
+                    let (join_plan, missing) = LinearJoinPlan::create_from(
+                        1, // The lookup list has to be the starting collection, at least until #14059 is fixed
+                        lookup_list_forms.arbitrary_arrangement(),
+                        &equivalences,
+                        &order,
+                        JoinInputMapper::new_from_input_arities(vec![get_arity, key_arity].into_iter()),
+                        &mut mfp,
+                        &join_input_forms,
+                    );
+
+                    // no `missing` because:
+                    // 1. We created a JoinImplementation::PredicateIndex only if there is an index
+                    // on the input;
+                    // 2. we arranged the lookup_list above.
+                    assert_eq!(missing.len(), 0);
+
                     (
-                        Plan::Get {
-                            id: mz_expr::Id::Global(*id),
-                            keys: in_keys,
-                            plan: GetPlan::Arrangement(key.clone(), Some(val.clone()), mfp.take()),
+                        Plan::Join {
+                            inputs: vec![get, lookup_list_arranged],
+                            plan: JoinPlan::Linear(join_plan),
                         },
                         AvailableCollections::new_raw(),
                     )
+
+                    //todo: add projection
+
+
+                    // (
+                    //     Plan::Get {
+                    //         id: mz_expr::Id::Global(*id),
+                    //         keys: in_keys,
+                    //         plan: GetPlan::Arrangement(key.clone(), Some(val.clone()), mfp.take()),
+                    //     },
+                    //     AvailableCollections::new_raw(),
+                    // )
                 } else {
                     let input_mapper = JoinInputMapper::new(inputs);
 
