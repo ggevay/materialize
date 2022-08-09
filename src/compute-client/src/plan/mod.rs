@@ -21,6 +21,7 @@ use proptest::strategy::Strategy;
 use proptest_derive::Arbitrary;
 use serde::{Deserialize, Serialize, Serializer};
 
+use mz_expr::JoinImplementation::Differential;
 use mz_expr::{
     permutation_for_arrangement, CollectionPlan, EvalError, Id, JoinInputMapper, LocalId,
     MapFilterProject, MirRelationExpr, MirScalarExpr, OptimizedMirRelationExpr, TableFunc,
@@ -1055,25 +1056,53 @@ impl<T: timely::progress::Timestamp> Plan<T> {
                 equivalences,
                 implementation,
             } => {
-                if let mz_expr::JoinImplementation::PredicateIndex(id, key, val) = implementation {
-                    let mut in_keys = arrangements
-                        .get(&Id::Global(*id))
-                        .cloned()
-                        .unwrap_or_else(AvailableCollections::new_raw);
+                if let mz_expr::JoinImplementation::PredicateIndex(_, key, val) = implementation {
+                    // We handle PredicateIndex in a special way: we transform it into a
+                    // Differential join with a constant collection, and call ourselves on the new
+                    // expression.
+                    // (For now, the constant collection has always only 1 element.)
+                    // E.g.: we go from something like
+                    // `SELECT f1, f2, f3 FROM t WHERE t.f1 = lit1 AND t.f2 = lit2
+                    // to
+                    // `SELECT f1, f2, f3 FROM t, (SELECT * FROM (VALUES (lit1, lit2))) as filter_list
+                    //  WHERE t.f1 = filter_list.column1 AND t.f2 = filter_list.column2`
 
-                    let (_, permutation, thinning) =
-                        in_keys.arranged.iter().find(|(k, _, _)| k == key).unwrap();
+                    let input = inputs.get(0).unwrap();
 
-                    mfp.permute(permutation.clone(), thinning.len() + key.len());
-                    in_keys.arranged = vec![(key.clone(), permutation.clone(), thinning.clone())];
-                    (
-                        Plan::Get {
-                            id: mz_expr::Id::Global(*id),
-                            keys: in_keys,
-                            plan: GetPlan::Arrangement(key.clone(), Some(val.clone()), mfp.take()),
+                    let inp_typ = input.typ();
+                    let filter_list = MirRelationExpr::Constant {
+                        rows: Ok(vec![((*val).clone(), 1)]),
+                        typ: mz_repr::RelationType {
+                            column_types: key.iter().map(|e| e.typ(&inp_typ)).collect(),
+                            keys: vec![],
                         },
-                        AvailableCollections::new_raw(),
-                    )
+                    };
+
+                    let all_cols_filter_list =
+                        MirScalarExpr::columns(&(0..key.len()).collect::<Vec<usize>>()[..]);
+
+                    let join = MirRelationExpr::Join {
+                        inputs: vec![input.clone().arrange_by(&[key.clone()]), filter_list],
+                        equivalences: key
+                            .iter()
+                            .enumerate()
+                            .map(|(i, e)| {
+                                vec![(*e).clone(), MirScalarExpr::column(i + inp_typ.arity())]
+                            })
+                            .collect(),
+                        // The filter_list has to be the starting collection, at least until #14059 is fixed
+                        implementation: Differential(
+                            (1, Some(all_cols_filter_list)),
+                            vec![(0, (*key).clone())],
+                        ),
+                    };
+
+                    let new_mir = MirRelationExpr::Project {
+                        input: Box::new(join),
+                        outputs: (0..inp_typ.arity()).collect(),
+                    };
+
+                    Self::from_mir_inner(&new_mir, arrangements, debug_info)?
                 } else {
                     let input_mapper = JoinInputMapper::new(inputs);
 
