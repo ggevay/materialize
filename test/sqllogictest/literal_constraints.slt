@@ -494,7 +494,8 @@ query T multiline
 EXPLAIN SELECT a FROM t1
 WHERE (
     (a = 1 AND b like 'nope') OR
-    (a = 2)
+    (a = 2) OR
+    (a = 1 AND a = 2)
 ) AND
 (b like 'l%' OR b like 'aaa')
 ----
