@@ -93,6 +93,17 @@ impl JoinImplementation {
         }
     }
 
+    fn filter_characteristics(filters: &Vec<MirScalarExpr>, index: usize) -> FilterCharacteristics {
+        FilterCharacteristics {
+            literal_equality: filters
+                .iter()
+                .any(|filter| filter.any_expr_eq_literal().is_some()),
+            literal_inequality: filters.iter().any(|filter| filter.any_expr_ineq_literal()),
+            any_filter: !filters.is_empty(),
+            index: std::cmp::Reverse(index),
+        }
+    }
+
     /// Determines the join implementation for join operators.
     pub fn action(&self, relation: &mut MirRelationExpr, indexes: &IndexMap) {
         if let MirRelationExpr::Join {
@@ -124,10 +135,15 @@ impl JoinImplementation {
                 .map(|typ| typ.keys)
                 .collect::<Vec<_>>();
             let mut available_arrangements = vec![Vec::new(); inputs.len()];
+            let mut input_filters = Vec::new();
             for index in 0..inputs.len() {
                 // We can work around mfps, as we can lift the mfps into the join execution.
                 let (mfp, input) = MapFilterProject::extract_non_errors_from_expr(&inputs[index]);
-                let (_, _, project) = mfp.as_map_filter_project();
+                let (_, filter, project) = mfp.as_map_filter_project();
+                input_filters.push((
+                    JoinImplementation::filter_characteristics(&filter, index),
+                    index,
+                ));
                 // Get and ArrangeBy expressions contribute arrangements.
                 match input {
                     MirRelationExpr::Get { id, typ: _ } => {
@@ -184,6 +200,9 @@ impl JoinImplementation {
                 });
             }
 
+            input_filters.sort();
+            input_filters.reverse();
+
             // Determine if we can perform delta queries with the existing arrangements.
             // We could defer the execution if we are sure we know we want one input,
             // but we could imagine wanting the best from each and then comparing the two.
@@ -192,6 +211,7 @@ impl JoinImplementation {
                 &input_mapper,
                 &available_arrangements,
                 &unique_keys,
+                &input_filters,
             );
             let differential_plan = differential::plan(
                 relation,
@@ -259,8 +279,10 @@ mod index_map {
 }
 
 mod delta_queries {
-
+    use crate::join_implementation::FilterCharacteristics;
+    use itertools::Itertools;
     use mz_expr::{JoinImplementation, JoinInputMapper, MirRelationExpr, MirScalarExpr};
+    use mz_ore::vec::{permute, reverse_permutation};
 
     use crate::TransformError;
 
@@ -273,6 +295,7 @@ mod delta_queries {
         input_mapper: &JoinInputMapper,
         available: &[Vec<Vec<MirScalarExpr>>],
         unique_keys: &[Vec<Vec<usize>>],
+        input_filters: &Vec<(FilterCharacteristics, usize)>,
     ) -> Result<MirRelationExpr, TransformError> {
         let mut new_join = join.clone();
 
@@ -320,12 +343,39 @@ mod delta_queries {
                 .collect::<Vec<_>>();
 
             // Implement arrangements in each of the inputs.
-            let lifted_mfp =
+            let mut lifted_mfp =
                 super::implement_arrangements(inputs, available, orders.iter().flatten());
+
+            let new_join_mapper = JoinInputMapper::new(inputs); //todo: comment
+
+            // We permute the inputs, and then compensate by applying the reverse permutation to ... todo: comment
+
+            let input_permutation = input_filters
+                .into_iter()
+                .map(|(_, input_index)| *input_index)
+                .collect_vec();
+            let compensating_input_perm = reverse_permutation(&input_permutation);
+            let compensating_col_perm = new_join_mapper.col_perm_from_input_perm(&compensating_input_perm);
+
+            permute(inputs, input_permutation);
+            // equivalences.iter_mut().for_each(|equivalence_class| {
+            //     equivalence_class
+            //         .iter_mut()
+            //         .for_each(|expr| expr.permute(&*compensating_col_perm))
+            // });
+            lifted_mfp.permute_with_vec(&compensating_col_perm, lifted_mfp.input_arity);
+            let orders = orders
+                .into_iter()
+                .map(|o| {
+                    o.into_iter()
+                        .map(|(input_index, keys)| (compensating_input_perm[input_index], keys)) // TODO: keys is local to the input, right?
+                        .collect_vec()
+                })
+                .collect_vec();
 
             *implementation = JoinImplementation::DeltaQuery(orders);
 
-            super::install_lifted_mfp(&mut new_join, lifted_mfp)?;
+            super::install_lifted_mfp(&mut new_join, lifted_mfp, Some(&compensating_col_perm))?;
 
             // Hooray done!
             Ok(new_join)
@@ -423,7 +473,7 @@ mod differential {
             // Install the implementation.
             *implementation = JoinImplementation::Differential((start, start_keys), order);
 
-            super::install_lifted_mfp(&mut new_join, lifted_mfp)?;
+            super::install_lifted_mfp(&mut new_join, lifted_mfp, None)?;
 
             // Hooray done!
             Ok(new_join)
@@ -485,7 +535,7 @@ fn implement_arrangements<'a>(
         }
     }
 
-    // Combined lifted mfps into one.
+    // Combine lifted mfps into one.
     let new_join_mapper = JoinInputMapper::new(inputs);
     let mut arity = new_join_mapper.total_columns();
     let combined_mfp = MapFilterProject::new(arity);
@@ -522,31 +572,35 @@ fn implement_arrangements<'a>(
 fn install_lifted_mfp(
     new_join: &mut MirRelationExpr,
     mfp: MapFilterProject,
+    compensating_col_perm: Option<&Vec<usize>>,
 ) -> Result<(), TransformError> {
-    if !mfp.is_identity() {
-        let (map, filter, project) = mfp.as_map_filter_project();
-        if let MirRelationExpr::Join { equivalences, .. } = new_join {
-            for equivalence in equivalences.iter_mut() {
-                for expr in equivalence.iter_mut() {
-                    // permute `equivalences` in light of the project being lifted
-                    expr.permute(&project);
-                    // if column references refer to mapped expressions that have been
-                    // lifted, replace the column reference with the mapped expression.
-                    #[allow(deprecated)]
-                    expr.visit_mut_pre_post(
-                        &mut |e| {
-                            if let MirScalarExpr::Column(c) = e {
-                                if *c >= mfp.input_arity {
-                                    *e = map[*c - mfp.input_arity].clone();
-                                }
-                            }
-                            None
-                        },
-                        &mut |_| {},
-                    )?;
+    let (map, filter, project) = mfp.as_map_filter_project();
+    if let MirRelationExpr::Join { equivalences, .. } = new_join {
+        for equivalence in equivalences.iter_mut() {
+            for expr in equivalence.iter_mut() {
+                // permute `equivalences` in light of the project being lifted
+                expr.permute(&project);
+                if let Some(compensating_col_perm) = compensating_col_perm {
+                    expr.permute(&*compensating_col_perm); //todo: comment
                 }
+                // if column references refer to mapped expressions that have been
+                // lifted, replace the column reference with the mapped expression.
+                #[allow(deprecated)]
+                expr.visit_mut_pre_post(
+                    &mut |e| {
+                        if let MirScalarExpr::Column(c) = e {
+                            if *c >= mfp.input_arity {
+                                *e = map[*c - mfp.input_arity].clone();
+                            }
+                        }
+                        None
+                    },
+                    &mut |_| {},
+                )?;
             }
         }
+    }
+    if !mfp.is_identity() {
         *new_join = new_join.clone().map(map).filter(filter).project(project);
     }
     Ok(())
@@ -562,6 +616,15 @@ fn optimize_orders(
     (0..available.len())
         .map(move |i| orderer.optimize_order_for(i))
         .collect::<Vec<_>>()
+}
+
+///todo: comments
+#[derive(Eq, PartialEq, Ord, PartialOrd, Debug, Clone)] //todo: which of these do we actually need?
+pub struct FilterCharacteristics {
+    literal_equality: bool,
+    literal_inequality: bool,
+    any_filter: bool,
+    index: std::cmp::Reverse<usize>,
 }
 
 /// Characteristics of a join order candidate collection.

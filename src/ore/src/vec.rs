@@ -15,6 +15,8 @@
 
 //! Vector utilities.
 
+use itertools::Itertools;
+use std::collections::BTreeMap;
 use std::mem::{align_of, size_of};
 
 #[cfg(feature = "smallvec")]
@@ -90,6 +92,35 @@ pub fn swap_remove_multiple<T>(v: &mut Vec<T>, mut indexes: Vec<usize>) -> Vec<T
         result.push(v.swap_remove(r));
     }
     result
+}
+
+/// todo: comment about duplicates
+/// `permutation[i] = j` means `v[j]` goes to `v[i]`
+pub fn permute<T>(v: &mut Vec<T>, permutation: Vec<usize>)
+where
+    T: Clone,
+{
+    // This assert is not strictly necessary for the below code, but it probably indicates a bug
+    // somewhere else if it's not true.
+    assert_eq!(v.len(), permutation.len());
+    let mut new_v = Vec::new();
+    for i in 0..permutation.len() {
+        new_v.push(v[permutation[i]].clone());
+    }
+    *v = new_v;
+}
+
+/// todo: comment
+/// The input shouldn't have duplicates.
+pub fn reverse_permutation(permutation: &Vec<usize>) -> Vec<usize> {
+    assert!(permutation.iter().all_unique());
+    permutation
+        .iter()
+        .enumerate()
+        .map(|(idx, c)| (*c, idx))
+        .collect::<BTreeMap<_, _>>()
+        .into_values()
+        .collect()
 }
 
 #[cfg(test)]

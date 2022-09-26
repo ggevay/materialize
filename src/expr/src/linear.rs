@@ -786,6 +786,7 @@ impl MapFilterProject {
             // Intermediate columns are just shifted.
             shuffle.insert(self.input_arity + index, new_input_arity + index);
         }
+        println!("shuffle: {:?}", shuffle);
         for expr in map.iter_mut() {
             expr.permute_map(&shuffle);
         }
@@ -793,12 +794,20 @@ impl MapFilterProject {
             pred.permute_map(&shuffle);
         }
         for proj in project.iter_mut() {
+            println!("proj: {}", proj);
+            assert!(shuffle[proj] < new_input_arity + map.len());
             *proj = shuffle[proj];
         }
         *self = Self::new(new_input_arity)
             .map(map)
             .filter(filter)
             .project(project)
+    }
+
+    /// Same as [permute], but takes a `Vec<usize>` instead of a `HashMap<usize, usize>`.
+    pub fn permute_with_vec(&mut self, shuffle: &Vec<usize>, new_input_arity: usize) {
+        println!("permute_with_vec: {:?}", shuffle);
+        self.permute(shuffle.iter().copied().enumerate().collect(), new_input_arity);
     }
 }
 
