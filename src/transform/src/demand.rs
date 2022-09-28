@@ -177,6 +177,7 @@ impl Demand {
                     inputs,
                     equivalences,
                     implementation: _,
+                    input_filters: _,
                 } => {
                     let input_mapper = JoinInputMapper::new(inputs);
 

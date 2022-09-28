@@ -223,7 +223,7 @@ EXPLAIN SELECT l_partkey AS col24843 , l_orderkey AS col24844 , l_partkey AS col
 | Get materialize.public.lineitem (u10)
 | Filter (#4 = (#4 % 5))
 | Project (#0, #1, #4, #6)
-| ArrangeBy ()
+| ArrangeBy (#2, #3)
 
 %1 =
 | Get materialize.public.orders (u7)
@@ -237,7 +237,7 @@ EXPLAIN SELECT l_partkey AS col24843 , l_orderkey AS col24844 , l_partkey AS col
 | | implementation = IndexedFilter (#1 = 134)
 | Filter (#2 = (#2 % 5))
 | Project (#2, #3)
-| ArrangeBy (#0, #1)
+| ArrangeBy ()
 
 %4 =
 | Get materialize.public.customer (u4)
@@ -253,7 +253,7 @@ EXPLAIN SELECT l_partkey AS col24843 , l_orderkey AS col24844 , l_partkey AS col
 
 %7 =
 | Join %0 %3 %6 (= #2 #4) (= #3 #5)
-| | implementation = Differential %6 %0.() %3.(#0, #1)
+| | implementation = Differential %6 %3.() %0.(#2, #3)
 | Project (#1, #0, #1)
 
 EOF
@@ -269,7 +269,7 @@ EXPLAIN SELECT *
 %0 =
 | Get materialize.public.lineitem (u10)
 | Filter (date_to_timestamp(#7) = (#5 + 6 days))
-| ArrangeBy ()
+| ArrangeBy (#4, #5)
 
 %1 =
 | Get materialize.public.orders (u7)
@@ -282,7 +282,7 @@ EXPLAIN SELECT *
 | Join %1 %2 (= #1 #4)
 | | implementation = IndexedFilter (#1 = 229)
 | Project (#0..=#3)
-| ArrangeBy (#2, #3)
+| ArrangeBy ()
 
 %4 =
 | Get materialize.public.customer (u4)
@@ -298,7 +298,7 @@ EXPLAIN SELECT *
 
 %7 =
 | Join %0 %3 %6 (= #4 #10) (= #5 #11)
-| | implementation = Differential %6 %0.() %3.(#2, #3)
+| | implementation = Differential %6 %3.() %0.(#4, #5)
 | Project (#0..=#9, #4, #5, #12..=#14)
 
 EOF

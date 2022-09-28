@@ -1091,6 +1091,7 @@ impl<T: timely::progress::Timestamp> Plan<T> {
                 inputs,
                 equivalences,
                 implementation,
+                input_filters: _, // No need to render
             } => {
                 let input_mapper = JoinInputMapper::new(inputs);
 

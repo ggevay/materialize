@@ -200,6 +200,7 @@ impl JoinBuilder {
                 inputs: self.inputs,
                 equivalences: self.equivalences,
                 implementation: mz_expr::JoinImplementation::Unimplemented,
+                input_filters: vec![],
             },
         };
 

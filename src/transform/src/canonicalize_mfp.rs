@@ -179,6 +179,7 @@ impl CanonicalizeMfp {
                             })
                             .collect(),
                         implementation: IndexedFilter(inp_id, key.clone(), possible_vals),
+                        input_filters: vec![],
                     };
 
                     // Rebuild the MFP to add the projection that removes the columns coming from

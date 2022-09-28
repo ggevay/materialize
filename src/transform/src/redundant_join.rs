@@ -114,12 +114,23 @@ impl RedundantJoin {
                     inputs,
                     equivalences,
                     implementation,
+                    input_filters,
                 } => {
+                    // `implementation` is fine to remove, because JoinImplementation can re-create
+                    // it any time. However, if we are ever in the situation that we are removing
+                    // `input_filters` here, that might cause problems, because we can't re-create
+                    // `input_filters` arbitrarily. (This is because JoinImplementation lifts the
+                    // filters away soon after recording their characteristics in `input_filters`.)
+                    assert!(
+                        input_filters.is_empty(),
+                        "JoinImplementation shouldn't run before RedundantJoin"
+                    );
+
                     // This logic first applies what it has learned about its input provenance,
                     // and if it finds a redundant join input it removes it. In that case, it
                     // also fails to produce exciting provenance information, partly out of
                     // laziness and the challenge of ensuring it is correct. Instead, if it is
-                    // unable to find a rendundant join it produces meaningful provenance information.
+                    // unable to find a redundant join it produces meaningful provenance information.
 
                     // Recursively apply transformation, and determine the provenance of inputs.
                     let mut input_prov = Vec::new();

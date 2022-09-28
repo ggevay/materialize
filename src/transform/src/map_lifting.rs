@@ -412,6 +412,7 @@ impl LiteralLifting {
                     inputs,
                     equivalences,
                     implementation,
+                    input_filters: _,
                 } => {
                     // before lifting, save the original shape of the inputs
                     let old_input_mapper = JoinInputMapper::new(inputs);
@@ -440,6 +441,8 @@ impl LiteralLifting {
 
                     if input_literals.iter().any(|l| !l.is_empty()) {
                         *implementation = mz_expr::JoinImplementation::Unimplemented;
+                        // (Don't clear filter_characteristics here. We are in a fixpoint loop
+                        // together with JoinImplementation.)
 
                         // We should be able to install any literals in the
                         // equivalence relations, and then lift all literals

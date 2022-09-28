@@ -1490,7 +1490,21 @@ SELECT * FROM t WHERE EXISTS(SELECT * FROM mv WHERE t.a < mv.a) AND EXISTS(SELEC
                                               ]
                                             ]
                                           ]
-                                        }
+                                        },
+                                        "input_filters": [
+                                          {
+                                            "literal_equality": false,
+                                            "like": false,
+                                            "literal_inequality": false,
+                                            "any_filter": false
+                                          },
+                                          {
+                                            "literal_equality": false,
+                                            "like": false,
+                                            "literal_inequality": false,
+                                            "any_filter": false
+                                          }
+                                        ]
                                       }
                                     },
                                     "predicates": [
@@ -1566,7 +1580,21 @@ SELECT * FROM t WHERE EXISTS(SELECT * FROM mv WHERE t.a < mv.a) AND EXISTS(SELEC
                         ]
                       ]
                     ]
-                  }
+                  },
+                  "input_filters": [
+                    {
+                      "literal_equality": false,
+                      "like": false,
+                      "literal_inequality": false,
+                      "any_filter": false
+                    },
+                    {
+                      "literal_equality": false,
+                      "like": false,
+                      "literal_inequality": false,
+                      "any_filter": false
+                    }
+                  ]
                 }
               },
               "outputs": [
@@ -1701,7 +1729,21 @@ SELECT * FROM t WHERE EXISTS(SELECT * FROM mv WHERE t.a < mv.a) AND EXISTS(SELEC
                                               ]
                                             ]
                                           ]
-                                        }
+                                        },
+                                        "input_filters": [
+                                          {
+                                            "literal_equality": false,
+                                            "like": false,
+                                            "literal_inequality": false,
+                                            "any_filter": false
+                                          },
+                                          {
+                                            "literal_equality": false,
+                                            "like": false,
+                                            "literal_inequality": false,
+                                            "any_filter": false
+                                          }
+                                        ]
                                       }
                                     },
                                     "predicates": [
@@ -1771,7 +1813,21 @@ SELECT * FROM t WHERE EXISTS(SELECT * FROM mv WHERE t.a < mv.a) AND EXISTS(SELEC
                         ]
                       ]
                     ]
-                  }
+                  },
+                  "input_filters": [
+                    {
+                      "literal_equality": false,
+                      "like": false,
+                      "literal_inequality": false,
+                      "any_filter": false
+                    },
+                    {
+                      "literal_equality": false,
+                      "like": false,
+                      "literal_inequality": false,
+                      "any_filter": false
+                    }
+                  ]
                 }
               },
               "outputs": [
@@ -2010,7 +2066,21 @@ SELECT (SELECT iv.a FROM iv WHERE iv.b = t.b LIMIT 1), (SELECT mv.a FROM mv WHER
                                         ]
                                       ]
                                     ]
-                                  }
+                                  },
+                                  "input_filters": [
+                                    {
+                                      "literal_equality": false,
+                                      "like": false,
+                                      "literal_inequality": false,
+                                      "any_filter": false
+                                    },
+                                    {
+                                      "literal_equality": false,
+                                      "like": false,
+                                      "literal_inequality": false,
+                                      "any_filter": false
+                                    }
+                                  ]
                                 }
                               },
                               "outputs": [
@@ -2131,7 +2201,21 @@ SELECT (SELECT iv.a FROM iv WHERE iv.b = t.b LIMIT 1), (SELECT mv.a FROM mv WHER
                                             ]
                                           ]
                                         ]
-                                      }
+                                      },
+                                      "input_filters": [
+                                        {
+                                          "literal_equality": false,
+                                          "like": false,
+                                          "literal_inequality": false,
+                                          "any_filter": false
+                                        },
+                                        {
+                                          "literal_equality": false,
+                                          "like": false,
+                                          "literal_inequality": false,
+                                          "any_filter": false
+                                        }
+                                      ]
                                     }
                                   },
                                   "outputs": [
@@ -2455,7 +2539,27 @@ SELECT (SELECT iv.a FROM iv WHERE iv.b = t.b LIMIT 1), (SELECT mv.a FROM mv WHER
                                         ]
                                       ]
                                     ]
-                                  }
+                                  },
+                                  "input_filters": [
+                                    {
+                                      "literal_equality": false,
+                                      "like": false,
+                                      "literal_inequality": false,
+                                      "any_filter": false
+                                    },
+                                    {
+                                      "literal_equality": false,
+                                      "like": false,
+                                      "literal_inequality": false,
+                                      "any_filter": false
+                                    },
+                                    {
+                                      "literal_equality": false,
+                                      "like": false,
+                                      "literal_inequality": false,
+                                      "any_filter": false
+                                    }
+                                  ]
                                 }
                               },
                               "outputs": [
@@ -2722,7 +2826,27 @@ RIGHT JOIN t as t3 ON t2.b = t3.b
                                 ]
                               ]
                             ]
-                          }
+                          },
+                          "input_filters": [
+                            {
+                              "literal_equality": false,
+                              "like": false,
+                              "literal_inequality": false,
+                              "any_filter": false
+                            },
+                            {
+                              "literal_equality": false,
+                              "like": false,
+                              "literal_inequality": false,
+                              "any_filter": false
+                            },
+                            {
+                              "literal_equality": false,
+                              "like": false,
+                              "literal_inequality": false,
+                              "any_filter": false
+                            }
+                          ]
                         }
                       },
                       "outputs": [
@@ -2856,7 +2980,21 @@ RIGHT JOIN t as t3 ON t2.b = t3.b
                                                 ]
                                               ]
                                             ]
-                                          }
+                                          },
+                                          "input_filters": [
+                                            {
+                                              "literal_equality": false,
+                                              "like": false,
+                                              "literal_inequality": false,
+                                              "any_filter": false
+                                            },
+                                            {
+                                              "literal_equality": false,
+                                              "like": false,
+                                              "literal_inequality": false,
+                                              "any_filter": false
+                                            }
+                                          ]
                                         }
                                       },
                                       "outputs": []
@@ -3152,7 +3290,21 @@ FROM
                                               ]
                                             ]
                                           ]
-                                        }
+                                        },
+                                        "input_filters": [
+                                          {
+                                            "literal_equality": false,
+                                            "like": false,
+                                            "literal_inequality": false,
+                                            "any_filter": false
+                                          },
+                                          {
+                                            "literal_equality": false,
+                                            "like": false,
+                                            "literal_inequality": false,
+                                            "any_filter": false
+                                          }
+                                        ]
                                       }
                                     },
                                     "group_key": [
@@ -3224,7 +3376,21 @@ FROM
                                 ]
                               ]
                             ]
-                          }
+                          },
+                          "input_filters": [
+                            {
+                              "literal_equality": false,
+                              "like": false,
+                              "literal_inequality": false,
+                              "any_filter": false
+                            },
+                            {
+                              "literal_equality": false,
+                              "like": false,
+                              "literal_inequality": false,
+                              "any_filter": true
+                            }
+                          ]
                         }
                       },
                       "predicates": [
@@ -3368,7 +3534,21 @@ FROM
                                               ]
                                             ]
                                           ]
-                                        }
+                                        },
+                                        "input_filters": [
+                                          {
+                                            "literal_equality": false,
+                                            "like": false,
+                                            "literal_inequality": false,
+                                            "any_filter": false
+                                          },
+                                          {
+                                            "literal_equality": false,
+                                            "like": false,
+                                            "literal_inequality": false,
+                                            "any_filter": false
+                                          }
+                                        ]
                                       }
                                     },
                                     "group_key": [
@@ -3434,7 +3614,21 @@ FROM
                                 ]
                               ]
                             ]
-                          }
+                          },
+                          "input_filters": [
+                            {
+                              "literal_equality": false,
+                              "like": false,
+                              "literal_inequality": false,
+                              "any_filter": false
+                            },
+                            {
+                              "literal_equality": false,
+                              "like": false,
+                              "literal_inequality": false,
+                              "any_filter": false
+                            }
+                          ]
                         }
                       },
                       "predicates": [
@@ -3609,7 +3803,21 @@ SELECT t1.a, t2.a FROM t as t1, t as t2
                     ]
                   ]
                 ]
-              }
+              },
+              "input_filters": [
+                {
+                  "literal_equality": false,
+                  "like": false,
+                  "literal_inequality": false,
+                  "any_filter": false
+                },
+                {
+                  "literal_equality": false,
+                  "like": false,
+                  "literal_inequality": false,
+                  "any_filter": false
+                }
+              ]
             }
           }
         }
@@ -3827,7 +4035,27 @@ WHERE t1.b = t2.b AND t2.b = t3.b
                             ]
                           ]
                         ]
-                      }
+                      },
+                      "input_filters": [
+                        {
+                          "literal_equality": false,
+                          "like": false,
+                          "literal_inequality": false,
+                          "any_filter": false
+                        },
+                        {
+                          "literal_equality": false,
+                          "like": false,
+                          "literal_inequality": false,
+                          "any_filter": false
+                        },
+                        {
+                          "literal_equality": false,
+                          "like": false,
+                          "literal_inequality": false,
+                          "any_filter": false
+                        }
+                      ]
                     }
                   },
                   "outputs": [
@@ -4076,7 +4304,27 @@ WHERE a = c and d = e and b = f
                         ]
                       ]
                     ]
-                  }
+                  },
+                  "input_filters": [
+                    {
+                      "literal_equality": false,
+                      "like": false,
+                      "literal_inequality": false,
+                      "any_filter": false
+                    },
+                    {
+                      "literal_equality": false,
+                      "like": false,
+                      "literal_inequality": false,
+                      "any_filter": false
+                    },
+                    {
+                      "literal_equality": false,
+                      "like": false,
+                      "literal_inequality": false,
+                      "any_filter": false
+                    }
+                  ]
                 }
               },
               "predicates": [
@@ -4319,7 +4567,27 @@ WHERE b = c and d = e
                         ]
                       ]
                     ]
-                  }
+                  },
+                  "input_filters": [
+                    {
+                      "literal_equality": false,
+                      "like": false,
+                      "literal_inequality": false,
+                      "any_filter": false
+                    },
+                    {
+                      "literal_equality": false,
+                      "like": false,
+                      "literal_inequality": false,
+                      "any_filter": false
+                    },
+                    {
+                      "literal_equality": false,
+                      "like": false,
+                      "literal_inequality": false,
+                      "any_filter": false
+                    }
+                  ]
                 }
               },
               "predicates": [

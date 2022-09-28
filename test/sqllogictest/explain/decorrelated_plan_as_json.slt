@@ -94,7 +94,8 @@ SELECT 1 / 0
               }
             ],
             "equivalences": [],
-            "implementation": "Unimplemented"
+            "implementation": "Unimplemented",
+            "input_filters": []
           }
         },
         "body": {
@@ -237,7 +238,8 @@ EXPLAIN DECORRELATED PLAN AS JSON FOR
               }
             ],
             "equivalences": [],
-            "implementation": "Unimplemented"
+            "implementation": "Unimplemented",
+            "input_filters": []
           }
         },
         "body": {
@@ -353,7 +355,8 @@ EXPLAIN DECORRELATED PLAN AS JSON FOR
                       }
                     ],
                     "equivalences": [],
-                    "implementation": "Unimplemented"
+                    "implementation": "Unimplemented",
+                    "input_filters": []
                   }
                 },
                 "body": {
@@ -594,7 +597,8 @@ EXPLAIN DECORRELATED PLAN AS JSON FOR
                                   }
                                 ],
                                 "equivalences": [],
-                                "implementation": "Unimplemented"
+                                "implementation": "Unimplemented",
+                                "input_filters": []
                               }
                             },
                             "body": {
@@ -880,7 +884,8 @@ SELECT 1, a + b as c FROM mv WHERE a > 0 and b < 0 and a + b > 0
                   }
                 ],
                 "equivalences": [],
-                "implementation": "Unimplemented"
+                "implementation": "Unimplemented",
+                "input_filters": []
               }
             },
             "predicates": [
@@ -1145,7 +1150,8 @@ SELECT generate_series(a, b) from t
               }
             ],
             "equivalences": [],
-            "implementation": "Unimplemented"
+            "implementation": "Unimplemented",
+            "input_filters": []
           }
         },
         "body": {
@@ -1305,7 +1311,8 @@ SELECT a FROM t EXCEPT SELECT b FROM mv
                   }
                 ],
                 "equivalences": [],
-                "implementation": "Unimplemented"
+                "implementation": "Unimplemented",
+                "input_filters": []
               }
             },
             "outputs": [
@@ -1358,7 +1365,8 @@ SELECT a FROM t EXCEPT SELECT b FROM mv
                       }
                     ],
                     "equivalences": [],
-                    "implementation": "Unimplemented"
+                    "implementation": "Unimplemented",
+                    "input_filters": []
                   }
                 },
                 "outputs": [
@@ -1563,7 +1571,8 @@ SELECT a FROM t EXCEPT ALL SELECT b FROM mv
                   }
                 ],
                 "equivalences": [],
-                "implementation": "Unimplemented"
+                "implementation": "Unimplemented",
+                "input_filters": []
               }
             },
             "outputs": [
@@ -1616,7 +1625,8 @@ SELECT a FROM t EXCEPT ALL SELECT b FROM mv
                       }
                     ],
                     "equivalences": [],
-                    "implementation": "Unimplemented"
+                    "implementation": "Unimplemented",
+                    "input_filters": []
                   }
                 },
                 "outputs": [
@@ -1796,7 +1806,8 @@ VIEW ov
                   }
                 ],
                 "equivalences": [],
-                "implementation": "Unimplemented"
+                "implementation": "Unimplemented",
+                "input_filters": []
               }
             },
             "group_key": [],
@@ -1893,7 +1904,8 @@ SELECT * FROM t ORDER BY b asc, a desc LIMIT 5
           }
         ],
         "equivalences": [],
-        "implementation": "Unimplemented"
+        "implementation": "Unimplemented",
+        "input_filters": []
       }
     }
   }
@@ -1971,7 +1983,8 @@ SELECT abs(min(a) - max(a)) FROM t
                   }
                 ],
                 "equivalences": [],
-                "implementation": "Unimplemented"
+                "implementation": "Unimplemented",
+                "input_filters": []
               }
             },
             "group_key": [],
@@ -2107,7 +2120,8 @@ SELECT abs(min(a) - max(a)) FROM t
                                   }
                                 ],
                                 "equivalences": [],
-                                "implementation": "Unimplemented"
+                                "implementation": "Unimplemented",
+                                "input_filters": []
                               }
                             },
                             "outputs": []
@@ -2145,7 +2159,8 @@ SELECT abs(min(a) - max(a)) FROM t
                         }
                       ],
                       "equivalences": [],
-                      "implementation": "Unimplemented"
+                      "implementation": "Unimplemented",
+                      "input_filters": []
                     }
                   }
                 ]
@@ -2288,7 +2303,8 @@ SELECT abs(min(a) - max(a)) FROM t GROUP BY b
               }
             ],
             "equivalences": [],
-            "implementation": "Unimplemented"
+            "implementation": "Unimplemented",
+            "input_filters": []
           }
         },
         "body": {
@@ -2507,7 +2523,8 @@ SELECT * FROM t WHERE EXISTS(SELECT * FROM mv WHERE t.a < mv.a) AND EXISTS(SELEC
                   }
                 ],
                 "equivalences": [],
-                "implementation": "Unimplemented"
+                "implementation": "Unimplemented",
+                "input_filters": []
               }
             },
             "predicates": [
@@ -2643,7 +2660,8 @@ SELECT * FROM t WHERE EXISTS(SELECT * FROM mv WHERE t.a < mv.a) AND EXISTS(SELEC
                                     }
                                   ],
                                   "equivalences": [],
-                                  "implementation": "Unimplemented"
+                                  "implementation": "Unimplemented",
+                                  "input_filters": []
                                 }
                               },
                               "predicates": [
@@ -2698,7 +2716,8 @@ SELECT * FROM t WHERE EXISTS(SELECT * FROM mv WHERE t.a < mv.a) AND EXISTS(SELEC
                       }
                     ],
                     "equivalences": [],
-                    "implementation": "Unimplemented"
+                    "implementation": "Unimplemented",
+                    "input_filters": []
                   }
                 },
                 "body": {
@@ -2877,7 +2896,8 @@ SELECT * FROM t WHERE EXISTS(SELECT * FROM mv WHERE t.a < mv.a) AND EXISTS(SELEC
                                                               }
                                                             ]
                                                           ],
-                                                          "implementation": "Unimplemented"
+                                                          "implementation": "Unimplemented",
+                                                          "input_filters": []
                                                         }
                                                       },
                                                       "outputs": [
@@ -2912,7 +2932,8 @@ SELECT * FROM t WHERE EXISTS(SELECT * FROM mv WHERE t.a < mv.a) AND EXISTS(SELEC
                                                   }
                                                 ],
                                                 "equivalences": [],
-                                                "implementation": "Unimplemented"
+                                                "implementation": "Unimplemented",
+                                                "input_filters": []
                                               }
                                             }
                                           ]
@@ -2929,7 +2950,8 @@ SELECT * FROM t WHERE EXISTS(SELECT * FROM mv WHERE t.a < mv.a) AND EXISTS(SELEC
                                         }
                                       ]
                                     ],
-                                    "implementation": "Unimplemented"
+                                    "implementation": "Unimplemented",
+                                    "input_filters": []
                                   }
                                 },
                                 "outputs": [
@@ -3044,7 +3066,8 @@ SELECT * FROM t WHERE EXISTS(SELECT * FROM mv WHERE t.a < mv.a) AND EXISTS(SELEC
                                                 }
                                               ],
                                               "equivalences": [],
-                                              "implementation": "Unimplemented"
+                                              "implementation": "Unimplemented",
+                                              "input_filters": []
                                             }
                                           },
                                           "predicates": [
@@ -3099,7 +3122,8 @@ SELECT * FROM t WHERE EXISTS(SELECT * FROM mv WHERE t.a < mv.a) AND EXISTS(SELEC
                                   }
                                 ],
                                 "equivalences": [],
-                                "implementation": "Unimplemented"
+                                "implementation": "Unimplemented",
+                                "input_filters": []
                               }
                             },
                             "body": {
@@ -3275,7 +3299,8 @@ SELECT * FROM t WHERE EXISTS(SELECT * FROM mv WHERE t.a < mv.a) AND EXISTS(SELEC
                                                                       }
                                                                     ]
                                                                   ],
-                                                                  "implementation": "Unimplemented"
+                                                                  "implementation": "Unimplemented",
+                                                                  "input_filters": []
                                                                 }
                                                               },
                                                               "outputs": [
@@ -3310,7 +3335,8 @@ SELECT * FROM t WHERE EXISTS(SELECT * FROM mv WHERE t.a < mv.a) AND EXISTS(SELEC
                                                           }
                                                         ],
                                                         "equivalences": [],
-                                                        "implementation": "Unimplemented"
+                                                        "implementation": "Unimplemented",
+                                                        "input_filters": []
                                                       }
                                                     }
                                                   ]
@@ -3327,7 +3353,8 @@ SELECT * FROM t WHERE EXISTS(SELECT * FROM mv WHERE t.a < mv.a) AND EXISTS(SELEC
                                                 }
                                               ]
                                             ],
-                                            "implementation": "Unimplemented"
+                                            "implementation": "Unimplemented",
+                                            "input_filters": []
                                           }
                                         },
                                         "outputs": [
@@ -3435,7 +3462,8 @@ SELECT (SELECT v.a FROM v WHERE v.b = t.b LIMIT 1), (SELECT mv.a FROM mv WHERE m
               }
             ],
             "equivalences": [],
-            "implementation": "Unimplemented"
+            "implementation": "Unimplemented",
+            "input_filters": []
           }
         },
         "body": {
@@ -3572,7 +3600,8 @@ SELECT (SELECT v.a FROM v WHERE v.b = t.b LIMIT 1), (SELECT mv.a FROM mv WHERE m
                                       }
                                     ],
                                     "equivalences": [],
-                                    "implementation": "Unimplemented"
+                                    "implementation": "Unimplemented",
+                                    "input_filters": []
                                   }
                                 },
                                 "predicates": [
@@ -3889,7 +3918,8 @@ SELECT (SELECT v.a FROM v WHERE v.b = t.b LIMIT 1), (SELECT mv.a FROM mv WHERE m
                                                       }
                                                     ],
                                                     "equivalences": [],
-                                                    "implementation": "Unimplemented"
+                                                    "implementation": "Unimplemented",
+                                                    "input_filters": []
                                                   }
                                                 },
                                                 "predicates": [
@@ -4269,7 +4299,8 @@ SELECT (SELECT v.a FROM v WHERE v.b = t.b LIMIT 1), (SELECT mv.a FROM mv WHERE m
                                                                                                 }
                                                                                               ]
                                                                                             ],
-                                                                                            "implementation": "Unimplemented"
+                                                                                            "implementation": "Unimplemented",
+                                                                                            "input_filters": []
                                                                                           }
                                                                                         },
                                                                                         "outputs": [
@@ -4304,7 +4335,8 @@ SELECT (SELECT v.a FROM v WHERE v.b = t.b LIMIT 1), (SELECT mv.a FROM mv WHERE m
                                                                                     }
                                                                                   ],
                                                                                   "equivalences": [],
-                                                                                  "implementation": "Unimplemented"
+                                                                                  "implementation": "Unimplemented",
+                                                                                  "input_filters": []
                                                                                 }
                                                                               }
                                                                             ]
@@ -4321,7 +4353,8 @@ SELECT (SELECT v.a FROM v WHERE v.b = t.b LIMIT 1), (SELECT mv.a FROM mv WHERE m
                                                                           }
                                                                         ]
                                                                       ],
-                                                                      "implementation": "Unimplemented"
+                                                                      "implementation": "Unimplemented",
+                                                                      "input_filters": []
                                                                     }
                                                                   },
                                                                   "outputs": [
@@ -4497,7 +4530,8 @@ SELECT (SELECT v.a FROM v WHERE v.b = t.b LIMIT 1), (SELECT mv.a FROM mv WHERE m
                                                                                                 }
                                                                                               ]
                                                                                             ],
-                                                                                            "implementation": "Unimplemented"
+                                                                                            "implementation": "Unimplemented",
+                                                                                            "input_filters": []
                                                                                           }
                                                                                         },
                                                                                         "outputs": [
@@ -4532,7 +4566,8 @@ SELECT (SELECT v.a FROM v WHERE v.b = t.b LIMIT 1), (SELECT mv.a FROM mv WHERE m
                                                                                     }
                                                                                   ],
                                                                                   "equivalences": [],
-                                                                                  "implementation": "Unimplemented"
+                                                                                  "implementation": "Unimplemented",
+                                                                                  "input_filters": []
                                                                                 }
                                                                               }
                                                                             ]
@@ -4549,7 +4584,8 @@ SELECT (SELECT v.a FROM v WHERE v.b = t.b LIMIT 1), (SELECT mv.a FROM mv WHERE m
                                                                           }
                                                                         ]
                                                                       ],
-                                                                      "implementation": "Unimplemented"
+                                                                      "implementation": "Unimplemented",
+                                                                      "input_filters": []
                                                                     }
                                                                   },
                                                                   "outputs": [
@@ -4584,7 +4620,8 @@ SELECT (SELECT v.a FROM v WHERE v.b = t.b LIMIT 1), (SELECT mv.a FROM mv WHERE m
                                                                 }
                                                               ]
                                                             ],
-                                                            "implementation": "Unimplemented"
+                                                            "implementation": "Unimplemented",
+                                                            "input_filters": []
                                                           }
                                                         },
                                                         "scalars": [
@@ -4706,7 +4743,8 @@ SELECT t1.a, t2.a FROM t as t1, t as t2
               }
             ],
             "equivalences": [],
-            "implementation": "Unimplemented"
+            "implementation": "Unimplemented",
+            "input_filters": []
           }
         },
         "body": {
@@ -4752,7 +4790,8 @@ SELECT t1.a, t2.a FROM t as t1, t as t2
                   }
                 ],
                 "equivalences": [],
-                "implementation": "Unimplemented"
+                "implementation": "Unimplemented",
+                "input_filters": []
               }
             },
             "body": {
@@ -4807,7 +4846,8 @@ SELECT t1.a, t2.a FROM t as t1, t as t2
                               }
                             ],
                             "equivalences": [],
-                            "implementation": "Unimplemented"
+                            "implementation": "Unimplemented",
+                            "input_filters": []
                           }
                         },
                         "outputs": [
@@ -4952,7 +4992,8 @@ SELECT t1.a, t2.a FROM t as t1 INNER JOIN t as t2 ON true
               }
             ],
             "equivalences": [],
-            "implementation": "Unimplemented"
+            "implementation": "Unimplemented",
+            "input_filters": []
           }
         },
         "body": {
@@ -4998,7 +5039,8 @@ SELECT t1.a, t2.a FROM t as t1 INNER JOIN t as t2 ON true
                   }
                 ],
                 "equivalences": [],
-                "implementation": "Unimplemented"
+                "implementation": "Unimplemented",
+                "input_filters": []
               }
             },
             "body": {
@@ -5053,7 +5095,8 @@ SELECT t1.a, t2.a FROM t as t1 INNER JOIN t as t2 ON true
                               }
                             ],
                             "equivalences": [],
-                            "implementation": "Unimplemented"
+                            "implementation": "Unimplemented",
+                            "input_filters": []
                           }
                         },
                         "outputs": [
@@ -5203,7 +5246,8 @@ WHERE t1.b = t2.b AND t2.b = t3.b
               }
             ],
             "equivalences": [],
-            "implementation": "Unimplemented"
+            "implementation": "Unimplemented",
+            "input_filters": []
           }
         },
         "body": {
@@ -5249,7 +5293,8 @@ WHERE t1.b = t2.b AND t2.b = t3.b
                   }
                 ],
                 "equivalences": [],
-                "implementation": "Unimplemented"
+                "implementation": "Unimplemented",
+                "input_filters": []
               }
             },
             "body": {
@@ -5304,7 +5349,8 @@ WHERE t1.b = t2.b AND t2.b = t3.b
                               }
                             ],
                             "equivalences": [],
-                            "implementation": "Unimplemented"
+                            "implementation": "Unimplemented",
+                            "input_filters": []
                           }
                         },
                         "outputs": [
@@ -5408,7 +5454,8 @@ WHERE t1.b = t2.b AND t2.b = t3.b
                               }
                             ],
                             "equivalences": [],
-                            "implementation": "Unimplemented"
+                            "implementation": "Unimplemented",
+                            "input_filters": []
                           }
                         },
                         "body": {
@@ -5471,7 +5518,8 @@ WHERE t1.b = t2.b AND t2.b = t3.b
                                           }
                                         ],
                                         "equivalences": [],
-                                        "implementation": "Unimplemented"
+                                        "implementation": "Unimplemented",
+                                        "input_filters": []
                                       }
                                     },
                                     "outputs": [
@@ -5670,7 +5718,8 @@ INNER JOIN t as t3 ON t2.b = t3.b
               }
             ],
             "equivalences": [],
-            "implementation": "Unimplemented"
+            "implementation": "Unimplemented",
+            "input_filters": []
           }
         },
         "body": {
@@ -5716,7 +5765,8 @@ INNER JOIN t as t3 ON t2.b = t3.b
                   }
                 ],
                 "equivalences": [],
-                "implementation": "Unimplemented"
+                "implementation": "Unimplemented",
+                "input_filters": []
               }
             },
             "body": {
@@ -5771,7 +5821,8 @@ INNER JOIN t as t3 ON t2.b = t3.b
                               }
                             ],
                             "equivalences": [],
-                            "implementation": "Unimplemented"
+                            "implementation": "Unimplemented",
+                            "input_filters": []
                           }
                         },
                         "outputs": [
@@ -5871,7 +5922,8 @@ INNER JOIN t as t3 ON t2.b = t3.b
                               }
                             ],
                             "equivalences": [],
-                            "implementation": "Unimplemented"
+                            "implementation": "Unimplemented",
+                            "input_filters": []
                           }
                         },
                         "body": {
@@ -5934,7 +5986,8 @@ INNER JOIN t as t3 ON t2.b = t3.b
                                           }
                                         ],
                                         "equivalences": [],
-                                        "implementation": "Unimplemented"
+                                        "implementation": "Unimplemented",
+                                        "input_filters": []
                                       }
                                     },
                                     "outputs": [
@@ -6094,7 +6147,8 @@ RIGHT JOIN t as t3 ON t2.b = t3.b
               }
             ],
             "equivalences": [],
-            "implementation": "Unimplemented"
+            "implementation": "Unimplemented",
+            "input_filters": []
           }
         },
         "body": {
@@ -6140,7 +6194,8 @@ RIGHT JOIN t as t3 ON t2.b = t3.b
                   }
                 ],
                 "equivalences": [],
-                "implementation": "Unimplemented"
+                "implementation": "Unimplemented",
+                "input_filters": []
               }
             },
             "body": {
@@ -6195,7 +6250,8 @@ RIGHT JOIN t as t3 ON t2.b = t3.b
                               }
                             ],
                             "equivalences": [],
-                            "implementation": "Unimplemented"
+                            "implementation": "Unimplemented",
+                            "input_filters": []
                           }
                         },
                         "outputs": [
@@ -6338,7 +6394,8 @@ RIGHT JOIN t as t3 ON t2.b = t3.b
                                                     }
                                                   ]
                                                 ],
-                                                "implementation": "Unimplemented"
+                                                "implementation": "Unimplemented",
+                                                "input_filters": []
                                               }
                                             },
                                             "outputs": [
@@ -6482,7 +6539,8 @@ RIGHT JOIN t as t3 ON t2.b = t3.b
                                   }
                                 ],
                                 "equivalences": [],
-                                "implementation": "Unimplemented"
+                                "implementation": "Unimplemented",
+                                "input_filters": []
                               }
                             },
                             "body": {
@@ -6545,7 +6603,8 @@ RIGHT JOIN t as t3 ON t2.b = t3.b
                                               }
                                             ],
                                             "equivalences": [],
-                                            "implementation": "Unimplemented"
+                                            "implementation": "Unimplemented",
+                                            "input_filters": []
                                           }
                                         },
                                         "outputs": [
@@ -6699,7 +6758,8 @@ RIGHT JOIN t as t3 ON t2.b = t3.b
                                                                         }
                                                                       ]
                                                                     ],
-                                                                    "implementation": "Unimplemented"
+                                                                    "implementation": "Unimplemented",
+                                                                    "input_filters": []
                                                                   }
                                                                 },
                                                                 "outputs": [
@@ -6943,7 +7003,8 @@ WITH x AS (SELECT t.a * t.b as v from t) SELECT a.v + b.v FROM x as a, x as b
               }
             ],
             "equivalences": [],
-            "implementation": "Unimplemented"
+            "implementation": "Unimplemented",
+            "input_filters": []
           }
         },
         "body": {
@@ -7046,7 +7107,8 @@ WITH x AS (SELECT t.a * t.b as v from t) SELECT a.v + b.v FROM x as a, x as b
                               }
                             ],
                             "equivalences": [],
-                            "implementation": "Unimplemented"
+                            "implementation": "Unimplemented",
+                            "input_filters": []
                           }
                         },
                         "outputs": [
@@ -7249,7 +7311,8 @@ FROM
               }
             ],
             "equivalences": [],
-            "implementation": "Unimplemented"
+            "implementation": "Unimplemented",
+            "input_filters": []
           }
         },
         "body": {
@@ -7339,7 +7402,8 @@ FROM
                           }
                         ],
                         "equivalences": [],
-                        "implementation": "Unimplemented"
+                        "implementation": "Unimplemented",
+                        "input_filters": []
                       }
                     },
                     "group_key": [
@@ -7515,7 +7579,8 @@ FROM
                                             }
                                           ]
                                         ],
-                                        "implementation": "Unimplemented"
+                                        "implementation": "Unimplemented",
+                                        "input_filters": []
                                       }
                                     },
                                     "outputs": [
@@ -7550,7 +7615,8 @@ FROM
                                 }
                               ],
                               "equivalences": [],
-                              "implementation": "Unimplemented"
+                              "implementation": "Unimplemented",
+                              "input_filters": []
                             }
                           }
                         ]
@@ -7634,7 +7700,8 @@ FROM
                                         }
                                       ]
                                     ],
-                                    "implementation": "Unimplemented"
+                                    "implementation": "Unimplemented",
+                                    "input_filters": []
                                   }
                                 },
                                 "outputs": [
@@ -7754,7 +7821,8 @@ FROM
                                           }
                                         ],
                                         "equivalences": [],
-                                        "implementation": "Unimplemented"
+                                        "implementation": "Unimplemented",
+                                        "input_filters": []
                                       }
                                     },
                                     "group_key": [
@@ -7930,7 +7998,8 @@ FROM
                                                             }
                                                           ]
                                                         ],
-                                                        "implementation": "Unimplemented"
+                                                        "implementation": "Unimplemented",
+                                                        "input_filters": []
                                                       }
                                                     },
                                                     "outputs": [
@@ -7965,7 +8034,8 @@ FROM
                                                 }
                                               ],
                                               "equivalences": [],
-                                              "implementation": "Unimplemented"
+                                              "implementation": "Unimplemented",
+                                              "input_filters": []
                                             }
                                           }
                                         ]
@@ -8091,7 +8161,8 @@ FROM
                                                     }
                                                   ]
                                                 ],
-                                                "implementation": "Unimplemented"
+                                                "implementation": "Unimplemented",
+                                                "input_filters": []
                                               }
                                             },
                                             "outputs": [
@@ -8232,7 +8303,8 @@ FROM
               }
             ],
             "equivalences": [],
-            "implementation": "Unimplemented"
+            "implementation": "Unimplemented",
+            "input_filters": []
           }
         },
         "body": {
@@ -8322,7 +8394,8 @@ FROM
                           }
                         ],
                         "equivalences": [],
-                        "implementation": "Unimplemented"
+                        "implementation": "Unimplemented",
+                        "input_filters": []
                       }
                     },
                     "group_key": [
@@ -8498,7 +8571,8 @@ FROM
                                             }
                                           ]
                                         ],
-                                        "implementation": "Unimplemented"
+                                        "implementation": "Unimplemented",
+                                        "input_filters": []
                                       }
                                     },
                                     "outputs": [
@@ -8533,7 +8607,8 @@ FROM
                                 }
                               ],
                               "equivalences": [],
-                              "implementation": "Unimplemented"
+                              "implementation": "Unimplemented",
+                              "input_filters": []
                             }
                           }
                         ]
@@ -8634,7 +8709,8 @@ FROM
                                       }
                                     ],
                                     "equivalences": [],
-                                    "implementation": "Unimplemented"
+                                    "implementation": "Unimplemented",
+                                    "input_filters": []
                                   }
                                 },
                                 "group_key": [
@@ -8847,7 +8923,8 @@ FROM
                                                         }
                                                       ]
                                                     ],
-                                                    "implementation": "Unimplemented"
+                                                    "implementation": "Unimplemented",
+                                                    "input_filters": []
                                                   }
                                                 },
                                                 "outputs": [
@@ -8883,7 +8960,8 @@ FROM
                                             }
                                           ],
                                           "equivalences": [],
-                                          "implementation": "Unimplemented"
+                                          "implementation": "Unimplemented",
+                                          "input_filters": []
                                         }
                                       }
                                     ]
@@ -9039,7 +9117,8 @@ FROM
                                                                   }
                                                                 ]
                                                               ],
-                                                              "implementation": "Unimplemented"
+                                                              "implementation": "Unimplemented",
+                                                              "input_filters": []
                                                             }
                                                           },
                                                           "outputs": [
@@ -9094,7 +9173,8 @@ FROM
                                                 }
                                               ]
                                             ],
-                                            "implementation": "Unimplemented"
+                                            "implementation": "Unimplemented",
+                                            "input_filters": []
                                           }
                                         },
                                         "outputs": [

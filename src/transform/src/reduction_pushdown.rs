@@ -138,7 +138,7 @@ impl ReductionPushdown {
             if let MirRelationExpr::Join {
                 inputs,
                 equivalences,
-                implementation: _,
+                ..
             } = &mut **input
             {
                 if let Some(new_relation_expr) = try_push_reduce_through_join(
