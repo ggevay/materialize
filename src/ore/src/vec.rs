@@ -15,6 +15,8 @@
 
 //! Vector utilities.
 
+use itertools::Itertools;
+use std::collections::{BTreeMap, HashMap};
 use std::mem::{align_of, size_of};
 
 #[cfg(feature = "smallvec")]
@@ -90,6 +92,72 @@ pub fn swap_remove_multiple<T>(v: &mut Vec<T>, mut indexes: Vec<usize>) -> Vec<T
         result.push(v.swap_remove(r));
     }
     result
+}
+
+/// todo: comment about duplicates
+/// `permutation[i] = j` means `v[j]` goes to `v[i]`
+pub fn permute<T>(v: &mut Vec<T>, permutation: &Vec<usize>)
+where
+    T: Clone,
+{
+    // This assert is not strictly necessary for the below code, but it probably indicates a bug
+    // somewhere else if it's not true.
+    assert_eq!(v.len(), permutation.len());
+    let mut new_v = Vec::new();
+    for i in 0..permutation.len() {
+        new_v.push(v[permutation[i]].clone());
+    }
+    *v = new_v;
+}
+
+/// todo: comment
+/// The input shouldn't have duplicates.
+pub fn reverse_permutation(permutation: &Vec<usize>) -> Vec<usize> {
+    assert!(permutation.iter().all_unique());
+    permutation
+        .iter()
+        .enumerate()
+        .map(|(idx, c)| (*c, idx))
+        .collect::<BTreeMap<_, _>>()
+        .into_values()
+        .collect()
+}
+
+/// Returns `f'` such that `g(f(x)) = f'(g(x))`
+/// `f` is not allowed to have duplicates, but `g, f'` are allowed.
+/// `f:  [0..n] -> [0..n]`, no holes
+/// `g:  [0..n] -> [0..m], n >= m`, holes possible
+/// `f': [0..m] -> [0..m]`, holes possible???????????????
+/// todo: cleanup
+/// todo: maybe add unit test?
+pub fn switch_permutations(f_inv: &Vec<usize>, g_inv: &Vec<usize>) -> Vec<usize> { // todo: rename
+    let g = g_inv.iter().enumerate().map(|(i,&j)| (j,i)).into_group_map();
+    let mut fp_inv = Vec::new();
+    for i in 0 .. g_inv.len() {
+        fp_inv.push(*g.get(&f_inv[g_inv[i]]).unwrap().first().unwrap());
+    }
+    fp_inv
+
+    // let g_map = g.iter().enumerate().map(|(i,j)| (*j,i)).into_group_map();
+    //
+    // //let fp_map = f.iter().enumerate().map(|(i,j)| (*g_map.get(&i).unwrap(), *g_map.get(j).unwrap())).collect::<HashMap<_, _>>();
+    // let fp_map = f.iter().enumerate().flat_map(|(i,j)|
+    //
+    //     g_map.get(&i).unwrap().clone().into_iter()
+    //         .cartesian_product(g_map.get(j).unwrap().clone().into_iter())
+    //
+    //     // ha j unwrap nem sikerult, akkor ures vector
+    //
+    //     // es az i??????????????????????????????
+    //
+    // ).collect::<HashMap<_, _>>(); //todo: maybe into_group_map and then assert that each group's len is 1
+    //
+    // let mut fp = Vec::new();
+    // for i in 0 .. g.len() {
+    //     fp.push(*fp_map.get(&i).unwrap());
+    // }
+    // fp
+
 }
 
 #[cfg(test)]

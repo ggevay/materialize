@@ -17,10 +17,12 @@
 //! and identifying opportunities to use indexes to replace filters.
 
 use std::collections::HashMap;
+use itertools::Itertools;
 
 use mz_expr::visit::{Visit, VisitChildren};
 use mz_expr::{JoinInputMapper, MapFilterProject, MirRelationExpr, MirScalarExpr, RECURSION_LIMIT};
 use mz_ore::stack::{CheckedRecursion, RecursionGuard};
+use mz_ore::vec::{permute, reverse_permutation, switch_permutations};
 
 use self::index_map::IndexMap;
 use crate::{TransformArgs, TransformError};
@@ -93,8 +95,22 @@ impl JoinImplementation {
         }
     }
 
+    fn filter_characteristics(filters: &Vec<MirScalarExpr>, index: usize) -> FilterCharacteristics {
+        FilterCharacteristics {
+            literal_equality: filters
+                .iter()
+                .any(|filter| filter.any_expr_eq_literal().is_some()),
+            literal_inequality: filters.iter().any(|filter| filter.any_expr_ineq_literal()),
+            any_filter: !filters.is_empty(),
+            index: std::cmp::Reverse(index),
+        }
+    }
+
     /// Determines the join implementation for join operators.
     pub fn action(&self, relation: &mut MirRelationExpr, indexes: &IndexMap) {
+
+        let orig_typ = relation.typ(); //todo: remove
+
         if let MirRelationExpr::Join {
             inputs,
             equivalences,
@@ -110,24 +126,29 @@ impl JoinImplementation {
             );
 
             // Common information of broad utility.
-            let input_mapper = JoinInputMapper::new_from_input_types(&input_types);
+            let mut input_mapper = JoinInputMapper::new_from_input_types(&input_types);
 
             // The first fundamental question is whether we should employ a delta query or not.
             //
             // Here we conservatively use the rule that if sufficient arrangements exist we will
             // use a delta query. An arrangement is considered available if it is a global get
             // with columns present in `indexes`, if it is an `ArrangeBy` with the columns present,
-            // or a filter wrapped around either of these.
+            // or a filter wrapped around either of these. // todo: update comment that a reduce might also be ok?
 
-            let unique_keys = input_types
+            let mut unique_keys = input_types
                 .into_iter()
                 .map(|typ| typ.keys)
                 .collect::<Vec<_>>();
             let mut available_arrangements = vec![Vec::new(); inputs.len()];
+            let mut input_filters = Vec::new();
             for index in 0..inputs.len() {
                 // We can work around mfps, as we can lift the mfps into the join execution.
                 let (mfp, input) = MapFilterProject::extract_non_errors_from_expr(&inputs[index]);
-                let (_, _, project) = mfp.as_map_filter_project();
+                let (_, filter, project) = mfp.as_map_filter_project();
+                input_filters.push((
+                    JoinImplementation::filter_characteristics(&filter, index),
+                    index,
+                ));
                 // Get and ArrangeBy expressions contribute arrangements.
                 match input {
                     MirRelationExpr::Get { id, typ: _ } => {
@@ -184,6 +205,36 @@ impl JoinImplementation {
                 });
             }
 
+            input_filters.sort();
+            input_filters.reverse();
+            let input_permutation = input_filters
+                .into_iter()
+                .map(|(_, input_index)| input_index)
+                .collect_vec();
+            let order_change = input_permutation.iter().tuple_windows().any(|(a, b)| a > b);
+
+            // We permute the inputs,  todo: comment
+            if order_change {
+                permute(inputs, &input_permutation);
+                permute(&mut available_arrangements, &input_permutation);
+                permute(&mut unique_keys, &input_permutation);
+                //////input_mapper = JoinInputMapper::new(inputs); // todo: This is not needed, right?
+
+                let col_perm = input_mapper.col_perm_from_input_perm(&input_permutation);
+                let compensating_col_perm = reverse_permutation(&col_perm);
+
+                *relation = relation.take_dangerous().project(compensating_col_perm);
+
+                /////assert_eq!(orig_typ, relation.typ()); // todo: it's weird that a key falls off, see a2b08c1b4aee6ed723b55bbf7b33348b484cef70
+
+                if let MirRelationExpr::Project{input, ..} = relation {
+                    self.action(&mut *input, indexes);
+                    return;
+                } else {
+                    unreachable!();
+                }
+            }
+
             // Determine if we can perform delta queries with the existing arrangements.
             // We could defer the execution if we are sure we know we want one input,
             // but we could imagine wanting the best from each and then comparing the two.
@@ -203,6 +254,132 @@ impl JoinImplementation {
             *relation = delta_query_plan
                 .or(differential_plan)
                 .expect("Failed to produce a join plan");
+
+            // if order_change {
+            //     // compensate by applying the reverse permutation ... todo: comment
+            //
+            //     // Need to recreate the input_mapper
+            //     let (mut mfp, join) = MapFilterProject::extract_non_errors_from_expr(&relation);
+            //     if let MirRelationExpr::Join {inputs, ..} = join {
+            //         input_mapper = JoinInputMapper::new(inputs);
+            //         assert_eq!(mfp.input_arity, input_mapper.total_columns());
+            //     } else {
+            //         unreachable!(); //todo: comment
+            //     }
+            //
+            //     let compensating_input_perm = reverse_permutation(&input_permutation);
+            //     let mut compensating_col_perm = input_mapper.col_perm_from_input_perm(&compensating_input_perm);
+            //
+            //     assert_eq!(compensating_col_perm.len(), mfp.input_arity);
+            //     for index in 0 .. mfp.expressions.len() {
+            //         // Intermediate columns are just shifted. todo: comment
+            //         compensating_col_perm.insert(mfp.input_arity + index, mfp.input_arity + index);
+            //     }
+            //
+            //     let switched_compensating_col_perm = switch_permutations(&compensating_col_perm, &mfp.projection);
+            //     mfp = mfp.project(switched_compensating_col_perm);
+            //
+            //     let (map, filter, project) = mfp.as_map_filter_project();
+            //     *relation = join
+            //         .clone()
+            //         .map(map)
+            //         .filter(filter)
+            //         .project(project);
+            // }
+
+            // if order_change {
+            //     let (mfp, join) = MapFilterProject::extract_non_errors_from_expr(&relation);
+            //     let (map, filter, project) = mfp.as_map_filter_project();
+            //
+            //     if let MirRelationExpr::Join {inputs, ..} = join {
+            //         input_mapper = JoinInputMapper::new(inputs);
+            //     } else {
+            //         unreachable!(); //todo: comment
+            //     }
+            //
+            //
+            //
+            //     // let compensating_input_perm = reverse_permutation(&input_permutation);
+            //     // let mut compensating_col_perm = input_mapper.col_perm_from_input_perm(&compensating_input_perm);
+            //
+            //     let xxx = input_mapper.col_perm_from_input_perm(&input_permutation);
+            //     let yyy = reverse_permutation(&xxx);
+            //     //////////assert_eq!(yyy, compensating_col_perm); // hooooooooooooooooooooooooooooooooo
+            //
+            //     let mut compensating_col_perm = yyy;
+            //
+            //
+            //     let num_map_exprs = map.len();
+            //     assert_eq!(mfp.input_arity, input_mapper.total_columns());
+            //     let mut new_mfp = MapFilterProject::new(mfp.input_arity)
+            //         .map(map)
+            //         .filter(filter);
+            //
+            //     assert_eq!(compensating_col_perm.len(), new_mfp.input_arity);
+            //     for index in 0 .. num_map_exprs {
+            //         // todo: comment
+            //         // todo: this could be push instead of insert (in linear.rs it's a map, and the indexes are also different)
+            //         compensating_col_perm.insert(new_mfp.input_arity + index, new_mfp.input_arity + index);
+            //     }
+            //     new_mfp = new_mfp.project(compensating_col_perm);
+            //
+            //     new_mfp = new_mfp.project(project);
+            //
+            //     if !new_mfp.is_identity() {
+            //         let (new_map, new_filter, new_project) = new_mfp.as_map_filter_project();
+            //         *relation = join
+            //             .clone()
+            //             .map(new_map)
+            //             .filter(new_filter)
+            //             .project(new_project);
+            //     } else {
+            //         *relation = join.clone();
+            //     }
+            // }
+
+            // // todo: factor out to fn
+            //
+            // //  compensate by applying the reverse permutation ... todo: comment
+            //
+            // let (mfp, join) = MapFilterProject::extract_non_errors_from_expr(&relation);
+            // let (map, filter, project) = mfp.as_map_filter_project();
+            //
+            // if let MirRelationExpr::Join {inputs, ..} = join {
+            //     input_mapper = JoinInputMapper::new(inputs);
+            // } else {
+            //     unreachable!(); //todo: comment
+            // }
+            //
+            // let compensating_input_perm = reverse_permutation(&input_permutation);
+            // let mut compensating_col_perm = input_mapper.col_perm_from_input_perm(&compensating_input_perm);
+            //
+            // let num_map_exprs = map.len();
+            // assert_eq!(mfp.input_arity, input_mapper.total_columns());
+            // let mut new_mfp = MapFilterProject::new(mfp.input_arity)
+            //     .map(map)
+            //     .filter(filter);
+            //
+            // assert_eq!(compensating_col_perm.len(), new_mfp.input_arity);
+            // for index in 0 .. num_map_exprs {
+            //     // Intermediate columns are just shifted. todo: comment
+            //     compensating_col_perm.insert(new_mfp.input_arity + index, new_mfp.input_arity + index);
+            // }
+            // new_mfp = new_mfp.project(compensating_col_perm);
+            //
+            // new_mfp = new_mfp.project(project);
+            //
+            // if !new_mfp.is_identity() {
+            //     let (new_map, new_filter, new_project) = new_mfp.as_map_filter_project();
+            //     *relation = join
+            //         .clone()
+            //         .map(new_map)
+            //         .filter(new_filter)
+            //         .project(new_project);
+            // } else {
+            //     *relation = join.clone();
+            // }
+
+            /////////assert_eq!(orig_typ, relation.typ());
         }
     }
 }
@@ -485,7 +662,7 @@ fn implement_arrangements<'a>(
         }
     }
 
-    // Combined lifted mfps into one.
+    // Combine lifted mfps into one.
     let new_join_mapper = JoinInputMapper::new(inputs);
     let mut arity = new_join_mapper.total_columns();
     let combined_mfp = MapFilterProject::new(arity);
@@ -562,6 +739,15 @@ fn optimize_orders(
     (0..available.len())
         .map(move |i| orderer.optimize_order_for(i))
         .collect::<Vec<_>>()
+}
+
+///todo: comments
+#[derive(Eq, PartialEq, Ord, PartialOrd, Debug, Clone)] //todo: which of these do we actually need?
+pub struct FilterCharacteristics {
+    literal_equality: bool,
+    literal_inequality: bool,
+    any_filter: bool,
+    index: std::cmp::Reverse<usize>,
 }
 
 /// Characteristics of a join order candidate collection.

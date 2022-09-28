@@ -3648,6 +3648,7 @@ dependencies = [
  "http",
  "hyper",
  "hyper-tls",
+ "itertools",
  "native-tls",
  "once_cell",
  "openssl",

@@ -452,11 +452,9 @@ Explained Query
                 Get l0 // { non_negative: true }
     Where
       l1 =
-        Project (#0, #1, #3) // { non_negative: true }
-          Filter (#0 != #3) // { non_negative: true }
+        Project (#0, #3, #1) // { non_negative: true }
+          Filter (#0 != #1) // { non_negative: true }
             Join on=(#0 = #2) type=delta // { non_negative: true }
-              ArrangeBy keys=[[#0]] // { non_negative: true }
-                Get materialize.public.t // { non_negative: true }
               ArrangeBy keys=[[#0]] // { non_negative: true }
                 Reduce group_by=[#0] aggregates=[max((#0 * #1))] // { non_negative: true }
                   CrossJoin type=differential // { non_negative: true }
@@ -464,6 +462,8 @@ Explained Query
                       Distinct group_by=[#0] // { non_negative: true }
                         Get l0 // { non_negative: true }
                     Get l0 // { non_negative: true }
+              ArrangeBy keys=[[#0]] // { non_negative: true }
+                Get materialize.public.t // { non_negative: true }
       l0 =
         Project (#0) // { non_negative: true }
           Get materialize.public.t // { non_negative: true }
