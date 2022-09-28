@@ -80,7 +80,10 @@ use std::collections::{HashMap, HashSet};
 use crate::{TransformArgs, TransformError};
 use itertools::Itertools;
 use mz_expr::visit::{Visit, VisitChildren};
-use mz_expr::{func, AggregateFunc, Id, MirRelationExpr, MirScalarExpr, VariadicFunc, RECURSION_LIMIT, JoinInputMapper};
+use mz_expr::{
+    func, AggregateFunc, Id, JoinInputMapper, MirRelationExpr, MirScalarExpr, VariadicFunc,
+    RECURSION_LIMIT,
+};
 use mz_ore::stack::{CheckedRecursion, RecursionGuard};
 use mz_repr::{ColumnType, Datum, ScalarType};
 
@@ -264,7 +267,11 @@ impl PredicatePushdown {
                                 std::iter::once(&input_type.column_types),
                             );
 
-                            let (push_downs, retain) = Self::push_filters_through_join(&input_mapper, equivalences, pred_not_translated);
+                            let (retain, push_downs) = Self::push_filters_through_join(
+                                &input_mapper,
+                                equivalences,
+                                pred_not_translated,
+                            );
 
                             Self::update_join_inputs_with_push_downs(inputs, push_downs);
 
@@ -356,7 +363,7 @@ impl PredicatePushdown {
                             self.action(relation, get_predicates)?;
                         }
                         MirRelationExpr::Map { input, scalars } => {
-                            let (retained, pushdown) = self.push_filters_through_map(
+                            let (retained, pushdown) = Self::push_filters_through_map(
                                 scalars,
                                 predicates,
                                 input.arity(),
@@ -688,7 +695,10 @@ impl PredicatePushdown {
         })
     }
 
-    fn update_join_inputs_with_push_downs(inputs: &mut Vec<MirRelationExpr>, push_downs: Vec<Vec<MirScalarExpr>>) {
+    fn update_join_inputs_with_push_downs(
+        inputs: &mut Vec<MirRelationExpr>,
+        push_downs: Vec<Vec<MirScalarExpr>>,
+    ) {
         let new_inputs = inputs
             .drain(..)
             .zip(push_downs)
@@ -704,8 +714,12 @@ impl PredicatePushdown {
         *inputs = new_inputs;
     }
 
-    /// Returns (predicates to push at each input, predicates to retain).
-    fn push_filters_through_join(input_mapper: &JoinInputMapper, equivalences: &Vec<Vec<MirScalarExpr>>, mut predicates: Vec<MirScalarExpr>) -> (Vec<Vec<MirScalarExpr>>, Vec<MirScalarExpr>) {
+    /// Returns (<predicates to retain>, <predicates to push at each input>).
+    pub fn push_filters_through_join(
+        input_mapper: &JoinInputMapper,
+        equivalences: &Vec<Vec<MirScalarExpr>>,
+        mut predicates: Vec<MirScalarExpr>,
+    ) -> (Vec<MirScalarExpr>, Vec<Vec<MirScalarExpr>>) {
         let mut push_downs = vec![Vec::new(); input_mapper.total_inputs()];
         let mut retain = Vec::new();
 
@@ -747,7 +761,7 @@ impl PredicatePushdown {
             }
         }
 
-        (push_downs, retain)
+        (retain, push_downs)
     }
 
     /// Computes "safe" predicates to push through a Map.
@@ -761,8 +775,7 @@ impl PredicatePushdown {
     /// input columns.
     ///
     /// Returns the predicates that can be pushed down, followed by ones that cannot.
-    fn push_filters_through_map(
-        &self,
+    pub fn push_filters_through_map(
         scalars: &Vec<MirScalarExpr>,
         predicates: &mut Vec<MirScalarExpr>,
         input_arity: usize,
