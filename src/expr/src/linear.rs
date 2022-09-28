@@ -793,6 +793,7 @@ impl MapFilterProject {
             pred.permute_map(&shuffle);
         }
         for proj in project.iter_mut() {
+            assert!(shuffle[proj] < new_input_arity + map.len());
             *proj = shuffle[proj];
         }
         *self = Self::new(new_input_arity)

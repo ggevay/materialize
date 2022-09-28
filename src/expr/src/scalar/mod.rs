@@ -368,6 +368,26 @@ impl MirScalarExpr {
         None
     }
 
+    /// Determines if `self` is
+    /// `<expr> < <literal>` or
+    /// `<expr> > <literal>` or
+    /// `<literal> < <expr>` or
+    /// `<literal> > <expr>` or
+    /// `<expr> <= <literal>` or
+    /// `<expr> >= <literal>` or
+    /// `<literal> <= <expr>` or
+    /// `<literal> >= <expr>`.
+    pub fn any_expr_ineq_literal(&self) -> bool {
+        match self {
+            MirScalarExpr::CallBinary {
+                func: BinaryFunc::Lt | BinaryFunc::Lte | BinaryFunc::Gt | BinaryFunc::Gte,
+                expr1,
+                expr2,
+            } => expr1.is_literal() || expr2.is_literal(),
+            _ => false,
+        }
+    }
+
     /// Rewrites column indices with their value in `permutation`.
     ///
     /// This method is applicable even when `permutation` is not a

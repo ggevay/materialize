@@ -17,6 +17,7 @@
 //! and identifying opportunities to use indexes to replace filters.
 
 use std::collections::HashMap;
+use itertools::Itertools;
 
 use mz_expr::visit::{Visit, VisitChildren};
 use mz_expr::{JoinInputMapper, MapFilterProject, MirRelationExpr, MirScalarExpr, RECURSION_LIMIT};
@@ -93,6 +94,17 @@ impl JoinImplementation {
         }
     }
 
+    fn filter_characteristics(filters: &Vec<MirScalarExpr>, index: usize) -> FilterCharacteristics {
+        FilterCharacteristics {
+            literal_equality: filters
+                .iter()
+                .any(|filter| filter.any_expr_eq_literal().is_some()),
+            literal_inequality: filters.iter().any(|filter| filter.any_expr_ineq_literal()),
+            any_filter: !filters.is_empty(),
+            index: std::cmp::Reverse(index),
+        }
+    }
+
     /// Determines the join implementation for join operators.
     pub fn action(&self, relation: &mut MirRelationExpr, indexes: &IndexMap) {
         if let MirRelationExpr::Join {
@@ -117,17 +129,22 @@ impl JoinImplementation {
             // Here we conservatively use the rule that if sufficient arrangements exist we will
             // use a delta query. An arrangement is considered available if it is a global get
             // with columns present in `indexes`, if it is an `ArrangeBy` with the columns present,
-            // or a filter wrapped around either of these.
+            // or a filter wrapped around either of these. // todo: update comment that a reduce might also be ok? at least from looking at the below code it seems so to me...
 
             let unique_keys = input_types
                 .into_iter()
                 .map(|typ| typ.keys)
                 .collect::<Vec<_>>();
             let mut available_arrangements = vec![Vec::new(); inputs.len()];
+            let mut input_filters = Vec::new();
             for index in 0..inputs.len() {
                 // We can work around mfps, as we can lift the mfps into the join execution.
                 let (mfp, input) = MapFilterProject::extract_non_errors_from_expr(&inputs[index]);
-                let (_, _, project) = mfp.as_map_filter_project();
+                let (_, filter, project) = mfp.as_map_filter_project();
+                input_filters.push((
+                    JoinImplementation::filter_characteristics(&filter, index),
+                    index,
+                ));
                 // Get and ArrangeBy expressions contribute arrangements.
                 match input {
                     MirRelationExpr::Get { id, typ: _ } => {
@@ -183,6 +200,14 @@ impl JoinImplementation {
                     })
                 });
             }
+
+            input_filters.sort();
+            input_filters.reverse();
+            let input_permutation = input_filters
+                .into_iter()
+                .map(|(_, input_index)| input_index)
+                .collect_vec();
+            let order_change = input_permutation.iter().tuple_windows().any(|(a, b)| a > b);
 
             // Determine if we can perform delta queries with the existing arrangements.
             // We could defer the execution if we are sure we know we want one input,
@@ -485,7 +510,7 @@ fn implement_arrangements<'a>(
         }
     }
 
-    // Combined lifted mfps into one.
+    // Combine lifted mfps into one.
     let new_join_mapper = JoinInputMapper::new(inputs);
     let mut arity = new_join_mapper.total_columns();
     let combined_mfp = MapFilterProject::new(arity);
@@ -562,6 +587,15 @@ fn optimize_orders(
     (0..available.len())
         .map(move |i| orderer.optimize_order_for(i))
         .collect::<Vec<_>>()
+}
+
+///todo: comments
+#[derive(Eq, PartialEq, Ord, PartialOrd, Debug, Clone)] //todo: which of these do we actually need?
+pub struct FilterCharacteristics {
+    literal_equality: bool,
+    literal_inequality: bool,
+    any_filter: bool,
+    index: std::cmp::Reverse<usize>,
 }
 
 /// Characteristics of a join order candidate collection.
