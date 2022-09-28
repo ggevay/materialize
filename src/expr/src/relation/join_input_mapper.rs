@@ -445,6 +445,20 @@ impl JoinInputMapper {
             }
         }
     }
+
+    /// todo: add comment
+    pub fn col_perm_from_input_perm(&self, input_permutation: &Vec<usize>) -> Vec<usize> {
+        let num_inputs = self.arities.len();
+        assert_eq!(input_permutation.len(), num_inputs);
+        let mut col_permutation = Vec::new();
+        for i in 0 .. num_inputs {
+            for j in 0 .. self.arities[input_permutation[i]] {
+                col_permutation.push(j + self.prior_arities[input_permutation[i]]);
+            }
+        }
+        assert_eq!(col_permutation.len(), self.total_columns());
+        col_permutation
+    }
 }
 
 #[cfg(test)]

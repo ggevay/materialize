@@ -978,14 +978,13 @@ ORDER BY o_ol_cnt
 
 %1 =
 | Get materialize.public.orderline (u13)
-| ArrangeBy (#2, #1, #0)
+| Filter (date_to_timestamp(#6) < 2020-01-01 00:00:00)
+| Project (#0..=#2, #6)
 
 %2 =
 | Join %0 %1 (= #0 #6) (= #1 #7) (= #2 #8)
-| | implementation = DeltaQuery
-| |   delta %0 %1.(#2, #1, #0)
-| |   delta %1 %0.(#0, #1, #2)
-| Filter (date_to_timestamp(#12) < 2020-01-01 00:00:00), (#3 <= #12)
+| | implementation = Differential %1 %0.(#0, #1, #2)
+| Filter (#3 <= #9)
 | Project (#4, #5)
 | Reduce group=(#1)
 | | agg sum(if ((#0 = 1) OR (#0 = 2)) then {1} else {0})
@@ -1017,14 +1016,12 @@ ORDER BY custdist DESC, c_count DESC
 
 %1 =
 | Get materialize.public.order (u11)
-| ArrangeBy (#2, #1, #3)
+| Filter (#5 > 8), (#3) IS NOT NULL
+| Project (#0..=#3)
 
 %2 = Let l0 =
 | Join %0 %1 (= #0 #25) (= #1 #23) (= #2 #24)
-| | implementation = DeltaQuery
-| |   delta %0 %1.(#2, #1, #3)
-| |   delta %1 %0.(#0, #1, #2)
-| Filter (#27 > 8)
+| | implementation = Differential %1 %0.(#0, #1, #2)
 | Project (#0..=#22)
 
 %3 =
