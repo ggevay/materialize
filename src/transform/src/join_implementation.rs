@@ -20,7 +20,10 @@ use std::collections::HashMap;
 
 use mz_expr::visit::{Visit, VisitChildren};
 use mz_expr::JoinImplementation::IndexedFilter;
-use mz_expr::{JoinInputMapper, MapFilterProject, MirRelationExpr, MirScalarExpr, RECURSION_LIMIT};
+use mz_expr::{
+    FilterCharacteristics, JoinInputMapper, MapFilterProject, MirRelationExpr, MirScalarExpr,
+    RECURSION_LIMIT,
+};
 use mz_ore::stack::{CheckedRecursion, RecursionGuard};
 
 use self::index_map::IndexMap;
@@ -108,7 +111,7 @@ impl JoinImplementation {
             inputs,
             equivalences,
             implementation,
-            ..
+            input_filters,
         } = relation
         {
             if !matches!(implementation, IndexedFilter(..)) {
@@ -126,20 +129,25 @@ impl JoinImplementation {
                 // The first fundamental question is whether we should employ a delta query or not.
                 //
                 // Here we conservatively use the rule that if sufficient arrangements exist we will
-                // use a delta query. An arrangement is considered available if it is a global get
+                // use a delta query. An arrangement is considered available if it is a global `Get`
                 // with columns present in `indexes`, if it is an `ArrangeBy` with the columns present,
-                // or a filter wrapped around either of these.
+                // if it is a filter wrapped around either of these, or a `Reduce` whose output is
+                // arranged the right way.
 
                 let unique_keys = input_types
                     .into_iter()
                     .map(|typ| typ.keys)
                     .collect::<Vec<_>>();
                 let mut available_arrangements = vec![Vec::new(); inputs.len()];
+                let fill_input_filters = input_filters.is_empty();
                 for index in 0..inputs.len() {
                     // We can work around mfps, as we can lift the mfps into the join execution.
-                    let (mfp, input) =
-                        MapFilterProject::extract_non_errors_from_expr(&inputs[index]);
-                    let (_, _, project) = mfp.as_map_filter_project();
+                    let (mfp, input) = MapFilterProject::extract_non_errors_from_expr(&inputs[index]);
+                    let (_, filter, project) = mfp.as_map_filter_project();
+                    // Extract filter characteristics and store in `input_filters` if not yet stored.
+                    if fill_input_filters {
+                        input_filters.push(FilterCharacteristics::filter_characteristics(&filter));
+                    }
                     // Get and ArrangeBy expressions contribute arrangements.
                     match input {
                         MirRelationExpr::Get { id, typ: _ } => {
@@ -293,6 +301,7 @@ mod delta_queries {
             inputs,
             equivalences,
             implementation,
+            input_filters,
         } = &mut new_join
         {
             if inputs.len() < 2 {
@@ -307,7 +316,13 @@ mod delta_queries {
             }
 
             // Determine a viable order for each relation, or return `Err` if none found.
-            let orders = super::optimize_orders(equivalences, available, unique_keys, input_mapper);
+            let orders = super::optimize_orders(
+                equivalences,
+                available,
+                unique_keys,
+                input_filters,
+                input_mapper,
+            );
 
             // A viable delta query requires that, for every order,
             // there is an arrangement for every input except for
@@ -351,7 +366,8 @@ mod delta_queries {
 }
 
 mod differential {
-
+    use crate::join_implementation::{Characteristics, FilterCharacteristics};
+    use itertools::Itertools;
     use mz_expr::{JoinImplementation, JoinInputMapper, MirRelationExpr, MirScalarExpr};
 
     use crate::TransformError;
@@ -369,6 +385,7 @@ mod differential {
             inputs,
             equivalences,
             implementation,
+            input_filters,
         } = &mut new_join
         {
             // We prefer a starting point based on the characteristics of the other input arrangements.
@@ -376,9 +393,35 @@ mod differential {
             // Important, we should choose something stable under re-ordering, to converge under fixed
             // point iteration; we choose to start with the first input optimizing our criteria, which
             // should remain stable even when promoted to the first position.
-            let mut orders =
-                super::optimize_orders(equivalences, available, unique_keys, input_mapper);
+            let mut orders = super::optimize_orders(
+                equivalences,
+                available,
+                unique_keys,
+                input_filters,
+                input_mapper,
+            );
 
+            // Inside each order, we take the `FilterCharacteristics` from each element, and OR it
+            // to every other element to the right. This is because we are gonna be looking for the
+            // worst `Characteristic` in every order, and for this it makes sense to include a
+            // filter in a `Characteristic` if the filter was applied not just at that input but
+            // any input before. Two examples for bad join orders without this:
+            //  - chbench.slt Query 20: a cross join would come before a filtered input.
+            //  - lifting.slt "tricky join ordering": a filtered input would go to the end. (Note
+            //    the `skip(1)` when thinking this through.)
+            orders.iter_mut().for_each(|order| {
+                let mut sum = FilterCharacteristics::none();
+                for (Characteristics { filters, .. }, _, _) in order {
+                    *filters |= sum;
+                    sum = filters.clone();
+                }
+            });
+
+            // `orders` has one order for each starting collection, and now we have to choose one
+            // from these. First, we find the worst `Characteristics` inside each order, and then we
+            // find the best one among these across all orders, which goes into
+            // `max_min_characteristics`.
+            //
             // For differential join, it is not as important for the starting
             // input to have good characteristics because the other ones
             // determine whether intermediate results blow up. Thus, we do not
@@ -390,10 +433,16 @@ mod differential {
             let mut order = if let Some(max_min_characteristics) = max_min_characteristics {
                 orders
                     .into_iter()
-                    .find(|o| {
+                    .filter(|o| {
                         o.iter().skip(1).map(|(c, _, _)| c).min().unwrap()
                             == &max_min_characteristics
                     })
+                    // It can happen that `orders` has multiple such orders that have the same worst
+                    // `Characteristic` as `max_min_characteristics`. In this case, we go beyond the
+                    // worst `Characteristic`: we inspect the entire `Characteristic` vector of each
+                    // of these orders, and choose the best among these. This pushes bad stuff to
+                    // happen later, by which time we might have applied some filters.
+                    .max_by_key(|o| o.clone().into_iter().skip(1).collect_vec())
                     .ok_or_else(|| {
                         TransformError::Internal(String::from(
                             "could not find max-min characteristics",
@@ -498,7 +547,7 @@ fn implement_arrangements<'a>(
         }
     }
 
-    // Combined lifted mfps into one.
+    // Combine lifted mfps into one.
     let new_join_mapper = JoinInputMapper::new(inputs);
     let mut arity = new_join_mapper.total_columns();
     let combined_mfp = MapFilterProject::new(arity);
@@ -569,9 +618,10 @@ fn optimize_orders(
     equivalences: &[Vec<MirScalarExpr>],
     available: &[Vec<Vec<MirScalarExpr>>],
     unique_keys: &[Vec<Vec<usize>>],
+    filters: &[FilterCharacteristics],
     input_mapper: &JoinInputMapper,
 ) -> Vec<Vec<(Characteristics, Vec<MirScalarExpr>, usize)>> {
-    let mut orderer = Orderer::new(equivalences, available, unique_keys, input_mapper);
+    let mut orderer = Orderer::new(equivalences, available, unique_keys, filters, input_mapper);
     (0..available.len())
         .map(move |i| orderer.optimize_order_for(i))
         .collect::<Vec<_>>()
@@ -592,16 +642,25 @@ pub struct Characteristics {
     key_length: usize,
     // Indicates that there will be no additional in-memory footprint.
     arranged: bool,
+    // Characteristics of the filter that is applied at this input.
+    filters: FilterCharacteristics,
     // We want to prefer input earlier in the input list, for stability of ordering.
     input: std::cmp::Reverse<usize>,
 }
 
 impl Characteristics {
-    fn new(unique_key: bool, key_length: usize, arranged: bool, input: usize) -> Self {
+    fn new(
+        unique_key: bool,
+        key_length: usize,
+        arranged: bool,
+        filters: FilterCharacteristics,
+        input: usize,
+    ) -> Self {
         Self {
             unique_key,
             key_length,
             arranged,
+            filters,
             input: std::cmp::Reverse(input),
         }
     }
@@ -612,6 +671,7 @@ struct Orderer<'a> {
     equivalences: &'a [Vec<MirScalarExpr>],
     arrangements: &'a [Vec<Vec<MirScalarExpr>>],
     unique_keys: &'a [Vec<Vec<usize>>],
+    filters: &'a [FilterCharacteristics],
     input_mapper: &'a JoinInputMapper,
     reverse_equivalences: Vec<Vec<(usize, usize)>>,
     unique_arrangement: Vec<Vec<bool>>,
@@ -629,6 +689,7 @@ impl<'a> Orderer<'a> {
         equivalences: &'a [Vec<MirScalarExpr>],
         arrangements: &'a [Vec<Vec<MirScalarExpr>>],
         unique_keys: &'a [Vec<Vec<usize>>],
+        filters: &'a [FilterCharacteristics],
         input_mapper: &'a JoinInputMapper,
     ) -> Self {
         let inputs = arrangements.len();
@@ -663,6 +724,7 @@ impl<'a> Orderer<'a> {
             equivalences,
             arrangements,
             unique_keys,
+            filters,
             input_mapper,
             reverse_equivalences,
             unique_arrangement,
@@ -699,13 +761,13 @@ impl<'a> Orderer<'a> {
             {
                 self.arrangement_active[input].push(pos);
                 self.priority_queue.push((
-                    Characteristics::new(is_unique, 0, true, input),
+                    Characteristics::new(is_unique, 0, true, self.filters[input].clone(), input),
                     vec![],
                     input,
                 ));
             } else {
                 self.priority_queue.push((
-                    Characteristics::new(is_unique, 0, false, input),
+                    Characteristics::new(is_unique, 0, false, self.filters[input].clone(), input),
                     vec![],
                     input,
                 ));
@@ -730,7 +792,11 @@ impl<'a> Orderer<'a> {
 
         // calculate characteristics of an arrangement, if any on the starting input
         // by default, there is no arrangement on the starting input
-        let mut start_tuple = (Characteristics::new(false, 0, false, start), vec![], start);
+        let mut start_tuple = (
+            Characteristics::new(false, 0, false, self.filters[start].clone(), start),
+            vec![],
+            start,
+        );
         // use an arrangement if there exists one that lines up with the keys of
         // the second input
         if let Some((_, key, second)) = self.order.get(0) {
@@ -752,7 +818,13 @@ impl<'a> Orderer<'a> {
                 {
                     let is_unique = self.unique_arrangement[start][pos];
                     start_tuple = (
-                        Characteristics::new(is_unique, candidate_start_key.len(), true, start),
+                        Characteristics::new(
+                            is_unique,
+                            candidate_start_key.len(),
+                            true,
+                            self.filters[start].clone(),
+                            start,
+                        ),
                         candidate_start_key,
                         start,
                     );
@@ -824,6 +896,7 @@ impl<'a> Orderer<'a> {
                                                     is_unique,
                                                     keys.len(),
                                                     true,
+                                                    self.filters[rel].clone(),
                                                     rel,
                                                 ),
                                                 keys.clone(),
@@ -842,6 +915,7 @@ impl<'a> Orderer<'a> {
                                         is_unique,
                                         self.bound[rel].len(),
                                         false,
+                                        self.filters[rel].clone(),
                                         rel,
                                     ),
                                     self.bound[rel].clone(),

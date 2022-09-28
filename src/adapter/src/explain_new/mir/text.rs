@@ -187,6 +187,11 @@ impl<'a> Displayable<'a, MirRelationExpr> {
                 inputs,
                 equivalences,
                 implementation,
+                //todo: Print this when WITH(join_impls).
+                // But how? Maybe put it on the inputs as if it were a real filter, but instead of
+                // "Filter ...", write something like "FilterHint ...", or PhantomFilter, or ...
+                // Btw. is the WITH(join_impls) going to be changed into a more concise format?
+                input_filters: _,
             } => {
                 let has_equivalences = !equivalences.is_empty();
                 let equivalences = separated(

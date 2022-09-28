@@ -13,6 +13,7 @@ use mz_repr::adt::timestamp::TimestampError;
 use std::collections::HashSet;
 use std::fmt;
 use std::mem;
+use std::ops::BitOrAssign;
 
 use mz_ore::stack::RecursionLimitError;
 use mz_proto::IntoRustIfSome;
@@ -367,6 +368,26 @@ impl MirScalarExpr {
             }
         }
         None
+    }
+
+    /// Determines if `self` is
+    /// `<expr> < <literal>` or
+    /// `<expr> > <literal>` or
+    /// `<literal> < <expr>` or
+    /// `<literal> > <expr>` or
+    /// `<expr> <= <literal>` or
+    /// `<expr> >= <literal>` or
+    /// `<literal> <= <expr>` or
+    /// `<literal> >= <expr>`.
+    pub fn any_expr_ineq_literal(&self) -> bool {
+        match self {
+            MirScalarExpr::CallBinary {
+                func: BinaryFunc::Lt | BinaryFunc::Lte | BinaryFunc::Gt | BinaryFunc::Gte,
+                expr1,
+                expr2,
+            } => expr1.is_literal() || expr2.is_literal(),
+            _ => false,
+        }
     }
 
     /// Rewrites column indices with their value in `permutation`.
@@ -1797,6 +1818,92 @@ impl VisitChildren<Self> for MirScalarExpr {
             }
         }
         Ok(())
+    }
+}
+
+/// Filter characteristics that are used for ordering join inputs.
+///
+/// The fields should be ordered decreasing by typical selectivity, so that Ord gives the right
+/// ordering for join inputs.
+#[derive(Eq, PartialEq, Ord, PartialOrd, Debug, Clone, Serialize, Deserialize, Hash, MzReflect)]
+pub struct FilterCharacteristics {
+    literal_equality: bool,
+    like: bool,
+    literal_inequality: bool,
+    /// Any filter, except ones involving IsNull, because those are too common.
+    /// Can be true by itself, or any other field being true also makes this true.
+    any_filter: bool,
+}
+
+impl BitOrAssign for FilterCharacteristics {
+    fn bitor_assign(&mut self, rhs: Self) {
+        self.literal_equality |= rhs.literal_equality;
+        self.like |= rhs.like;
+        self.literal_inequality |= rhs.literal_inequality;
+        self.any_filter |= rhs.any_filter;
+    }
+}
+
+impl FilterCharacteristics {
+    pub fn none() -> FilterCharacteristics {
+        FilterCharacteristics {
+            literal_equality: false,
+            like: false,
+            literal_inequality: false,
+            any_filter: false,
+        }
+    }
+
+    pub fn filter_characteristics(filters: &Vec<MirScalarExpr>) -> FilterCharacteristics {
+        let mut literal_equality = false;
+        let mut literal_inequality = false;
+        let mut like = false;
+        #[allow(deprecated)]
+        filters.iter().for_each(|f| {
+            f.visit_post_nolimit(&mut |e| {
+                if e.any_expr_eq_literal().is_some() {
+                    literal_equality = true;
+                }
+                if e.any_expr_ineq_literal() {
+                    literal_inequality = true;
+                }
+                if matches!(
+                    e,
+                    MirScalarExpr::CallUnary {
+                        func: UnaryFunc::IsLikeMatch(_),
+                        ..
+                    }
+                ) {
+                    like = true;
+                }
+            })
+        });
+        let any_filter = filters
+            .iter()
+            .filter(|f| {
+                let mut mentions_is_null = false;
+                #[allow(deprecated)]
+                f.visit_post_nolimit(&mut |e| {
+                    if matches!(
+                        e,
+                        MirScalarExpr::CallUnary {
+                            func: UnaryFunc::IsNull(crate::func::IsNull),
+                            ..
+                        }
+                    ) {
+                        mentions_is_null = true;
+                    }
+                });
+                !mentions_is_null
+            })
+            .next()
+            .is_some();
+        FilterCharacteristics {
+            literal_equality,
+            like,
+            literal_inequality,
+            any_filter,
+        }
     }
 }
 

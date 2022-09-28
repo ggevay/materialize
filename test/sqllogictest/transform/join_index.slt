@@ -224,7 +224,7 @@ where foo.a = bar.a
 
 %3 =
 | Join %0 %1 %2 (= #0 #2) (= #3 #4)
-| | implementation = Differential %0.(#0) %1.(#0) %2.(#0)
+| | implementation = Differential %1.(#0) %0.(#0) %2.(#0)
 | Filter (#0) IS NOT NULL, (#3) IS NOT NULL
 | Project (#0, #5)
 

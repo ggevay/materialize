@@ -175,6 +175,7 @@ impl ProjectionLifting {
                     inputs,
                     equivalences,
                     implementation,
+                    input_filters: _,
                 } => {
                     for input in inputs.iter_mut() {
                         self.action(input, gets)?;

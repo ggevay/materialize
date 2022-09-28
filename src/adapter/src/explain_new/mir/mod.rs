@@ -498,6 +498,7 @@ fn normalize_lets_at_root(expr: &mut MirRelationExpr) {
             inputs,
             equivalences,
             implementation,
+            input_filters,
         } => {
             let mut bindings = vec![];
 
@@ -517,6 +518,7 @@ fn normalize_lets_at_root(expr: &mut MirRelationExpr) {
                 inputs,
                 equivalences: equivalences.split_off(0),
                 implementation: implementation.to_owned(),
+                input_filters: input_filters.to_owned(),
             };
             for (id, value) in bindings.drain(..).rev() {
                 result = Let {

@@ -251,6 +251,8 @@ impl<'a> ViewExplanation<'a> {
                 inputs,
                 equivalences,
                 implementation,
+                // I'm not adding this to the old explain, because this code will be gone soon.
+                input_filters: _,
             } => {
                 write!(
                     f,

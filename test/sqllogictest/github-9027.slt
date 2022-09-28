@@ -340,102 +340,67 @@ Query:
                           }
                         },
                         {
-                          "ArrangeBy": {
-                            "input": {
-                              "Get": {
-                                "id": {
-                                  "Global": {
-                                    "User": 1
-                                  }
-                                },
-                                "keys": {
-                                  "raw": true,
-                                  "arranged": []
-                                },
-                                "plan": {
-                                  "Collection": {
-                                    "expressions": [],
-                                    "predicates": [
-                                      [
-                                        1,
-                                        {
+                          "Get": {
+                            "id": {
+                              "Global": {
+                                "User": 1
+                              }
+                            },
+                            "keys": {
+                              "raw": true,
+                              "arranged": []
+                            },
+                            "plan": {
+                              "Collection": {
+                                "expressions": [],
+                                "predicates": [
+                                  [
+                                    1,
+                                    {
+                                      "CallUnary": {
+                                        "func": {
+                                          "Not": null
+                                        },
+                                        "expr": {
                                           "CallUnary": {
                                             "func": {
-                                              "Not": null
+                                              "IsNull": null
                                             },
                                             "expr": {
-                                              "CallUnary": {
-                                                "func": {
-                                                  "IsNull": null
-                                                },
-                                                "expr": {
-                                                  "Column": 0
-                                                }
-                                              }
+                                              "Column": 0
                                             }
                                           }
                                         }
-                                      ]
-                                    ],
-                                    "projection": [
-                                      0,
-                                      1
-                                    ],
-                                    "input_arity": 2
-                                  }
-                                }
-                              }
-                            },
-                            "forms": {
-                              "raw": true,
-                              "arranged": [
-                                [
-                                  [
-                                    {
-                                      "Column": 0
+                                      }
                                     }
-                                  ],
-                                  {
-                                    "0": 0,
-                                    "1": 1
-                                  },
-                                  [
-                                    1
                                   ]
-                                ]
-                              ]
-                            },
-                            "input_key": null,
-                            "input_mfp": {
-                              "expressions": [],
-                              "predicates": [],
-                              "projection": [
-                                0,
-                                1
-                              ],
-                              "input_arity": 2
+                                ],
+                                "projection": [
+                                  0,
+                                  1
+                                ],
+                                "input_arity": 2
+                              }
                             }
                           }
                         }
                       ],
                       "plan": {
                         "Linear": {
-                          "source_relation": 1,
-                          "source_key": [
-                            {
-                              "Column": 0
-                            }
-                          ],
+                          "source_relation": 2,
+                          "source_key": null,
                           "initial_closure": null,
                           "stage_plans": [
                             {
-                              "lookup_relation": 2,
+                              "lookup_relation": 1,
                               "stream_key": [
                                 {
                                   "Column": 0
                                 }
                               ],
-                              "stream_thinning": [],
+                              "stream_thinning": [
+                                1
+                              ],
                               "lookup_key": [
                                 {
                                   "Column": 0

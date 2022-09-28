@@ -33,7 +33,10 @@ use mz_repr::{ColumnName, ColumnType, Datum, Diff, GlobalId, RelationType, Row, 
 
 use crate::explain::{Indices, ViewExplanation};
 use crate::visit::{Visit, VisitChildren};
-use crate::{func as scalar_func, EvalError, Id, LocalId, MirScalarExpr, UnaryFunc, VariadicFunc};
+use crate::{
+    func as scalar_func, EvalError, FilterCharacteristics, Id, LocalId, MirScalarExpr, UnaryFunc,
+    VariadicFunc,
+};
 
 use self::func::{AggregateFunc, LagLeadType, TableFunc};
 
@@ -167,9 +170,16 @@ pub enum MirRelationExpr {
         /// inputs, but more general cases exist (e.g. complex functions of multiple columns
         /// from multiple inputs, or just constant literals).
         equivalences: Vec<Vec<MirScalarExpr>>,
+
+        // The rest of the fields are filled by `JoinImplementation`.
         /// Join implementation information.
         #[serde(default)]
         implementation: JoinImplementation,
+        /// This is not used in the rendering, it's just to have filter info available when doing
+        /// join ordering, even after `implement_arrangements` lifts the filters.
+        /// (Note that JoinImplementation is inside a fixpoint loop.)
+        #[serde(default)]
+        input_filters: Vec<FilterCharacteristics>,
     },
     /// Group a dataflow by some columns and aggregate over each group
     ///
@@ -1025,6 +1035,7 @@ impl MirRelationExpr {
             inputs,
             equivalences,
             implementation: JoinImplementation::Unimplemented,
+            input_filters: vec![],
         }
     }
 
