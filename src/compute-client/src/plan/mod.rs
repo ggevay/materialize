@@ -1127,8 +1127,26 @@ impl<T: timely::progress::Timestamp> Plan<T> {
                         );
                         (JoinPlan::Linear(ljp), missing)
                     }
-                    Differential((start, _start_arr), order) => {
-                        let source_arrangement = input_keys[*start].arbitrary_arrangement();
+                    Differential((start, start_arr), order) => {
+
+                        //let source_arrangement = input_keys[*start].arbitrary_arrangement();
+
+                        ////////////////////////////////////////////// This is the actual change.
+                        let source_arrangement = input_keys[*start].arranged.iter()
+                            .find(|(keys, _, _)| start_arr.iter().any(|a| a == keys))
+                            .or_else(|| input_keys[*start].arbitrary_arrangement());
+
+                        if start_arr.is_some() && source_arrangement.is_some() && start_arr.clone().unwrap() == source_arrangement.unwrap().0 {
+                            println!("Found good arrangement.");
+                            if input_keys[*start].arbitrary_arrangement() != source_arrangement {
+                                println!("!!!!!!! And the old code wouldn't have found it!");
+                                // It seems that none of our tests are exercising this case.
+                                // I also ran explain physical plan in chbench.slt, and also not exercised there.
+                                // !! Exercised in tpch.slt if I change to explain physical plan.
+                                //    But then "MFP in initial_closure is NOT identity"
+                            }
+                        }
+
                         let (ljp, missing) = LinearJoinPlan::create_from(
                             *start,
                             source_arrangement,

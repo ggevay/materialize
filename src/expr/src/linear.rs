@@ -1403,7 +1403,7 @@ pub mod plan {
     /// A wrapper type which indicates it is safe to simply evaluate all expressions.
     #[derive(Arbitrary, Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
     pub struct SafeMfpPlan {
-        mfp: MapFilterProject,
+        pub mfp: MapFilterProject,
     }
 
     impl RustType<ProtoSafeMfpPlan> for SafeMfpPlan {

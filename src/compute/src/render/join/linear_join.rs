@@ -72,14 +72,20 @@ where
         // We can use an arrangement if it exists and an initial closure does not.
         let mut joined = match (arrangement, linear_plan.initial_closure) {
             (Some(ArrangementFlavor::Local(oks, errs)), None) => {
+                println!("############################ ArrangementFlavor::Local");
+                println!();
                 errors.push(errs.as_collection(|k, _v| k.clone()));
                 JoinedFlavor::Local(oks)
             }
             (Some(ArrangementFlavor::Trace(_gid, oks, errs)), None) => {
+                println!("############################ ArrangementFlavor::Trace");
+                println!();
                 errors.push(errs.as_collection(|k, _v| k.clone()));
                 JoinedFlavor::Trace(oks)
             }
             (_, initial_closure) => {
+                println!("############################ No arrangement");
+                println!();
                 // TODO: extract closure from the first stage in the join plan, should it exist.
                 // TODO: apply that closure in `flat_map_ref` rather than calling `.collection`.
                 let (mut joined, errs) = inputs[linear_plan.source_relation]

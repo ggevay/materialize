@@ -190,6 +190,16 @@ impl LinearJoinPlan {
                 let mut mfp = MapFilterProject::new(unthinned_source_arity);
                 mfp.permute(permutation.clone(), key.len() + thinning.len());
                 let mfp = mfp.into_plan().unwrap().into_nontemporal().unwrap();
+
+                if mfp.is_identity() {
+                    println!("+++ Identity MFP in initial_closure");
+                } else {
+                    println!("--- MFP in initial_closure is NOT identity");
+                }
+                println!();
+                println!("MFP: {}", mfp.mfp);
+                println!();
+
                 (
                     if mfp.is_identity() {
                         None
