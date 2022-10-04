@@ -9,7 +9,7 @@
 
 statement ok
 CREATE TABLE nation (
-    n_nationkey  integer PRIMARY KEY,
+    n_nationkey  integer,
     n_name       char(25) NOT NULL,
     n_regionkey  integer NOT NULL,
     n_comment    varchar(152)
@@ -20,14 +20,14 @@ CREATE INDEX fk_nation_regionkey ON nation (n_regionkey ASC)
 
 statement ok
 CREATE TABLE region  (
-    r_regionkey  integer PRIMARY KEY,
+    r_regionkey  integer,
     r_name       char(25) NOT NULL,
     r_comment    varchar(152)
 )
 
 statement ok
 CREATE TABLE part (
-    p_partkey     integer PRIMARY KEY,
+    p_partkey     integer,
     p_name        varchar(55) NOT NULL,
     p_mfgr        char(25) NOT NULL,
     p_brand       char(10) NOT NULL,
@@ -40,7 +40,7 @@ CREATE TABLE part (
 
 statement ok
 CREATE TABLE supplier (
-    s_suppkey     integer PRIMARY KEY,
+    s_suppkey     integer,
     s_name        char(25) NOT NULL,
     s_address     varchar(40) NOT NULL,
     s_nationkey   integer NOT NULL,
@@ -58,8 +58,7 @@ CREATE TABLE partsupp (
     ps_suppkey     integer NOT NULL,
     ps_availqty    integer NOT NULL,
     ps_supplycost  decimal(15, 2) NOT NULL,
-    ps_comment     varchar(199) NOT NULL,
-    PRIMARY KEY (ps_partkey, ps_suppkey)
+    ps_comment     varchar(199) NOT NULL
 )
 
 statement ok
@@ -70,7 +69,7 @@ CREATE INDEX fk_partsupp_suppkey ON partsupp (ps_suppkey ASC)
 
 statement ok
 CREATE TABLE customer (
-    c_custkey     integer PRIMARY KEY,
+    c_custkey     integer,
     c_name        varchar(25) NOT NULL,
     c_address     varchar(40) NOT NULL,
     c_nationkey   integer NOT NULL,
@@ -85,7 +84,7 @@ CREATE INDEX fk_customer_nationkey ON customer (c_nationkey ASC)
 
 statement ok
 CREATE TABLE orders (
-    o_orderkey       integer PRIMARY KEY,
+    o_orderkey       integer,
     o_custkey        integer NOT NULL,
     o_orderstatus    char(1) NOT NULL,
     o_totalprice     decimal(15, 2) NOT NULL,
@@ -116,8 +115,7 @@ CREATE TABLE lineitem (
     l_receiptdate    date NOT NULL,
     l_shipinstruct   char(25) NOT NULL,
     l_shipmode       char(10) NOT NULL,
-    l_comment        varchar(44) NOT NULL,
-    PRIMARY KEY (l_orderkey, l_linenumber)
+    l_comment        varchar(44) NOT NULL
 )
 
 statement ok
@@ -269,7 +267,7 @@ ORDER BY
 | Join %4 %0 %1 %2 %3 (= #0 #16) (= #9 #17) (= #12 #21) (= #23 #25)
 | | implementation = DeltaQuery
 | |   delta %4 %1.(#0) %0.(#0) %2.(#0) %3.(#0)
-| |   delta %0 %2.(#0) %3.(#0) %1.(#1) %4.(#0)
+| |   delta %0 %1.(#1) %4.(#0) %2.(#0) %3.(#0)
 | |   delta %1 %4.(#0) %0.(#0) %2.(#0) %3.(#0)
 | |   delta %2 %3.(#0) %0.(#3) %1.(#1) %4.(#0)
 | |   delta %3 %2.(#2) %0.(#3) %1.(#1) %4.(#0)
@@ -287,7 +285,7 @@ ORDER BY
 | | implementation = DeltaQuery
 | |   delta %6 %1.(#0) %0.(#0) %2.(#0) %3.(#0)
 | |   delta %1 %6.(#0) %0.(#0) %2.(#0) %3.(#0)
-| |   delta %0 %2.(#0) %3.(#0) %1.(#1) %6.(#0)
+| |   delta %0 %1.(#1) %6.(#0) %2.(#0) %3.(#0)
 | |   delta %2 %3.(#0) %0.(#3) %1.(#1) %6.(#0)
 | |   delta %3 %2.(#2) %0.(#3) %1.(#1) %6.(#0)
 | Filter (#18 = "EUROPE")
@@ -389,17 +387,25 @@ ORDER BY
 | ArrangeBy (#0)
 
 %1 =
+| Get materialize.public.orders (u12)
+| Filter (#4 >= 1993-07-01), (#0) IS NOT NULL, (date_to_timestamp(#4) < 1993-10-01 00:00:00)
+| Project (#0)
+| Distinct group=(#0)
+| ArrangeBy (#0)
+
+%2 =
 | Get materialize.public.lineitem (u14)
 | Filter (#11 < #12)
 | Project (#0)
 | Distinct group=(#0)
 | ArrangeBy (#0)
 
-%2 =
-| Join %0 %1 (= #0 #9)
+%3 =
+| Join %0 %1 %2 (= #0 #9 #10)
 | | implementation = DeltaQuery
-| |   delta %0 %1.(#0)
-| |   delta %1 %0.(#0)
+| |   delta %0 %1.(#0) %2.(#0)
+| |   delta %1 %2.(#0) %0.(#0)
+| |   delta %2 %1.(#0) %0.(#0)
 | Filter (#4 >= 1993-07-01), (date_to_timestamp(#4) < 1993-10-01 00:00:00)
 | Project (#5)
 | Reduce group=(#0)
@@ -439,11 +445,11 @@ ORDER BY
 ----
 %0 =
 | Get materialize.public.customer (u10)
-| ArrangeBy (#0)
+| ArrangeBy (#3)
 
 %1 =
 | Get materialize.public.orders (u12)
-| ArrangeBy (#0)
+| ArrangeBy (#1)
 
 %2 =
 | Get materialize.public.lineitem (u14)
@@ -451,12 +457,13 @@ ORDER BY
 
 %3 =
 | Get materialize.public.supplier (u5)
+| Filter (#0) IS NOT NULL
 | Project (#0, #3)
 | ArrangeBy (#0, #1)
 
 %4 =
 | Get materialize.public.nation (u1)
-| ArrangeBy (#0)
+| ArrangeBy (#2)
 
 %5 =
 | Get materialize.public.region (u3)
@@ -464,7 +471,7 @@ ORDER BY
 
 %6 =
 | Join %0 %1 %2 %3 %4 %5 (= #0 #9) (= #3 #34 #35) (= #8 #17) (= #19 #33) (= #37 #39)
-| | implementation = Differential %2.(#0) %1.(#0) %0.(#0) %3.(#0, #1) %4.(#0) %5.(#0)
+| | implementation = Differential %5.(#0) %4.(#2) %0.(#3) %1.(#1) %2.(#0) %3.(#0, #1)
 | Filter (#40 = "ASIA"), (#12 < 1995-01-01), (#12 >= 1994-01-01)
 | Project (#22, #23, #36)
 | Reduce group=(#2)
@@ -579,7 +586,7 @@ ORDER BY
 | | implementation = DeltaQuery
 | |   delta %1 %0.(#0) %2.(#2) %3.(#0) %4.(#0) %0.(#0)
 | |   delta %2 %1.(#0) %0.(#0) %3.(#0) %4.(#0) %0.(#0)
-| |   delta %3 %4.(#0) %0.(#0) %2.(#0) %1.(#0) %0.(#0)
+| |   delta %3 %2.(#0) %1.(#0) %0.(#0) %4.(#0) %0.(#0)
 | |   delta %4 %0.(#0) %3.(#1) %2.(#0) %1.(#0) %0.(#0)
 | |   delta %0 %1.(#3) %2.(#2) %3.(#0) %4.(#0) %0.(#0)
 | |   delta %0 %4.(#3) %3.(#1) %2.(#0) %1.(#0) %0.(#0)
@@ -670,10 +677,10 @@ ORDER BY
 | Join %0 %1 %2 %3 %4 %5 %6 %7 (= #0 #17) (= #9 #18) (= #12 #53) (= #16 #32) (= #33 #41) (= #44 #49) (= #51 #57)
 | | implementation = DeltaQuery
 | |   delta %0 %2.(#1) %3.(#0) %1.(#0) %4.(#0) %5.(#0) %7.(#0) %6.(#0)
-| |   delta %1 %6.(#0) %2.(#2) %0.(#0) %3.(#0) %4.(#0) %5.(#0) %7.(#0)
+| |   delta %1 %2.(#2) %0.(#0) %3.(#0) %4.(#0) %5.(#0) %7.(#0) %6.(#0)
 | |   delta %2 %0.(#0) %3.(#0) %1.(#0) %4.(#0) %5.(#0) %7.(#0) %6.(#0)
-| |   delta %3 %4.(#0) %5.(#0) %7.(#0) %2.(#0) %0.(#0) %1.(#0) %6.(#0)
-| |   delta %4 %5.(#0) %7.(#0) %3.(#1) %2.(#0) %0.(#0) %1.(#0) %6.(#0)
+| |   delta %3 %2.(#0) %0.(#0) %1.(#0) %4.(#0) %5.(#0) %7.(#0) %6.(#0)
+| |   delta %4 %3.(#1) %2.(#0) %0.(#0) %1.(#0) %5.(#0) %7.(#0) %6.(#0)
 | |   delta %5 %7.(#0) %4.(#3) %3.(#1) %2.(#0) %0.(#0) %1.(#0) %6.(#0)
 | |   delta %6 %1.(#3) %2.(#2) %0.(#0) %3.(#0) %4.(#0) %5.(#0) %7.(#0)
 | |   delta %7 %5.(#2) %4.(#3) %3.(#1) %2.(#0) %0.(#0) %1.(#0) %6.(#0)
@@ -753,9 +760,9 @@ ORDER BY
 | Join %0 %1 %2 %3 %4 %5 (= #0 #17 #32) (= #9 #18 #33) (= #12 #46) (= #16 #37)
 | | implementation = DeltaQuery
 | |   delta %0 %2.(#1) %3.(#0, #1) %1.(#0) %4.(#0) %5.(#0)
-| |   delta %1 %5.(#0) %2.(#2) %3.(#0, #1) %0.(#0) %4.(#0)
+| |   delta %1 %2.(#2) %3.(#0, #1) %0.(#0) %4.(#0) %5.(#0)
 | |   delta %2 %3.(#0, #1) %0.(#0) %1.(#0) %4.(#0) %5.(#0)
-| |   delta %3 %0.(#0) %1.(#0) %5.(#0) %2.(#1, #2) %4.(#0)
+| |   delta %3 %2.(#1, #2) %0.(#0) %1.(#0) %4.(#0) %5.(#0)
 | |   delta %4 %2.(#0) %3.(#0, #1) %0.(#0) %1.(#0) %5.(#0)
 | |   delta %5 %1.(#3) %2.(#2) %3.(#0, #1) %0.(#0) %4.(#0)
 | Filter "%green%" ~~(varchar_to_text(#1))
@@ -822,8 +829,8 @@ ORDER BY
 %4 =
 | Join %0 %1 %2 %3 (= #0 #9) (= #3 #33) (= #8 #17)
 | | implementation = DeltaQuery
-| |   delta %0 %3.(#0) %1.(#1) %2.(#0)
-| |   delta %1 %0.(#0) %3.(#0) %2.(#0)
+| |   delta %0 %1.(#1) %2.(#0) %3.(#0)
+| |   delta %1 %2.(#0) %0.(#0) %3.(#0)
 | |   delta %2 %1.(#0) %0.(#0) %3.(#0)
 | |   delta %3 %0.(#3) %1.(#1) %2.(#0)
 | Filter (#25 = "R"), (#12 < 1994-01-01), (#12 >= 1993-10-01), (date_to_timestamp(#12) < 1994-01-01 00:00:00)
@@ -1013,19 +1020,27 @@ ORDER BY
 | Get %2 (l0)
 | Project (#0..=#7)
 | Distinct group=(#0, #1, #2, #3, #4, #5, #6, #7)
-| Project (#0)
 | Negate
 
 %5 =
 | Get materialize.public.customer (u10)
-| Project (#0)
+| Distinct group=(#0, #1, #2, #3, #4, #5, #6, #7)
 
 %6 =
 | Union %4 %5
-| Map null
+| ArrangeBy (#0, #1, #2, #3, #4, #5, #6, #7)
 
 %7 =
-| Union %3 %6
+| Get materialize.public.customer (u10)
+
+%8 =
+| Join %6 %7 (= #0 #8) (= #1 #9) (= #2 #10) (= #3 #11) (= #4 #12) (= #5 #13) (= #6 #14) (= #7 #15)
+| | implementation = Differential %7 %6.(#0, #1, #2, #3, #4, #5, #6, #7)
+| Map null
+| Project (#0, #16)
+
+%9 =
+| Union %3 %8
 | Reduce group=(#0)
 | | agg count(#1)
 | Project (#1)
@@ -1151,7 +1166,7 @@ ORDER BY
 
 %4 =
 | Join %1 %2 %3 (= #0 #7) (= #8 #9)
-| | implementation = Differential %2.(#0) %1.(#0) %3.(#0)
+| | implementation = Differential %1.(#0) %2.(#0) %3.(#0)
 | Project (#0..=#2, #4, #8)
 
 Finish order_by=(#0 asc nulls_last) limit=none offset=0 project=(#0..=#4)
@@ -1222,19 +1237,19 @@ ORDER BY
 
 %5 =
 | Get %3 (l1)
-| ArrangeBy (#0)
+| ArrangeBy ()
 
 %6 =
 | Get materialize.public.supplier (u5)
-| ArrangeBy (#0)
+| Filter "%Customer%Complaints%" ~~(varchar_to_text(#6))
+| Project (#0)
 
 %7 =
-| Join %5 %6 (= #0 #1)
-| | implementation = DeltaQuery
-| |   delta %5 %6.(#0)
-| |   delta %6 %5.(#0)
-| Filter "%Customer%Complaints%" ~~(varchar_to_text(#7))
+| Join %5 %6
+| | implementation = Differential %6 %5.()
+| Filter ((#1) IS NULL OR (#0 = #1))
 | Project (#0)
+| Distinct group=(#0)
 | Negate
 
 %8 =
@@ -1551,6 +1566,7 @@ ORDER BY
 %3 =
 | Get %2 (l0)
 | Project (#0)
+| Distinct group=(#0)
 | ArrangeBy ()
 
 %4 =
@@ -1559,12 +1575,14 @@ ORDER BY
 
 %5 =
 | Get materialize.public.part (u4)
+| Filter (#0) IS NOT NULL, "forest%" ~~(varchar_to_text(#1))
+| Project (#0)
+| Distinct group=(#0)
 | ArrangeBy (#0)
 
 %6 = Let l1 =
 | Join %3 %4 %5 (= #1 #6)
 | | implementation = Differential %4.(#0) %5.(#0) %3.()
-| Filter "forest%" ~~(varchar_to_text(#7))
 | Project (#0..=#3)
 
 %7 =
@@ -1810,29 +1828,36 @@ ORDER BY
 %4 = Let l2 =
 | Get %3 (l1)
 | Project (#0)
+| Distinct group=(#0)
 
 %5 =
 | Get %3 (l1)
 | ArrangeBy (#0)
 
 %6 =
+| Get %4 (l2)
+| ArrangeBy (#0)
+
+%7 =
 | Get materialize.public.orders (u12)
 | Project (#1)
 | Distinct group=(#0)
 | ArrangeBy (#0)
 
-%7 =
-| Join %4 %6 (= #0 #1)
-| | implementation = Differential %4 %6.(#0)
+%8 =
+| Join %6 %7 (= #0 #1)
+| | implementation = DeltaQuery
+| |   delta %6 %7.(#0)
+| |   delta %7 %6.(#0)
 | Project (#0)
 | Negate
 
-%8 =
-| Union %7 %4
-
 %9 =
-| Join %5 %8 (= #0 #3)
-| | implementation = Differential %8 %5.(#0)
+| Union %8 %4
+
+%10 =
+| Join %5 %9 (= #0 #3)
+| | implementation = Differential %9 %5.(#0)
 | Project (#1, #2)
 | Reduce group=(substr(char_to_text(#0), 1, 2))
 | | agg count(true)
