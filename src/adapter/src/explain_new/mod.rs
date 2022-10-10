@@ -20,7 +20,7 @@ use std::collections::HashMap;
 use std::fmt;
 
 use mz_expr::explain::Indices;
-use mz_expr::{MapFilterProject, RowSetFinishing};
+use mz_expr::{MapFilterProject, MirScalarExpr, RowSetFinishing};
 use mz_ore::str::{Indent, IndentLike};
 use mz_repr::explain_new::{
     separated_text, DisplayJson, DisplayText, ExplainConfig, ExprHumanizer, RenderingContext,
@@ -113,13 +113,15 @@ impl fmt::Display for Attributes {
 }
 
 /// A set of indexes that are used in the physical plan
-/// derived  from a plan wrapped in an [`ExplainSinglePlan`]
+/// derived from a plan wrapped in an [`ExplainSinglePlan`]
 /// or an [`ExplainMultiPlan`].
+/// The `Vec<MirScalarExpr>` is the key that will be used to access the index.
+/// The `bool` indicates whether the index will be scanned.
 #[derive(Debug)]
-pub(crate) struct UsedIndexes(Vec<GlobalId>);
+pub(crate) struct UsedIndexes(Vec<(GlobalId, Vec<MirScalarExpr>, bool)>);
 
 impl UsedIndexes {
-    pub(crate) fn new(values: Vec<GlobalId>) -> UsedIndexes {
+    pub(crate) fn new(values: Vec<(GlobalId, Vec<MirScalarExpr>, bool)>) -> UsedIndexes {
         UsedIndexes(values)
     }
 
@@ -135,12 +137,16 @@ where
     fn fmt_text(&self, f: &mut fmt::Formatter<'_>, ctx: &mut C) -> fmt::Result {
         writeln!(f, "{}Used Indexes:", ctx.as_mut())?;
         *ctx.as_mut() += 1;
-        for id in &self.0 {
+        for (id, key) in &self.0 {
             let index_name = ctx
                 .as_ref()
                 .humanize_id(*id)
                 .unwrap_or_else(|| id.to_string());
-            writeln!(f, "{}- {}", ctx.as_mut(), index_name)?;
+            let key = match key {
+                Some(key) => "",
+                None => " (scan)"
+            };
+            writeln!(f, "{}- {}{}", ctx.as_mut(), index_name, key)?;
         }
         *ctx.as_mut() -= 1;
         Ok(())
