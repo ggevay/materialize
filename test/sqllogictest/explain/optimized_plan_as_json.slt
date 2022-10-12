@@ -1495,13 +1495,15 @@ SELECT * FROM t WHERE EXISTS(SELECT * FROM mv WHERE t.a < mv.a) AND EXISTS(SELEC
                                           {
                                             "literal_equality": false,
                                             "like": false,
-                                            "literal_inequality": false,
+                                            "is_null": false,
+                                            "literal_inequality": 0,
                                             "any_filter": false
                                           },
                                           {
                                             "literal_equality": false,
                                             "like": false,
-                                            "literal_inequality": false,
+                                            "is_null": false,
+                                            "literal_inequality": 0,
                                             "any_filter": false
                                           }
                                         ]
@@ -1585,13 +1587,15 @@ SELECT * FROM t WHERE EXISTS(SELECT * FROM mv WHERE t.a < mv.a) AND EXISTS(SELEC
                     {
                       "literal_equality": false,
                       "like": false,
-                      "literal_inequality": false,
+                      "is_null": false,
+                      "literal_inequality": 0,
                       "any_filter": false
                     },
                     {
                       "literal_equality": false,
                       "like": false,
-                      "literal_inequality": false,
+                      "is_null": false,
+                      "literal_inequality": 0,
                       "any_filter": false
                     }
                   ]
@@ -1734,13 +1738,15 @@ SELECT * FROM t WHERE EXISTS(SELECT * FROM mv WHERE t.a < mv.a) AND EXISTS(SELEC
                                           {
                                             "literal_equality": false,
                                             "like": false,
-                                            "literal_inequality": false,
+                                            "is_null": false,
+                                            "literal_inequality": 0,
                                             "any_filter": false
                                           },
                                           {
                                             "literal_equality": false,
                                             "like": false,
-                                            "literal_inequality": false,
+                                            "is_null": false,
+                                            "literal_inequality": 0,
                                             "any_filter": false
                                           }
                                         ]
@@ -1818,13 +1824,15 @@ SELECT * FROM t WHERE EXISTS(SELECT * FROM mv WHERE t.a < mv.a) AND EXISTS(SELEC
                     {
                       "literal_equality": false,
                       "like": false,
-                      "literal_inequality": false,
+                      "is_null": false,
+                      "literal_inequality": 0,
                       "any_filter": false
                     },
                     {
                       "literal_equality": false,
                       "like": false,
-                      "literal_inequality": false,
+                      "is_null": false,
+                      "literal_inequality": 0,
                       "any_filter": false
                     }
                   ]
@@ -2071,13 +2079,15 @@ SELECT (SELECT iv.a FROM iv WHERE iv.b = t.b LIMIT 1), (SELECT mv.a FROM mv WHER
                                     {
                                       "literal_equality": false,
                                       "like": false,
-                                      "literal_inequality": false,
+                                      "is_null": false,
+                                      "literal_inequality": 0,
                                       "any_filter": false
                                     },
                                     {
                                       "literal_equality": false,
                                       "like": false,
-                                      "literal_inequality": false,
+                                      "is_null": false,
+                                      "literal_inequality": 0,
                                       "any_filter": false
                                     }
                                   ]
@@ -2206,13 +2216,15 @@ SELECT (SELECT iv.a FROM iv WHERE iv.b = t.b LIMIT 1), (SELECT mv.a FROM mv WHER
                                         {
                                           "literal_equality": false,
                                           "like": false,
-                                          "literal_inequality": false,
+                                          "is_null": false,
+                                          "literal_inequality": 0,
                                           "any_filter": false
                                         },
                                         {
                                           "literal_equality": false,
                                           "like": false,
-                                          "literal_inequality": false,
+                                          "is_null": false,
+                                          "literal_inequality": 0,
                                           "any_filter": false
                                         }
                                       ]
@@ -2544,19 +2556,22 @@ SELECT (SELECT iv.a FROM iv WHERE iv.b = t.b LIMIT 1), (SELECT mv.a FROM mv WHER
                                     {
                                       "literal_equality": false,
                                       "like": false,
-                                      "literal_inequality": false,
+                                      "is_null": false,
+                                      "literal_inequality": 0,
                                       "any_filter": false
                                     },
                                     {
                                       "literal_equality": false,
                                       "like": false,
-                                      "literal_inequality": false,
+                                      "is_null": false,
+                                      "literal_inequality": 0,
                                       "any_filter": false
                                     },
                                     {
                                       "literal_equality": false,
                                       "like": false,
-                                      "literal_inequality": false,
+                                      "is_null": false,
+                                      "literal_inequality": 0,
                                       "any_filter": false
                                     }
                                   ]
@@ -2831,19 +2846,22 @@ RIGHT JOIN t as t3 ON t2.b = t3.b
                             {
                               "literal_equality": false,
                               "like": false,
-                              "literal_inequality": false,
+                              "is_null": false,
+                              "literal_inequality": 0,
                               "any_filter": false
                             },
                             {
                               "literal_equality": false,
                               "like": false,
-                              "literal_inequality": false,
+                              "is_null": false,
+                              "literal_inequality": 0,
                               "any_filter": false
                             },
                             {
                               "literal_equality": false,
                               "like": false,
-                              "literal_inequality": false,
+                              "is_null": false,
+                              "literal_inequality": 0,
                               "any_filter": false
                             }
                           ]
@@ -2985,13 +3003,15 @@ RIGHT JOIN t as t3 ON t2.b = t3.b
                                             {
                                               "literal_equality": false,
                                               "like": false,
-                                              "literal_inequality": false,
+                                              "is_null": false,
+                                              "literal_inequality": 0,
                                               "any_filter": false
                                             },
                                             {
                                               "literal_equality": false,
                                               "like": false,
-                                              "literal_inequality": false,
+                                              "is_null": false,
+                                              "literal_inequality": 0,
                                               "any_filter": false
                                             }
                                           ]
@@ -3295,13 +3315,15 @@ FROM
                                           {
                                             "literal_equality": false,
                                             "like": false,
-                                            "literal_inequality": false,
+                                            "is_null": false,
+                                            "literal_inequality": 0,
                                             "any_filter": false
                                           },
                                           {
                                             "literal_equality": false,
                                             "like": false,
-                                            "literal_inequality": false,
+                                            "is_null": false,
+                                            "literal_inequality": 0,
                                             "any_filter": false
                                           }
                                         ]
@@ -3381,13 +3403,15 @@ FROM
                             {
                               "literal_equality": false,
                               "like": false,
-                              "literal_inequality": false,
+                              "is_null": false,
+                              "literal_inequality": 0,
                               "any_filter": false
                             },
                             {
                               "literal_equality": false,
                               "like": false,
-                              "literal_inequality": false,
+                              "is_null": false,
+                              "literal_inequality": 0,
                               "any_filter": true
                             }
                           ]
@@ -3539,13 +3563,15 @@ FROM
                                           {
                                             "literal_equality": false,
                                             "like": false,
-                                            "literal_inequality": false,
+                                            "is_null": false,
+                                            "literal_inequality": 0,
                                             "any_filter": false
                                           },
                                           {
                                             "literal_equality": false,
                                             "like": false,
-                                            "literal_inequality": false,
+                                            "is_null": false,
+                                            "literal_inequality": 0,
                                             "any_filter": false
                                           }
                                         ]
@@ -3619,13 +3645,15 @@ FROM
                             {
                               "literal_equality": false,
                               "like": false,
-                              "literal_inequality": false,
+                              "is_null": false,
+                              "literal_inequality": 0,
                               "any_filter": false
                             },
                             {
                               "literal_equality": false,
                               "like": false,
-                              "literal_inequality": false,
+                              "is_null": true,
+                              "literal_inequality": 0,
                               "any_filter": false
                             }
                           ]
@@ -3808,13 +3836,15 @@ SELECT t1.a, t2.a FROM t as t1, t as t2
                 {
                   "literal_equality": false,
                   "like": false,
-                  "literal_inequality": false,
+                  "is_null": false,
+                  "literal_inequality": 0,
                   "any_filter": false
                 },
                 {
                   "literal_equality": false,
                   "like": false,
-                  "literal_inequality": false,
+                  "is_null": false,
+                  "literal_inequality": 0,
                   "any_filter": false
                 }
               ]
@@ -4040,19 +4070,22 @@ WHERE t1.b = t2.b AND t2.b = t3.b
                         {
                           "literal_equality": false,
                           "like": false,
-                          "literal_inequality": false,
+                          "is_null": false,
+                          "literal_inequality": 0,
                           "any_filter": false
                         },
                         {
                           "literal_equality": false,
                           "like": false,
-                          "literal_inequality": false,
+                          "is_null": false,
+                          "literal_inequality": 0,
                           "any_filter": false
                         },
                         {
                           "literal_equality": false,
                           "like": false,
-                          "literal_inequality": false,
+                          "is_null": false,
+                          "literal_inequality": 0,
                           "any_filter": false
                         }
                       ]
@@ -4309,19 +4342,22 @@ WHERE a = c and d = e and b = f
                     {
                       "literal_equality": false,
                       "like": false,
-                      "literal_inequality": false,
+                      "is_null": false,
+                      "literal_inequality": 0,
                       "any_filter": false
                     },
                     {
                       "literal_equality": false,
                       "like": false,
-                      "literal_inequality": false,
+                      "is_null": false,
+                      "literal_inequality": 0,
                       "any_filter": false
                     },
                     {
                       "literal_equality": false,
                       "like": false,
-                      "literal_inequality": false,
+                      "is_null": false,
+                      "literal_inequality": 0,
                       "any_filter": false
                     }
                   ]
@@ -4572,19 +4608,22 @@ WHERE b = c and d = e
                     {
                       "literal_equality": false,
                       "like": false,
-                      "literal_inequality": false,
+                      "is_null": false,
+                      "literal_inequality": 0,
                       "any_filter": false
                     },
                     {
                       "literal_equality": false,
                       "like": false,
-                      "literal_inequality": false,
+                      "is_null": false,
+                      "literal_inequality": 0,
                       "any_filter": false
                     },
                     {
                       "literal_equality": false,
                       "like": false,
-                      "literal_inequality": false,
+                      "is_null": false,
+                      "literal_inequality": 0,
                       "any_filter": false
                     }
                   ]

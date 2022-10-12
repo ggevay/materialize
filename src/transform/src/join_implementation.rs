@@ -24,7 +24,7 @@ use mz_expr::{
     FilterCharacteristics, JoinInputMapper, MapFilterProject, MirRelationExpr, MirScalarExpr,
     RECURSION_LIMIT,
 };
-use mz_ore::stack::{CheckedRecursion, RecursionGuard};
+use mz_ore::stack::{CheckedRecursion, RecursionGuard, RecursionLimitError};
 
 use self::index_map::IndexMap;
 use crate::{TransformArgs, TransformError};
@@ -62,7 +62,7 @@ impl crate::Transform for JoinImplementation {
         &self,
         relation: &mut MirRelationExpr,
         args: TransformArgs,
-    ) -> Result<(), crate::TransformError> {
+    ) -> Result<(), TransformError> {
         let result = self.action_recursive(relation, &mut IndexMap::new(args.indexes));
         mz_repr::explain_new::trace_plan(&*relation);
         result
@@ -78,7 +78,7 @@ impl JoinImplementation {
         &self,
         relation: &mut MirRelationExpr,
         indexes: &mut IndexMap,
-    ) -> Result<(), crate::TransformError> {
+    ) -> Result<(), TransformError> {
         if let MirRelationExpr::Let { id, value, body } = relation {
             self.action_recursive(value, indexes)?;
             match &**value {
@@ -100,13 +100,13 @@ impl JoinImplementation {
             Ok(())
         } else {
             relation.try_visit_mut_children(|e| self.action_recursive(e, indexes))?;
-            self.action(relation, indexes);
+            self.action(relation, indexes)?;
             Ok(())
         }
     }
 
     /// Determines the join implementation for join operators.
-    pub fn action(&self, relation: &mut MirRelationExpr, indexes: &IndexMap) {
+    pub fn action(&self, relation: &mut MirRelationExpr, indexes: &IndexMap) -> Result<(), RecursionLimitError> {
         if let MirRelationExpr::Join {
             inputs,
             equivalences,
@@ -129,10 +129,20 @@ impl JoinImplementation {
                 // The first fundamental question is whether we should employ a delta query or not.
                 //
                 // Here we conservatively use the rule that if sufficient arrangements exist we will
-                // use a delta query. An arrangement is considered available if it is a global `Get`
-                // with columns present in `indexes`, if it is an `ArrangeBy` with the columns present,
-                // if it is a filter wrapped around either of these, or a `Reduce` whose output is
-                // arranged the right way.
+                // use a delta query. An arrangement is considered available
+                // - if it is a global `Get` with columns present in `indexes`,
+                //   - or the same wrapped by an IndexedFilter,
+                // - if it is an `ArrangeBy` with the columns present,
+                // - if it is a `Reduce` whose output is arranged the right way,
+                // - if it is a filter wrapped around either of these (see the mfp extraction).
+                //
+                // The `IndexedFilter` case above is to avoid losing some Delta joins
+                // due to `IndexedFilter` on a join input. This means that in the absolute worst
+                // case (when the `IndexedFilter` doesn't filter out anything), we will fully
+                // re-create some arrangements that we already have for that input. This worst case
+                // is still much better than what can happen if we lose a Delta join: Differential
+                // joins will create several arrangements that doesn't even have a size bound, i.e.,
+                // they might be much larger than any user-created index.
 
                 let unique_keys = input_types
                     .into_iter()
@@ -146,9 +156,13 @@ impl JoinImplementation {
                     let (_, filter, project) = mfp.as_map_filter_project();
                     // Extract filter characteristics and store in `input_filters` if not yet stored.
                     if fill_input_filters {
-                        input_filters.push(FilterCharacteristics::filter_characteristics(&filter));
+                        let mut characteristics = FilterCharacteristics::filter_characteristics(&filter)?;
+                        if matches!(input, MirRelationExpr::Join {implementation: IndexedFilter(..), ..}) {
+                            characteristics.add_literal_equality();
+                        }
+                        input_filters.push(characteristics);
                     }
-                    // Get and ArrangeBy expressions contribute arrangements.
+                    // Collect available arrangements on this input.
                     match input {
                         MirRelationExpr::Get { id, typ: _ } => {
                             available_arrangements[index]
@@ -166,6 +180,11 @@ impl JoinImplementation {
                             // The first `keys.len()` columns form an arrangement key.
                             available_arrangements[index]
                                 .push((0..group_key.len()).map(MirScalarExpr::Column).collect());
+                        }
+                        MirRelationExpr::Join { implementation: IndexedFilter(..), .. } => {
+                            let (get_id, _) = input.input_of_indexed_filter();
+                            available_arrangements[index]
+                                .extend(indexes.get(get_id).map(|key| key.to_vec()));
                         }
                         _ => {}
                     }
@@ -225,6 +244,7 @@ impl JoinImplementation {
                     .expect("Failed to produce a join plan");
             }
         }
+        Ok(())
     }
 }
 

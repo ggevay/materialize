@@ -569,8 +569,10 @@ WHERE
 EOF
 
 # IndexedFilter before a join.
-# (CanonicalizeMfp has to run before JoinImplementation. Otherwise, JoinImplementation lifts the predicate, and then
-# CanonicalizeMfp can't create an IndexedFilter from the predicate anymore, because it's not on top of a Get.)
+# - CanonicalizeMfp has to run before JoinImplementation. Otherwise, JoinImplementation lifts the predicate, and then
+#   CanonicalizeMfp can't create an IndexedFilter from the predicate anymore, because it's not on top of a Get.
+# - This should be a Delta join! To ensure this, we have to look behind the IndexedFilter when collecting the available
+#   arrangements on the join inputs.
 
 query T multiline
 EXPLAIN SELECT t1.a, t1.b, t2.c FROM t1, t2
@@ -588,17 +590,19 @@ WHERE
 %2 =
 | Join %0 %1 (= #1 #2)
 | | implementation = IndexedFilter (#1 = "l2") OR (#1 = "l3")
-| Filter (#0) IS NOT NULL
-| Project (#0, #1)
+| ArrangeBy (#0)
 
 %3 =
 | Get materialize.public.t2 (u4)
 | ArrangeBy (#0)
 
 %4 =
-| Join %2 %3 (= #0 #2)
-| | implementation = Differential %2 %3.(#0)
-| Project (#0, #1, #4)
+| Join %2 %3 (= #0 #3)
+| | implementation = DeltaQuery
+| |   delta %2 %3.(#0)
+| |   delta %3 %2.(#0)
+| Filter (#0) IS NOT NULL
+| Project (#0, #1, #5)
 
 EOF
 
@@ -611,7 +615,7 @@ WHERE
 2  l2  32
 3  l3  33
 
-# This is the same as the previous query, but it also tests that ColumnKnowledge and LiteralLifting don't mess up
+# This is similar to the previous query, but it also tests that ColumnKnowledge and LiteralLifting don't mess up
 # the IndexedFilter join.
 
 query T multiline
@@ -630,17 +634,19 @@ WHERE
 %2 =
 | Join %0 %1 (= #1 #2)
 | | implementation = IndexedFilter (#1 = "l2")
-| Filter (#0) IS NOT NULL
-| Project (#0, #1)
+| ArrangeBy (#0)
 
 %3 =
 | Get materialize.public.t2 (u4)
 | ArrangeBy (#0)
 
 %4 =
-| Join %2 %3 (= #0 #2)
-| | implementation = Differential %2 %3.(#0)
-| Project (#0, #1, #4)
+| Join %2 %3 (= #0 #3)
+| | implementation = DeltaQuery
+| |   delta %2 %3.(#0)
+| |   delta %3 %2.(#0)
+| Filter (#0) IS NOT NULL
+| Project (#0, #1, #5)
 
 EOF
 

@@ -282,7 +282,6 @@ EXPLAIN SELECT *
 | Join %1 %2 (= #1 #4)
 | | implementation = IndexedFilter (#1 = 229)
 | Project (#0..=#3)
-| ArrangeBy ()
 
 %4 =
 | Get materialize.public.customer (u4)
@@ -295,10 +294,11 @@ EXPLAIN SELECT *
 | Join %4 %5 (= #0 #3)
 | | implementation = IndexedFilter (#0 = 229)
 | Project (#0..=#2)
+| ArrangeBy ()
 
 %7 =
 | Join %0 %3 %6 (= #4 #10) (= #5 #11)
-| | implementation = Differential %6 %3.() %0.(#4, #5)
+| | implementation = Differential %3 %0.(#4, #5) %6.()
 | Project (#0..=#9, #4, #5, #12..=#14)
 
 EOF

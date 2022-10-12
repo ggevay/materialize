@@ -704,9 +704,7 @@ GROUP BY 1
 ----
 %0 =
 | Get materialize.public.lineitem (u7)
-| Filter (#10 <= 1994-03-17), (#0 >= 53)
-| Project (#0, #5)
-| ArrangeBy ()
+| ArrangeBy (#0)
 
 %1 =
 | Get materialize.public.orders (u4)
@@ -715,12 +713,13 @@ GROUP BY 1
 %2 =
 | Get materialize.public.customer (u1)
 | Project (#0, #5)
+| ArrangeBy ()
 
 %3 =
-| Join %0 %1 %2 (= #0 #2)
-| | implementation = Differential %2 %0.() %1.(#0)
-| Filter (#0 >= 53), (#1 < #5), (#12 < #5)
-| Project (#11)
+| Join %0 %1 %2 (= #0 #16)
+| | implementation = Differential %1.(#0) %0.(#0) %2.()
+| Filter (#10 <= 1994-03-17), (#0 >= 53), (#5 < #19), (#26 < #19)
+| Project (#25)
 | Reduce group=(#0)
 | | agg count(true)
 | | agg count(distinct #0)

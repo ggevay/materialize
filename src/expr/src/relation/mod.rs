@@ -37,6 +37,7 @@ use crate::{
     func as scalar_func, EvalError, FilterCharacteristics, Id, LocalId, MirScalarExpr, UnaryFunc,
     VariadicFunc,
 };
+use crate::JoinImplementation::IndexedFilter;
 
 use self::func::{AggregateFunc, LagLeadType, TableFunc};
 
@@ -1436,6 +1437,27 @@ impl MirRelationExpr {
         }
         dfs(self, &mut size, &mut max_depth, 1);
         (size, max_depth)
+    }
+
+    /// Gets the id and type of the Get that is the input of an IndexedFilter.
+    /// Should be called only on an IndexedFilter!
+    pub fn input_of_indexed_filter(&self) -> (Id, RelationType) {
+        match self {
+            MirRelationExpr::Join { inputs, implementation: IndexedFilter(..), .. } => {
+                match &inputs[0] {
+                    MirRelationExpr::ArrangeBy {input: arr_in , ..} => {
+                        match &**arr_in {
+                            MirRelationExpr::Get { id, typ } => {
+                                (id.clone(), typ.clone())
+                            }
+                            _ => unreachable!() // We put IndexedFilter only directly on Gets (+ArrangeBy)
+                        }
+                    }
+                    _ => unreachable!() // input[0] of an IndexedFilter is always an ArrangeBy
+                }
+            }
+            _ => unreachable!() // We are called only on IndexedFilters
+        }
     }
 }
 

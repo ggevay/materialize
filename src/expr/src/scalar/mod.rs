@@ -1822,16 +1822,25 @@ impl VisitChildren<Self> for MirScalarExpr {
 }
 
 /// Filter characteristics that are used for ordering join inputs.
+/// This is associated with a `Vec<MirScalarExpr>`, which represents an AND of the predicates.
 ///
-/// The fields should be ordered decreasing by typical selectivity, so that Ord gives the right
-/// ordering for join inputs.
+/// The fields should be ordered by typical selectivity, so that Ord gives the right
+/// ordering for join inputs. Bigger is better, i.e., will tend to come to the front of the inputs.
 #[derive(Eq, PartialEq, Ord, PartialOrd, Debug, Clone, Serialize, Deserialize, Hash, MzReflect)]
 pub struct FilterCharacteristics {
     literal_equality: bool,
+    // (Assuming a random string of lower-case characters, `LIKE 'a%'` has a selectivity of 1/26.)
     like: bool,
-    literal_inequality: bool,
-    /// Any filter, except ones involving IsNull, because those are too common.
+    is_null: bool,
+    // Number of Vec elements that involve inequality predicates.
+    // A BETWEEN is represented as two inequality predicates.
+    // (For inequality predicates, some databases assume 1/3 selectivity in the absence of statistics.)
+    literal_inequality: usize,
+    /// Any filter, except ones involving `IS NOT NULL`, because those are too common.
     /// Can be true by itself, or any other field being true also makes this true.
+    /// `NOT LIKE` is only in this category.
+    /// `!=` is only in this category.
+    /// `NOT (a = b)` is turned into `!=` by `reduce` before us!
     any_filter: bool,
 }
 
@@ -1839,7 +1848,8 @@ impl BitOrAssign for FilterCharacteristics {
     fn bitor_assign(&mut self, rhs: Self) {
         self.literal_equality |= rhs.literal_equality;
         self.like |= rhs.like;
-        self.literal_inequality |= rhs.literal_inequality;
+        self.is_null |= rhs.is_null;
+        self.literal_inequality += rhs.literal_inequality;
         self.any_filter |= rhs.any_filter;
     }
 }
@@ -1849,61 +1859,85 @@ impl FilterCharacteristics {
         FilterCharacteristics {
             literal_equality: false,
             like: false,
-            literal_inequality: false,
+            is_null: false,
+            literal_inequality: 0,
             any_filter: false,
         }
     }
 
-    pub fn filter_characteristics(filters: &Vec<MirScalarExpr>) -> FilterCharacteristics {
+    pub fn filter_characteristics(filters: &Vec<MirScalarExpr>) -> Result<FilterCharacteristics, RecursionLimitError> {
         let mut literal_equality = false;
-        let mut literal_inequality = false;
         let mut like = false;
-        #[allow(deprecated)]
-        filters.iter().for_each(|f| {
-            f.visit_post_nolimit(&mut |e| {
-                if e.any_expr_eq_literal().is_some() {
-                    literal_equality = true;
-                }
-                if e.any_expr_ineq_literal() {
-                    literal_inequality = true;
-                }
-                if matches!(
-                    e,
-                    MirScalarExpr::CallUnary {
-                        func: UnaryFunc::IsLikeMatch(_),
-                        ..
-                    }
-                ) {
-                    like = true;
-                }
-            })
-        });
-        let any_filter = filters
-            .iter()
-            .filter(|f| {
-                let mut mentions_is_null = false;
-                #[allow(deprecated)]
-                f.visit_post_nolimit(&mut |e| {
+        let mut is_null = false;
+        let mut literal_inequality = 0;
+        let mut any_filter = false;
+        filters.iter().try_for_each(|f| {
+            let mut literal_inequality_in_current_filter = false;
+            let mut is_not_null_in_current_filter = false;
+            f.visit_pre_with_context(
+                false,
+                &mut |not_in_parent_chain, expr| {
+                    not_in_parent_chain || matches!(
+                        expr,
+                        MirScalarExpr::CallUnary {
+                            func: UnaryFunc::Not(func::Not),
+                            ..
+                        }
+                    )
+                },
+                &mut |not_in_parent_chain, expr| {
+                    if !not_in_parent_chain {
+                        if expr.any_expr_eq_literal().is_some() {
+                            literal_equality = true;
+                        }
+                        if expr.any_expr_ineq_literal() {
+                            literal_inequality_in_current_filter = true;
+                        }
+                        if matches!(
+                            expr,
+                            MirScalarExpr::CallUnary {
+                                func: UnaryFunc::IsLikeMatch(_),
+                                ..
+                            }
+                        ) {
+                            like = true;
+                        }
+                    };
                     if matches!(
-                        e,
+                        expr,
                         MirScalarExpr::CallUnary {
                             func: UnaryFunc::IsNull(crate::func::IsNull),
                             ..
                         }
                     ) {
-                        mentions_is_null = true;
+                        if *not_in_parent_chain {
+                            is_not_null_in_current_filter = true;
+                        } else {
+                            is_null = true;
+                        }
                     }
-                });
-                !mentions_is_null
-            })
-            .next()
-            .is_some();
-        FilterCharacteristics {
+                },
+            )?;
+            if literal_inequality_in_current_filter {
+                literal_inequality += 1;
+            }
+            if !is_not_null_in_current_filter {
+                // We want to ignore `IS NOT NULL` for `any_filter`.
+                any_filter = true;
+            }
+            Ok(())
+        })?;
+        Ok(FilterCharacteristics {
             literal_equality,
             like,
+            is_null,
             literal_inequality,
             any_filter,
-        }
+        })
+    }
+
+    pub fn add_literal_equality(&mut self) {
+        self.literal_equality = true;
     }
 }
 
