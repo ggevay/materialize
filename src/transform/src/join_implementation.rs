@@ -24,10 +24,11 @@ use mz_expr::{
     FilterCharacteristics, JoinInputMapper, MapFilterProject, MirRelationExpr, MirScalarExpr,
     RECURSION_LIMIT,
 };
-use mz_ore::stack::{CheckedRecursion, RecursionGuard, RecursionLimitError};
+use mz_ore::stack::{CheckedRecursion, RecursionGuard};
 
 use self::index_map::IndexMap;
 use crate::{TransformArgs, TransformError};
+use crate::predicate_pushdown::PredicatePushdown;
 
 /// Determines the join implementation for join operators.
 #[derive(Debug)]
@@ -107,7 +108,7 @@ impl JoinImplementation {
     }
 
     /// Determines the join implementation for join operators.
-    pub fn action(&self, relation: &mut MirRelationExpr, mfp_above: MapFilterProject, indexes: &IndexMap) -> Result<(), RecursionLimitError> {
+    pub fn action(&self, relation: &mut MirRelationExpr, mfp_above: MapFilterProject, indexes: &IndexMap) -> Result<(), TransformError> {
         if let MirRelationExpr::Join {
             inputs,
             equivalences,
@@ -151,6 +152,14 @@ impl JoinImplementation {
                     .collect::<Vec<_>>();
                 let mut available_arrangements = vec![Vec::new(); inputs.len()];
                 let fill_input_filters = input_filters.is_empty();
+
+                //
+                let (map, mut filter, _) = mfp_above.as_map_filter_project();
+                let all_errors = filter.iter().all(|p| p.is_literal_err());
+                PredicatePushdown::push_filters_through_map(&map, &mut filter, mfp_above.input_arity, all_errors)?;
+                let (push_downs, _) = PredicatePushdown::push_filters_through_join(&input_mapper, equivalences, filter);
+                //
+
                 for index in 0..inputs.len() {
                     // We can work around mfps, as we can lift the mfps into the join execution.
                     let (mfp, input) = MapFilterProject::extract_non_errors_from_expr(&inputs[index]);
@@ -161,7 +170,12 @@ impl JoinImplementation {
                         if matches!(input, MirRelationExpr::Join {implementation: IndexedFilter(..), ..}) {
                             characteristics.add_literal_equality();
                         }
-                        input_filters.push(characteristics);
+                        input_filters.push(characteristics.clone());
+
+                        //
+                        let mut new_characteristics = FilterCharacteristics::filter_characteristics(&filter)?;
+                        new_characteristics |= FilterCharacteristics::filter_characteristics(&push_downs[index])?;
+                        assert_eq!(new_characteristics, characteristics);
                     }
                     // Collect available arrangements on this input.
                     match input {
