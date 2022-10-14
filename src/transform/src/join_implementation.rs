@@ -99,14 +99,15 @@ impl JoinImplementation {
             indexes.remove_local(*id);
             Ok(())
         } else {
-            relation.try_visit_mut_children(|e| self.action_recursive(e, indexes))?;
-            self.action(relation, indexes)?;
+            let (mfp, mfp_input) = MapFilterProject::extract_non_errors_from_expr_ref_mut(relation);
+            mfp_input.try_visit_mut_children(|e| self.action_recursive(e, indexes))?;
+            self.action(mfp_input, mfp, indexes)?;
             Ok(())
         }
     }
 
     /// Determines the join implementation for join operators.
-    pub fn action(&self, relation: &mut MirRelationExpr, indexes: &IndexMap) -> Result<(), RecursionLimitError> {
+    pub fn action(&self, relation: &mut MirRelationExpr, mfp_above: MapFilterProject, indexes: &IndexMap) -> Result<(), RecursionLimitError> {
         if let MirRelationExpr::Join {
             inputs,
             equivalences,
