@@ -1939,6 +1939,13 @@ impl FilterCharacteristics {
     pub fn add_literal_equality(&mut self) {
         self.literal_equality = true;
     }
+
+    pub fn assert_eq_except_literal_inequality(&self, o: &Self) {
+        assert_eq!(self.literal_equality, o.literal_equality);
+        assert_eq!(self.like, o.like);
+        assert_eq!(self.is_null, o.is_null);
+        assert_eq!(self.any_filter, o.any_filter);
+    }
 }
 
 #[derive(

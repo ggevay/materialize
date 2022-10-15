@@ -156,8 +156,9 @@ impl JoinImplementation {
                 //
                 let (map, mut filter, _) = mfp_above.as_map_filter_project();
                 let all_errors = filter.iter().all(|p| p.is_literal_err());
-                PredicatePushdown::push_filters_through_map(&map, &mut filter, mfp_above.input_arity, all_errors)?;
-                let (push_downs, _) = PredicatePushdown::push_filters_through_join(&input_mapper, equivalences, filter);
+                let (_, pushed_through_map) = PredicatePushdown::push_filters_through_map(&map, &mut filter, mfp_above.input_arity, all_errors)?;
+                let (push_downs, _) = PredicatePushdown::push_filters_through_join(&input_mapper, equivalences, pushed_through_map);
+                //todo: megforditani majd a push_filters_through_join return tuple sorrendjet hogy illeszkjedjen a masikhoz? (es vigyazni a doc kommentre is)
                 //
 
                 for index in 0..inputs.len() {
@@ -170,13 +171,37 @@ impl JoinImplementation {
                         if matches!(input, MirRelationExpr::Join {implementation: IndexedFilter(..), ..}) {
                             characteristics.add_literal_equality();
                         }
-                        input_filters.push(characteristics.clone());
 
                         //
-                        let mut new_characteristics = FilterCharacteristics::filter_characteristics(&filter)?;
-                        new_characteristics |= FilterCharacteristics::filter_characteristics(&push_downs[index])?;
-                        assert_eq!(new_characteristics, characteristics);
+                        characteristics |= FilterCharacteristics::filter_characteristics(&push_downs[index])?;
+                        //
+
+                        input_filters.push(characteristics);
                     }
+
+                    if !fill_input_filters {
+                        let mut new_characteristics = FilterCharacteristics::filter_characteristics(&filter)?;
+                        if matches!(input, MirRelationExpr::Join {implementation: IndexedFilter(..), ..}) {
+                            new_characteristics.add_literal_equality();
+                        }
+
+                        if let MirRelationExpr::ArrangeBy {input: arrange_by_input, ..} = input {
+                            let (mfp, input) = MapFilterProject::extract_non_errors_from_expr(arrange_by_input);
+                            let (_, filter, _) = mfp.as_map_filter_project();
+                            new_characteristics |= FilterCharacteristics::filter_characteristics(&filter)?;
+                            if matches!(input, MirRelationExpr::Join {implementation: IndexedFilter(..), ..}) {
+                                new_characteristics.add_literal_equality();
+                            }
+                        }
+
+                        new_characteristics |= FilterCharacteristics::filter_characteristics(&push_downs[index])?;
+                        //println!("characteristics: {:?}, new_characteristics: {:?}", characteristics, new_characteristics);
+                        //todo: lehet, hogy a predicate duplication miatt is failelhet ugy, hogy nem gond a fail? (azaz a literal_inequality szamaban)
+                        println!("index: {}", index);
+                        assert_eq!(input_filters[index], new_characteristics);
+                        //input_filters[index].assert_eq_except_literal_inequality(&new_characteristics);
+                    }
+
                     // Collect available arrangements on this input.
                     match input {
                         MirRelationExpr::Get { id, typ: _ } => {
