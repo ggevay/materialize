@@ -212,6 +212,7 @@ impl<'a> Displayable<'a, MirRelationExpr> {
 
                 if ctx.config.join_impls {
                     let input_name = |pos: &usize| -> String {
+                        println!("{:?}", ctx.humanizer);
                         match &inputs[*pos] {
                             MirRelationExpr::Get { id, .. } => match id {
                                 Id::Local(id) => id.to_string(),
