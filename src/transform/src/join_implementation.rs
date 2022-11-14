@@ -539,14 +539,19 @@ mod differential {
                     .collect::<Vec<_>>()
             };
 
+            println!("inputs: {:?}", inputs);
             let (start, start_keys, _characteristics) = &order[0];
             let start = *start;
             let start_keys = if available[start].contains(start_keys) {
+                println!("available[start].contains(start_keys)");
                 Some(start_keys.clone())
             } else {
+                println!("! available[start].contains(start_keys)");
                 // if there is not already a pre-existing arrangement
                 // for the start input, do not implement one
+                println!("order before remove: {:?}", order);
                 order.remove(0);
+                println!("order after remove:  {:?}", order);
                 None
             };
 
@@ -596,6 +601,7 @@ fn implement_arrangements<'a>(
     // Transform inputs[index] based on needed and available arrangements.
     // Specifically, lift intervening mfps if all arrangements exist.
     for (index, needed) in needed.iter_mut().enumerate() {
+        println!("index: {}, needed: {:?}", index, needed);
         needed.sort();
         needed.dedup();
         // We should lift any mfps, iff all arrangements are otherwise available.

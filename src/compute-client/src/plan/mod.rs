@@ -1129,6 +1129,7 @@ impl<T: timely::progress::Timestamp> Plan<T> {
                     }
                     Differential((start, _start_arr), order) => {
                         let source_arrangement = input_keys[*start].arbitrary_arrangement();
+                        println!("arbitrary picked: {:?}", source_arrangement);
                         let (ljp, missing) = LinearJoinPlan::create_from(
                             *start,
                             source_arrangement,

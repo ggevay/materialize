@@ -192,8 +192,12 @@ impl LinearJoinPlan {
                 let mfp = mfp.into_plan().unwrap().into_nontemporal().unwrap();
                 (
                     if mfp.is_identity() {
+                        println!("######################## mfp.is_identity()");
                         None
                     } else {
+                        println!("######################## !mfp.is_identity()");
+                        println!("mfp: {}", mfp.to_string());
+                        println!();
                         Some(JoinClosure {
                             ready_equivalences: vec![],
                             before: mfp,
