@@ -370,7 +370,7 @@ impl<'a> ViewExplanation<'a> {
         implementation: &JoinImplementation,
     ) -> fmt::Result {
         match implementation {
-            JoinImplementation::Differential((pos, first_arr), inputs) => writeln!(
+            JoinImplementation::Differential((pos, first_arr, _start_characteristics), inputs) => writeln!(
                 f,
                 "Differential %{}{} {}",
                 self.expr_chain(&join_inputs[*pos]),

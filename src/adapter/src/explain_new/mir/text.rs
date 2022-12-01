@@ -263,6 +263,7 @@ impl<'a> Displayable<'a, MirRelationExpr> {
                     };
                     let join_order = |start_idx: usize,
                                       start_key: &Option<Vec<MirScalarExpr>>,
+                                      start_characteristics: &Option<JoinInputCharacteristics>,
                                       tail: &Vec<(
                         usize,
                         Vec<MirScalarExpr>,
@@ -270,12 +271,16 @@ impl<'a> Displayable<'a, MirRelationExpr> {
                     )>|
                      -> String {
                         format!(
-                            "{}{} » {}",
+                            "{}{}{} » {}",
                             input_name(start_idx),
                             match start_key {
                                 None => "".to_owned(),
                                 Some(key) => format!("[{}]", join_key_to_string(key)),
                             },
+                            start_characteristics
+                                            .as_ref()
+                                            .map(|c| c.explain())
+                                            .unwrap_or_else(|| "".to_string()),
                             separated(
                                 " » ",
                                 tail.iter().map(|(pos, key, characteristics)| {
@@ -294,7 +299,7 @@ impl<'a> Displayable<'a, MirRelationExpr> {
                     };
                     ctx.indented(|ctx| {
                         match implementation {
-                            JoinImplementation::Differential((start_idx, start_key), tail) => {
+                            JoinImplementation::Differential((start_idx, start_key, start_characteristics), tail) => {
                                 soft_assert!(inputs.len() == tail.len() + 1);
 
                                 writeln!(f, "{}implementation", ctx.indent)?;
@@ -303,7 +308,7 @@ impl<'a> Displayable<'a, MirRelationExpr> {
                                         f,
                                         "{}{}",
                                         ctx.indent,
-                                        join_order(*start_idx, start_key, tail)
+                                        join_order(*start_idx, start_key, start_characteristics, tail)
                                     )
                                 })?;
                             }
@@ -317,7 +322,7 @@ impl<'a> Displayable<'a, MirRelationExpr> {
                                             f,
                                             "{}{}",
                                             ctx.indent,
-                                            join_order(pos, &None, chain)
+                                            join_order(pos, &None, &None, chain)
                                         )?;
                                     }
                                     Ok(())
