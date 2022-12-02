@@ -455,7 +455,6 @@ mod delta_queries {
 
 mod differential {
     use crate::join_implementation::{FilterCharacteristics, JoinInputCharacteristics};
-    use itertools::Itertools;
     use mz_expr::{JoinImplementation, JoinInputMapper, MirRelationExpr, MirScalarExpr};
     use mz_ore::soft_assert;
 
@@ -588,10 +587,23 @@ mod differential {
                 order.remove(0);
             }
 
+            let start_keys_cloned = start_keys.clone();
+
             // Install the implementation.
             *implementation = JoinImplementation::Differential((start, start_keys, start_characteristics.clone()), order);
 
             super::install_lifted_mfp(&mut new_join, lifted_mfp)?;
+
+            if start_keys_cloned.is_some() && _start_keys != start_keys_cloned.as_ref().unwrap() {
+                println!();
+                println!("_start_keys != start_keys");
+                println!();
+                println!("_start_keys: {:?}", _start_keys);
+                println!("start_keys: {:?}", start_keys_cloned);
+                println!();
+                println!("new_join: {:?}", new_join);
+                println!();
+            }
 
             // Hooray done!
             Ok(new_join)
@@ -904,6 +916,18 @@ impl<'a> Orderer<'a> {
                             is_unique,
                             candidate_start_key.len(),
                             true,
+                            self.filters[start].clone(),
+                            start,
+                        ),
+                        candidate_start_key,
+                        start,
+                    );
+                } else {
+                    start_tuple = (
+                        JoinInputCharacteristics::new(
+                            false, //todo
+                            candidate_start_key.len(),
+                            false,
                             self.filters[start].clone(),
                             start,
                         ),
