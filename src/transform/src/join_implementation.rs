@@ -20,10 +20,7 @@ use std::collections::HashMap;
 
 use mz_expr::visit::{Visit, VisitChildren};
 use mz_expr::JoinImplementation::IndexedFilter;
-use mz_expr::{
-    FilterCharacteristics, Id, JoinInputCharacteristics, JoinInputMapper, MapFilterProject,
-    MirRelationExpr, MirScalarExpr, RECURSION_LIMIT,
-};
+use mz_expr::{FilterCharacteristics, Id, JoinInputCharacteristics, JoinInputMapper, LocalId, MapFilterProject, MirRelationExpr, MirScalarExpr, RECURSION_LIMIT};
 use mz_ore::stack::{CheckedRecursion, RecursionGuard};
 
 use self::index_map::IndexMap;
@@ -64,7 +61,7 @@ impl crate::Transform for JoinImplementation {
         relation: &mut MirRelationExpr,
         args: TransformArgs,
     ) -> Result<(), TransformError> {
-        let result = self.action_recursive(relation, &mut IndexMap::new(args.indexes));
+        let result = self.action_recursive(relation, &mut IndexMap::new(args.indexes), &mut HashMap::new());
         mz_repr::explain_new::trace_plan(&*relation);
         result
     }
@@ -79,9 +76,12 @@ impl JoinImplementation {
         &self,
         relation: &mut MirRelationExpr,
         indexes: &mut IndexMap,
+        filters_on_ctes: &mut HashMap<LocalId, FilterCharacteristics>,
     ) -> Result<(), TransformError> {
         if let MirRelationExpr::Let { id, value, body } = relation {
-            self.action_recursive(value, indexes)?;
+            self.action_recursive(value, indexes, filters_on_ctes)?;
+
+            // indexes
             match &**value {
                 MirRelationExpr::ArrangeBy { keys, .. } => {
                     for key in keys {
@@ -96,13 +96,21 @@ impl JoinImplementation {
                 }
                 _ => {}
             }
-            self.action_recursive(body, indexes)?;
+
+            // filters_on_ctes
+            let (mfp, input) =
+                MapFilterProject::extract_non_errors_from_expr(value);
+            let filter_characteristics = JoinImplementation::filter_characteristics(&mfp, input, filters_on_ctes)?;
+            filters_on_ctes.insert(*id, filter_characteristics);
+
+            self.action_recursive(body, indexes, filters_on_ctes)?;
             indexes.remove_local(*id);
+            filters_on_ctes.remove(id);
             Ok(())
         } else {
             let (mfp, mfp_input) = MapFilterProject::extract_non_errors_from_expr_ref_mut(relation);
-            mfp_input.try_visit_mut_children(|e| self.action_recursive(e, indexes))?;
-            self.action(mfp_input, mfp, indexes)?;
+            mfp_input.try_visit_mut_children(|e| self.action_recursive(e, indexes, filters_on_ctes))?;
+            self.action(mfp_input, mfp, indexes, filters_on_ctes)?;
             Ok(())
         }
     }
@@ -113,6 +121,7 @@ impl JoinImplementation {
         relation: &mut MirRelationExpr,
         mfp_above: MapFilterProject,
         indexes: &IndexMap,
+        filters_on_ctes: &mut HashMap<LocalId, FilterCharacteristics>,
     ) -> Result<(), TransformError> {
         if let MirRelationExpr::Join {
             inputs,
@@ -182,7 +191,7 @@ impl JoinImplementation {
                         MapFilterProject::extract_non_errors_from_expr(&inputs[index]);
                     let (_, _, project) = mfp.as_map_filter_project();
 
-                    let mut characteristics = JoinImplementation::filter_characteristics(&mfp, input)?;
+                    let mut characteristics = JoinImplementation::filter_characteristics(&mfp, input, filters_on_ctes)?;
                     characteristics |=
                         FilterCharacteristics::filter_characteristics(&push_downs[index])?;
                     filters.push(characteristics);
@@ -281,7 +290,7 @@ impl JoinImplementation {
         Ok(())
     }
 
-    fn filter_characteristics(mfp: &MapFilterProject, relation: &MirRelationExpr) -> Result<FilterCharacteristics, TransformError> {
+    fn filter_characteristics(mfp: &MapFilterProject, relation: &MirRelationExpr, filters_on_ctes: &HashMap<LocalId, FilterCharacteristics>,) -> Result<FilterCharacteristics, TransformError> {
         // We gather filter characteristics:
         // - From the filter that is directly at the top mfp of the input.
         // - IndexedFilter joins are constructed from literal equality filters.
@@ -302,24 +311,29 @@ impl JoinImplementation {
                     ) {
             characteristics.add_literal_equality();
         }
-        if let MirRelationExpr::ArrangeBy {
-            input: arrange_by_input,
-            ..
-        } = relation
-        {
-            let (mfp, input) =
-                MapFilterProject::extract_non_errors_from_expr(arrange_by_input);
-            let (_, filter, _) = mfp.as_map_filter_project();
-            characteristics |= FilterCharacteristics::filter_characteristics(&filter)?;
-            if matches!(
+        match relation {
+            MirRelationExpr::ArrangeBy {
+                input: arrange_by_input,
+                ..
+            } => {
+                let (mfp, input) =
+                    MapFilterProject::extract_non_errors_from_expr(arrange_by_input);
+                let (_, filter, _) = mfp.as_map_filter_project();
+                characteristics |= FilterCharacteristics::filter_characteristics(&filter)?;
+                if matches!(
                             input,
                             MirRelationExpr::Join {
                                 implementation: IndexedFilter(..),
                                 ..
                             }
                         ) {
-                characteristics.add_literal_equality();
+                    characteristics.add_literal_equality();
+                }
             }
+            MirRelationExpr::Get { id: Id::Local(id), ..} => {
+                characteristics |= filters_on_ctes.get(id).unwrap().clone();
+            }
+            _ => {}
         }
         Ok(characteristics)
     }

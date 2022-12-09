@@ -425,6 +425,8 @@ impl Optimizer {
                     // This goes after union fusion so we can cancel out
                     // more branches at a time.
                     Box::new(crate::union_cancel::UnionBranchCancellation),
+                    // The last RelationCSE call before JoinImplementation should be with
+                    // inline_mfp = true.
                     Box::new(crate::cse::relation_cse::RelationCSE::new(true)),
                     Box::new(crate::fold_constants::FoldConstants { limit: Some(10000) }),
                 ],
