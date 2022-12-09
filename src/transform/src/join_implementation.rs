@@ -138,7 +138,7 @@ impl JoinImplementation {
                 // Here we conservatively use the rule that if sufficient arrangements exist we will
                 // use a delta query (except for 2-input joins).
                 // An arrangement is considered available for an input
-                // - if it is a global `Get` with columns present in `indexes`,
+                // - if it is a `Get` with columns present in `indexes`,
                 //   - or the same wrapped by an IndexedFilter,
                 // - if it is an `ArrangeBy` with the columns present (note that the ArrangeBy might
                 //   have been inserted by a previous run of JoinImplementation),
@@ -180,46 +180,9 @@ impl JoinImplementation {
                     // We can work around mfps, as we can lift the mfps into the join execution.
                     let (mfp, input) =
                         MapFilterProject::extract_non_errors_from_expr(&inputs[index]);
-                    let (_, filter, project) = mfp.as_map_filter_project();
+                    let (_, _, project) = mfp.as_map_filter_project();
 
-                    // We gather filter characteristics:
-                    // - From the filter that is directly at the top mfp of the input.
-                    // - IndexedFilter joins are constructed from literal equality filters.
-                    // - If the input is an ArrangeBy, then we gather filter characteristics from
-                    //   the mfp below the ArrangeBy. (JoinImplementation often inserts ArrangeBys.)
-                    // - From filters that could be pushed down from above the join to this input.
-                    //   (In LIR, these will be executed right after the join path executes the join
-                    //   for this input.)
-                    let mut characteristics =
-                        FilterCharacteristics::filter_characteristics(&filter)?;
-                    if matches!(
-                        input,
-                        MirRelationExpr::Join {
-                            implementation: IndexedFilter(..),
-                            ..
-                        }
-                    ) {
-                        characteristics.add_literal_equality();
-                    }
-                    if let MirRelationExpr::ArrangeBy {
-                        input: arrange_by_input,
-                        ..
-                    } = input
-                    {
-                        let (mfp, input) =
-                            MapFilterProject::extract_non_errors_from_expr(arrange_by_input);
-                        let (_, filter, _) = mfp.as_map_filter_project();
-                        characteristics |= FilterCharacteristics::filter_characteristics(&filter)?;
-                        if matches!(
-                            input,
-                            MirRelationExpr::Join {
-                                implementation: IndexedFilter(..),
-                                ..
-                            }
-                        ) {
-                            characteristics.add_literal_equality();
-                        }
-                    }
+                    let mut characteristics = JoinImplementation::filter_characteristics(&mfp, input)?;
                     characteristics |=
                         FilterCharacteristics::filter_characteristics(&push_downs[index])?;
                     filters.push(characteristics);
@@ -316,6 +279,49 @@ impl JoinImplementation {
             }
         }
         Ok(())
+    }
+
+    fn filter_characteristics(mfp: &MapFilterProject, relation: &MirRelationExpr) -> Result<FilterCharacteristics, TransformError> {
+        // We gather filter characteristics:
+        // - From the filter that is directly at the top mfp of the input.
+        // - IndexedFilter joins are constructed from literal equality filters.
+        // - If the input is an ArrangeBy, then we gather filter characteristics from
+        //   the mfp below the ArrangeBy. (JoinImplementation often inserts ArrangeBys.)
+        // - From filters that could be pushed down from above the join to this input.
+        //   (In LIR, these will be executed right after the join path executes the join
+        //   for this input.) (This is done not by this function, but after the call in `action`.)
+        let (_, filter, _) = mfp.as_map_filter_project();
+        let mut characteristics =
+            FilterCharacteristics::filter_characteristics(&filter)?;
+        if matches!(
+                        relation,
+                        MirRelationExpr::Join {
+                            implementation: IndexedFilter(..),
+                            ..
+                        }
+                    ) {
+            characteristics.add_literal_equality();
+        }
+        if let MirRelationExpr::ArrangeBy {
+            input: arrange_by_input,
+            ..
+        } = relation
+        {
+            let (mfp, input) =
+                MapFilterProject::extract_non_errors_from_expr(arrange_by_input);
+            let (_, filter, _) = mfp.as_map_filter_project();
+            characteristics |= FilterCharacteristics::filter_characteristics(&filter)?;
+            if matches!(
+                            input,
+                            MirRelationExpr::Join {
+                                implementation: IndexedFilter(..),
+                                ..
+                            }
+                        ) {
+                characteristics.add_literal_equality();
+            }
+        }
+        Ok(characteristics)
     }
 }
 
