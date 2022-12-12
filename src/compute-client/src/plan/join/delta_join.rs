@@ -222,6 +222,15 @@ impl DeltaJoinPlan {
         map_filter_project: &mut MapFilterProject,
         available: &[AvailableCollections],
     ) -> (Self, Vec<AvailableCollections>) {
+
+        println!();
+        println!("create_from");
+        println!("equivalences: {:?}", equivalences);
+        println!("join_orders: {:#?}", join_orders.iter().map(|v| v.iter().map(|(a,b,_)| (a,b)).collect::<Vec<_>>()).collect::<Vec<_>>());
+        println!();
+        println!("JoinInputMapper (create_from): {:?}", input_mapper);
+        println!();
+
         let mut requested: Vec<AvailableCollections> =
             vec![Default::default(); input_mapper.total_inputs()];
         let number_of_inputs = input_mapper.total_inputs();
@@ -280,8 +289,10 @@ impl DeltaJoinPlan {
 
             let mut unthinned_stream_arity = initial_closure.before.projection.len();
 
+            println!();
             // TODO[btv] - Can we deduplicate this with the very similar code in `linear_join.rs` ?
             for (lookup_relation, lookup_key, _characteristics) in order.iter() {
+                println!("lookup_relation: {}, lookup_key: {:?}", lookup_relation, lookup_key);
                 let available = &available[*lookup_relation];
                 let (lookup_permutation, lookup_thinning) = available
                     .arranged
@@ -321,7 +332,7 @@ impl DeltaJoinPlan {
                     .map(|expr| {
                         let mut bound_expr = input_mapper
                             .find_bound_expr(expr, &bound_inputs, &join_build_state.equivalences)
-                            .expect("Expression in join plan is not bound at time of use");
+                            .expect(&*format!("Expression in join plan is not bound at time of use.\nexpr: {}", expr));
                         // Rewrite column references to physical locations.
                         bound_expr.permute_map(&join_build_state.column_map);
                         bound_expr

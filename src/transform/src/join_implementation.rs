@@ -114,12 +114,18 @@ impl JoinImplementation {
         mfp_above: MapFilterProject,
         indexes: &IndexMap,
     ) -> Result<(), TransformError> {
+
+        let relation_cloned = relation.clone();
+
         if let MirRelationExpr::Join {
             inputs,
             equivalences,
             implementation,
         } = relation
         {
+
+            let _______equivalences = equivalences.clone();
+
             let inputs_len = inputs.len();
             if !matches!(implementation, IndexedFilter(..)) {
                 let input_types = inputs.iter().map(|i| i.typ()).collect::<Vec<_>>();
@@ -132,6 +138,13 @@ impl JoinImplementation {
 
                 // Common information of broad utility.
                 let input_mapper = JoinInputMapper::new_from_input_types(&input_types);
+
+                println!("");
+                println!(">>>>>>>>>>>>>>>>> JoinImplementation.action on:");
+                println!("{:?}", relation_cloned);
+                println!("");
+                println!("{:?}", input_mapper);
+                println!("");
 
                 // The first fundamental question is whether we should employ a delta query or not.
                 //
@@ -288,6 +301,8 @@ impl JoinImplementation {
                     });
                 }
 
+                let old_implementation = implementation.clone();
+
                 // Determine if we can perform delta queries with the existing arrangements.
                 // We could defer the execution if we are sure we know we want one input,
                 // but we could imagine wanting the best from each and then comparing the two.
@@ -306,13 +321,39 @@ impl JoinImplementation {
                     &filters,
                 );
 
-                // Employ delta join plans only for multi-way joins of at least three inputs.
-                *relation = if inputs_len > 2 {
+                // // Employ delta join plans only for multi-way joins of at least three inputs.
+                // *relation = if inputs_len > 2 {
+                //     delta_query_plan.or(differential_plan)
+                // } else {
+                //     differential_plan
+                // }
+                // .expect("Failed to produce a join plan");
+
+                let mut new_delta = false;
+                let new_plan = if inputs_len > 2 {
+                    if delta_query_plan.is_ok() {
+                        new_delta = true;
+                    }
                     delta_query_plan.or(differential_plan)
                 } else {
                     differential_plan
                 }
                 .expect("Failed to produce a join plan");
+
+                if matches!(old_implementation, mz_expr::JoinImplementation::Unimplemented) ||
+                    (matches!(old_implementation, mz_expr::JoinImplementation::Differential(..)) && new_delta)
+                {
+                    *relation = new_plan;
+                } else {
+                    println!();
+                    println!("old_implementation: {:?}", old_implementation);
+                    println!("new_plan: {:?}", new_plan);
+                    println!();
+                    println!("equivalences: {:?}", _______equivalences);
+                    println!();
+                    println!("JoinInputMapper: {:?}", input_mapper);
+                    println!();
+                }
             }
         }
         Ok(())
@@ -953,11 +994,35 @@ impl<'a> Orderer<'a> {
                         //   query better.
                         if let Some(rel) = rels.next() {
                             if rels.next().is_none() {
+                                let global_expr_cloned = expr.clone();
                                 let expr = self.input_mapper.map_expr_to_local(expr.clone());
 
+                                let expr_cloned = expr.clone();
                                 // Update bound columns.
                                 self.bound[rel].push(expr);
                                 self.bound[rel].sort();
+
+                                if input == 3 && rel == 2 && expr_cloned == MirScalarExpr::Column(3) {
+                                    println!();
+                                    println!("{:?}", self.input_mapper);
+                                    println!("input == 3 && rel == 2 && expr_cloned == MirScalarExpr::Column(3)");
+                                    println!("##########################################");
+                                    println!("global_expr: {}", global_expr_cloned);
+                                    println!("self.bound[rel]: {:?}", self.bound[rel]);
+                                    println!("equivalences: {:?}", self.equivalences);
+                                    println!();
+                                }
+
+                                if input == 3 && rel == 2 && expr_cloned == MirScalarExpr::Column(1) {
+                                    println!();
+                                    println!("{:?}", self.input_mapper);
+                                    println!("input == 3 && rel == 2 && expr_cloned == MirScalarExpr::Column(1)");
+                                    println!("##########################################");
+                                    println!("global_expr: {}", global_expr_cloned);
+                                    println!("self.bound[rel]: {:?}", self.bound[rel]);
+                                    println!("equivalences: {:?}", self.equivalences);
+                                    println!();
+                                }
 
                                 // Reconsider all available arrangements.
                                 for (pos, keys) in self.arrangements[rel].iter().enumerate() {
@@ -988,6 +1053,13 @@ impl<'a> Orderer<'a> {
                                                 keys.clone(),
                                                 rel,
                                             ));
+
+                                            if input == 3 && rel == 2 && keys.contains(&MirScalarExpr::Column(1)) {
+                                                println!();
+                                                println!("!!!!!!!!!!!!!!!!!!!!!");
+                                                println!("equivalences: {:?}", self.equivalences);
+                                                println!();
+                                            }
                                         }
                                     }
                                 }

@@ -381,23 +381,23 @@ impl Optimizer {
                 limit: 100,
                 transforms: vec![
                     Box::new(crate::join_implementation::JoinImplementation::default()),
-                    Box::new(crate::column_knowledge::ColumnKnowledge::default()),
-                    Box::new(crate::fold_constants::FoldConstants { limit: Some(10000) }),
-                    Box::new(crate::demand::Demand::default()),
-                    Box::new(crate::literal_lifting::LiteralLifting::default()),
+                    ////Box::new(crate::column_knowledge::ColumnKnowledge::default()),
+                    ////Box::new(crate::fold_constants::FoldConstants { limit: Some(10000) }),
+                    ////Box::new(crate::demand::Demand::default()),
+                    //////////Box::new(crate::literal_lifting::LiteralLifting::default()),
                 ],
             }),
-            Box::new(crate::canonicalize_mfp::CanonicalizeMfp),
+            ////Box::new(crate::canonicalize_mfp::CanonicalizeMfp),
             // Identifies common relation subexpressions.
-            Box::new(crate::cse::relation_cse::RelationCSE::new(false)),
-            Box::new(crate::fold_constants::FoldConstants { limit: Some(10000) }),
+            //////////Box::new(crate::cse::relation_cse::RelationCSE::new(false)),
+            //////////Box::new(crate::fold_constants::FoldConstants { limit: Some(10000) }),
             // Remove threshold operators which have no effect.
             // Must be done at the very end of the physical pass, because before
             // that (at least at the moment) we cannot be sure that all trees
             // are simplified equally well so they are structurally almost
             // identical. Check the `threshold_elision.slt` tests that fail if
             // you remove this transform for examples.
-            Box::new(crate::threshold_elision::ThresholdElision),
+            ////Box::new(crate::threshold_elision::ThresholdElision),
         ];
         Self {
             name: "physical",
