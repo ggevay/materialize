@@ -4683,6 +4683,26 @@ WHERE a = c AND d = e AND b + d > 42
                         ],
                         "predicates": [
                           [
+                            1,
+                            {
+                              "CallUnary": {
+                                "func": {
+                                  "Not": null
+                                },
+                                "expr": {
+                                  "CallUnary": {
+                                    "func": {
+                                      "IsNull": null
+                                    },
+                                    "expr": {
+                                      "Column": 0
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          ],
+                          [
                             4,
                             {
                               "CallBinary": {
@@ -5200,7 +5220,28 @@ WHERE a = c AND d = e AND f = a
                     "before": {
                       "mfp": {
                         "expressions": [],
-                        "predicates": [],
+                        "predicates": [
+                          [
+                            1,
+                            {
+                              "CallUnary": {
+                                "func": {
+                                  "Not": null
+                                },
+                                "expr": {
+                                  "CallUnary": {
+                                    "func": {
+                                      "IsNull": null
+                                    },
+                                    "expr": {
+                                      "Column": 0
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          ]
+                        ],
                         "projection": [
                           0,
                           2,
@@ -5408,7 +5449,28 @@ WHERE a = c and a = e
                         "before": {
                           "mfp": {
                             "expressions": [],
-                            "predicates": [],
+                            "predicates": [
+                              [
+                                1,
+                                {
+                                  "CallUnary": {
+                                    "func": {
+                                      "Not": null
+                                    },
+                                    "expr": {
+                                      "CallUnary": {
+                                        "func": {
+                                          "IsNull": null
+                                        },
+                                        "expr": {
+                                          "Column": 0
+                                        }
+                                      }
+                                    }
+                                  }
+                                }
+                              ]
+                            ],
                             "projection": [
                               0,
                               1,
@@ -5440,7 +5502,28 @@ WHERE a = c and a = e
                         "before": {
                           "mfp": {
                             "expressions": [],
-                            "predicates": [],
+                            "predicates": [
+                              [
+                                1,
+                                {
+                                  "CallUnary": {
+                                    "func": {
+                                      "Not": null
+                                    },
+                                    "expr": {
+                                      "CallUnary": {
+                                        "func": {
+                                          "IsNull": null
+                                        },
+                                        "expr": {
+                                          "Column": 0
+                                        }
+                                      }
+                                    }
+                                  }
+                                }
+                              ]
+                            ],
                             "projection": [
                               0,
                               1,
@@ -5484,7 +5567,28 @@ WHERE a = c and a = e
                     "before": {
                       "mfp": {
                         "expressions": [],
-                        "predicates": [],
+                        "predicates": [
+                          [
+                            1,
+                            {
+                              "CallUnary": {
+                                "func": {
+                                  "Not": null
+                                },
+                                "expr": {
+                                  "CallUnary": {
+                                    "func": {
+                                      "IsNull": null
+                                    },
+                                    "expr": {
+                                      "Column": 0
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          ]
+                        ],
                         "projection": [
                           0,
                           1
@@ -5569,7 +5673,28 @@ WHERE a = c and a = e
                         "before": {
                           "mfp": {
                             "expressions": [],
-                            "predicates": [],
+                            "predicates": [
+                              [
+                                1,
+                                {
+                                  "CallUnary": {
+                                    "func": {
+                                      "Not": null
+                                    },
+                                    "expr": {
+                                      "CallUnary": {
+                                        "func": {
+                                          "IsNull": null
+                                        },
+                                        "expr": {
+                                          "Column": 0
+                                        }
+                                      }
+                                    }
+                                  }
+                                }
+                              ]
+                            ],
                             "projection": [
                               1,
                               2,
@@ -5613,7 +5738,28 @@ WHERE a = c and a = e
                     "before": {
                       "mfp": {
                         "expressions": [],
-                        "predicates": [],
+                        "predicates": [
+                          [
+                            1,
+                            {
+                              "CallUnary": {
+                                "func": {
+                                  "Not": null
+                                },
+                                "expr": {
+                                  "CallUnary": {
+                                    "func": {
+                                      "IsNull": null
+                                    },
+                                    "expr": {
+                                      "Column": 0
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          ]
+                        ],
                         "projection": [
                           0,
                           1
@@ -5698,7 +5844,28 @@ WHERE a = c and a = e
                         "before": {
                           "mfp": {
                             "expressions": [],
-                            "predicates": [],
+                            "predicates": [
+                              [
+                                1,
+                                {
+                                  "CallUnary": {
+                                    "func": {
+                                      "Not": null
+                                    },
+                                    "expr": {
+                                      "CallUnary": {
+                                        "func": {
+                                          "IsNull": null
+                                        },
+                                        "expr": {
+                                          "Column": 0
+                                        }
+                                      }
+                                    }
+                                  }
+                                }
+                              ]
+                            ],
                             "projection": [
                               1,
                               2,
