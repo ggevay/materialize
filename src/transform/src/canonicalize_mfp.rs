@@ -29,6 +29,7 @@
 use crate::{IndexOracle, TransformArgs};
 use mz_expr::visit::VisitChildren;
 use mz_expr::{MapFilterProject, MirRelationExpr};
+use mz_expr::canonicalize::canonicalize_predicates;
 
 /// Canonicalizes MFPs and performs common sub-expression elimination.
 #[derive(Debug)]
@@ -60,12 +61,26 @@ impl CanonicalizeMfp {
     ) -> Result<(), crate::TransformError> {
         let mut mfp = MapFilterProject::extract_non_errors_from_expr_mut(relation);
         relation.try_visit_mut_children(|e| self.action(e, indexes))?;
+        CanonicalizeMfp::canonicalize_predicates(&mut mfp, relation);
         mfp.optimize(); // Optimize MFP, e.g., perform CSE
         Self::rebuild_mfp(mfp, relation);
         Ok(())
     }
 
-    /// Canonicalize the MapFilterProject to Map-Filter-Project, in that order.
+    /// Call [mz_expr::canonicalize::canonicalize_predicates] on each of the predicates in the MFP.
+    pub fn canonicalize_predicates(mfp: &mut MapFilterProject, relation: &MirRelationExpr) {
+        let (map, mut predicates, project) = mfp.as_map_filter_project();
+        let typ_after_map = relation.clone().map(map.clone()).typ();
+        canonicalize_predicates(&mut predicates, &typ_after_map.column_types);
+        // Rebuild the MFP with the new predicates.
+        *mfp = MapFilterProject::new(mfp.input_arity)
+            .map(map)
+            .filter(predicates)
+            .project(project);
+    }
+
+    /// Translate the `MapFilterProject` into actual Map, Filter, Project operators. Add these on
+    /// top of the given `relation` expression.
     pub fn rebuild_mfp(mfp: MapFilterProject, relation: &mut MirRelationExpr) {
         if !mfp.is_identity() {
             let (map, filter, project) = mfp.as_map_filter_project();

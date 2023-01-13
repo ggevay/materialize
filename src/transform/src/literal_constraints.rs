@@ -21,7 +21,6 @@
 use crate::canonicalize_mfp::CanonicalizeMfp;
 use crate::{IndexOracle, TransformArgs};
 use itertools::Itertools;
-use mz_expr::canonicalize::canonicalize_predicates;
 use mz_expr::visit::{Visit, VisitChildren};
 use mz_expr::JoinImplementation::IndexedFilter;
 use mz_expr::{BinaryFunc, Id, MapFilterProject, MirRelationExpr, MirScalarExpr, VariadicFunc};
@@ -84,7 +83,7 @@ impl LiteralConstraints {
             ) -> Result<(), RecursionLimitError> {
                 // undo list_of_predicates_to_and_of_predicates, distribute_and_over_or, unary_and
                 // (It undoes the latter 2 through `MirScalarExp::reduce`.)
-                LiteralConstraints::canonicalize_predicates(mfp, relation);
+                CanonicalizeMfp::canonicalize_predicates(mfp, relation);
                 // undo inline_literal_constraints
                 mfp.optimize();
                 // We can usually undo, but sometimes not (see comment on `distribute_and_over_or`),
@@ -492,18 +491,6 @@ impl LiteralConstraints {
         *mfp = MapFilterProject::new(mfp.input_arity)
             .map(map)
             .filter(new_predicates)
-            .project(project);
-    }
-
-    /// Call [mz_expr::canonicalize::canonicalize_predicates] on each of the predicates in the MFP.
-    fn canonicalize_predicates(mfp: &mut MapFilterProject, relation: &MirRelationExpr) {
-        let (map, mut predicates, project) = mfp.as_map_filter_project();
-        let typ_after_map = relation.clone().map(map.clone()).typ();
-        canonicalize_predicates(&mut predicates, &typ_after_map.column_types);
-        // Rebuild the MFP with the new predicates.
-        *mfp = MapFilterProject::new(mfp.input_arity)
-            .map(map)
-            .filter(predicates)
             .project(project);
     }
 
