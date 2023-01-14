@@ -556,10 +556,10 @@ ORDER BY
 Explained Query:
   Finish order_by=[#0 asc nulls_last, #1 asc nulls_last, #2 asc nulls_last] output=[#0..=#3]
     Return // { arity: 4 }
-      Reduce group_by=[#3, #4, extract_year_d(#2)] aggregates=[sum((#0 * (1 - #1)))] // { arity: 4 }
-        Project (#12, #13, #17, #41, #45) // { arity: 5 }
-          Filter (#17 <= 1996-12-31) AND (#17 >= 1995-01-01) AND (#48 OR #49) AND (#50 OR #51) AND ((#48 AND #51) OR (#49 AND #50)) // { arity: 52 }
-            Map ((#41 = "FRANCE"), (#41 = "GERMANY"), (#45 = "FRANCE"), (#45 = "GERMANY")) // { arity: 52 }
+      Reduce group_by=[#0, #1, #2] aggregates=[sum(#3)] // { arity: 4 }
+        Project (#41, #45, #52, #53) // { arity: 4 }
+          Filter (#17 <= 1996-12-31) AND (#17 >= 1995-01-01) AND (#48 OR #49) AND (#50 OR #51) AND ((#48 AND #51) OR (#49 AND #50)) // { arity: 54 }
+            Map ((#41 = "FRANCE"), (#41 = "GERMANY"), (#45 = "FRANCE"), (#45 = "GERMANY"), extract_year_d(#17), (#12 * (1 - #13))) // { arity: 54 }
               Join on=(#0 = #9 AND #3 = #40 AND #7 = #23 AND #24 = #32 AND #35 = #44) type=delta // { arity: 48 }
                 implementation
                   %0:supplier » %4:l0[#0]KAef » %1:lineitem[#2]KAiif » %2:orders[#0]KA » %3:customer[#0]KA » %5:l0[#0]KAef

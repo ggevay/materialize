@@ -116,10 +116,6 @@ Explained Query:
       Map (((#0 + #1) > 0)) // { arity: 3 }
         Get materialize.public.t2 // { arity: 2 }
 
-Source materialize.public.t2
-  filter=(#2 AND case when #2 then ((1 / #0) > 0) else false end)
-  map=(((#0 + #1) > 0))
-
 EOF
 
 query T multiline
@@ -130,10 +126,6 @@ Explained Query:
     Filter #2 AND case when #2 then ((1 / #0) > 0) else false end // { arity: 3 }
       Map (((#0 + #1) > 0)) // { arity: 3 }
         Get materialize.public.t2 // { arity: 2 }
-
-Source materialize.public.t2
-  filter=(#2 AND case when #2 then ((1 / #0) > 0) else false end)
-  map=(((#0 + #1) > 0))
 
 EOF
 

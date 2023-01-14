@@ -70,6 +70,9 @@ Explained Query:
     Filter ((#0 + 1) != (#1 + 3)) // { arity: 3 }
       Get materialize.public.x // { arity: 3 }
 
+Source materialize.public.x
+  filter=(((#0 + 1) != (#1 + 3)))
+
 EOF
 
 # We can push down b = 3, since it only refers to input columns. We can't push
