@@ -2473,6 +2473,19 @@ impl AggregateExpr {
             _ => false,
         }
     }
+
+    /// todo: docs
+    pub fn is_window_func(&self) -> bool {
+        //todo: matches!
+        //  and more funcs
+        match self {
+            AggregateExpr {
+                func: AggregateFunc::LagLead {..},
+                ..
+            } => {true}
+            _ => {false}
+        }
+    }
 }
 
 /// Describe a join implementation in dataflow.

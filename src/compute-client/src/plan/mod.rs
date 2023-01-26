@@ -24,6 +24,7 @@ use mz_expr::{
     permutation_for_arrangement, CollectionPlan, EvalError, Id, JoinInputMapper, LocalId,
     MapFilterProject, MirRelationExpr, MirScalarExpr, OptimizedMirRelationExpr, TableFunc,
 };
+use mz_expr::visit::Visit;
 use mz_ore::soft_panic_or_log;
 use mz_proto::{IntoRustIfSome, ProtoType, RustType, TryFromProtoError};
 use mz_repr::{Diff, GlobalId, Row};
@@ -930,6 +931,21 @@ impl<T: timely::progress::Timestamp> Plan<T> {
         arrangements: &mut BTreeMap<Id, AvailableCollections>,
         debug_info: LirDebugInfo<'_>,
     ) -> Result<(Self, AvailableCollections), String> {
+
+        let mut window_func_count = 0;
+        #[allow(deprecated)]
+        expr.visit_post_nolimit(&mut |e| {
+            match e {
+                MirRelationExpr::Reduce {aggregates, ..} => {
+                    if aggregates.iter().any(|agg| agg.is_window_func()) {
+                        window_func_count += 1;
+                    }
+                    assert!(aggregates.iter().filter(|agg| agg.is_window_func()).count() <= 1); //todo: handle it when it's more instead of asserting
+                }
+                _ => {}
+            }
+        });
+
         // We don't want to trace recursive calls, which is why the public `from_mir`
         // is annotated and delegates the work to a private (recursive) from_mir_inner.
         Plan::from_mir_inner(expr, arrangements, debug_info)
