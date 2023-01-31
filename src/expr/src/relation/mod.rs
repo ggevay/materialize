@@ -2481,6 +2481,7 @@ impl AggregateExpr {
         match self {
             AggregateExpr {
                 func: AggregateFunc::LagLead {..},
+                //func: AggregateFunc::LagLead {..} | AggregateFunc::RowNumber {..} | AggregateFunc::DenseRank {..} | AggregateFunc::FirstValue {..} | AggregateFunc::LastValue {..},
                 ..
             } => {true}
             _ => {false}
