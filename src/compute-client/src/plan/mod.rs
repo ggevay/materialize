@@ -946,6 +946,45 @@ impl<T: timely::progress::Timestamp> Plan<T> {
             }
         });
 
+        let mut pattern_count = 0;
+        #[allow(deprecated)]
+        expr.visit_post_nolimit(&mut |e| {
+            let (mfp1, below_mfp1) = MapFilterProject::extract_from_expression(e);
+            match below_mfp1 {
+                MirRelationExpr::FlatMap {func: TableFunc::UnnestList {..}, input, exprs} => {
+                    // Check that the argument of the UnnestList is `#0`
+                    assert_eq!(exprs.len(), 1);
+                    match exprs[0] {
+                        MirScalarExpr::Column(0) => {
+                            // Continue with the pattern
+                            let (mfp2, below_mfp2) = MapFilterProject::extract_from_expression(input);
+                            // Check that mfp2 is a `Project` yielding one column.
+                            // This check can fail if, for example, ReduceElision removed the Reduce
+                            // that has the window function, and then everything is different.
+                            if mfp2.expressions.is_empty() && mfp2.predicates.is_empty() && mfp2.projection.len() == 1 {
+                                // Check for the Reduce below the Project
+                                match below_mfp2 {
+                                    MirRelationExpr::Reduce { aggregates, group_key, .. } => {
+                                        assert_eq!(mfp2.projection[0], group_key.len()); // check that the Project gets the column after the group key
+                                        if aggregates.iter().any(|agg| agg.is_window_func()) {
+                                            pattern_count += 1;
+                                        }
+                                        assert!(aggregates.iter().filter(|agg| agg.is_window_func()).count() <= 1);
+                                    }
+                                    _ => {}
+                                }
+                            }
+                        }
+                        _ => {assert!(false);}
+                    }
+                }
+                _ => {}
+            }
+        });
+
+        assert_eq!(window_func_count > 0, pattern_count > 0);
+
+
         // We don't want to trace recursive calls, which is why the public `from_mir`
         // is annotated and delegates the work to a private (recursive) from_mir_inner.
         Plan::from_mir_inner(expr, arrangements, debug_info)
