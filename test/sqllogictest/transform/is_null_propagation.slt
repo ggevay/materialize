@@ -31,7 +31,7 @@ Explained Query:
   Project () // { arity: 0 }
     Join on=(#0 = (#1 + #2)) type=differential // { arity: 3 }
       implementation
-        %1:t2[×] » %0:t1[×]A
+        %1:t2[×] » %0:t1[×]
       ArrangeBy keys=[[]] // { arity: 2 }
         Filter (#0) IS NOT NULL // { arity: 2 }
           Get materialize.public.t1 // { arity: 2 }

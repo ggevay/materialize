@@ -239,7 +239,7 @@ Explained Query:
                     Reduce group_by=[#0] aggregates=[row_number(row(list[row(#0, #1, #2)]))] // { arity: 2 }
                       CrossJoin type=differential // { arity: 3 }
                         implementation
-                          %1:t2[×] » %0[×]A
+                          %1:t2[×] » %0[×]
                         ArrangeBy keys=[[]] // { arity: 1 }
                           Distinct group_by=[#0] // { arity: 1 }
                             Get l0 // { arity: 1 }

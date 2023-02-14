@@ -293,6 +293,8 @@ impl JoinImplementation {
                     });
                 }
 
+                let old_implementation = implementation.clone();
+
                 // Determine if we can perform delta queries with the existing arrangements.
                 // We could defer the execution if we are sure we know we want one input,
                 // but we could imagine wanting the best from each and then comparing the two.
@@ -311,13 +313,25 @@ impl JoinImplementation {
                     &filters,
                 );
 
-                // Employ delta join plans only for multi-way joins of at least three inputs.
-                *relation = if inputs_len > 2 {
+
+                // Employ delta join plans only for multi-way joins of at least three inputs. // todo: update comment!!!!!!!!!!!!!!!!!!!!!!!!!
+                let mut new_delta = false;
+                let new_plan = if inputs_len > 2 {
+                    if delta_query_plan.is_ok() {
+                        new_delta = true;
+                    }
                     delta_query_plan.or(differential_plan)
                 } else {
                     differential_plan
                 }
                 .expect("Failed to produce a join plan");
+
+                if matches!(old_implementation, mz_expr::JoinImplementation::Unimplemented) ||
+                    (matches!(old_implementation, mz_expr::JoinImplementation::Differential(..)) && new_delta)
+                    //(matches!(old_implementation, mz_expr::JoinImplementation::Differential(..)) && matches!(new_plan, MirRelationExpr::Join{implementation: mz_expr::JoinImplementation::DeltaQuery(..), ..})) //ez rossz!!!!!!!!!!!!!!!
+                {
+                    *relation = new_plan;
+                }
             }
         }
         Ok(())
@@ -408,6 +422,7 @@ mod delta_queries {
                 // a filter gets converted into a single input join only when
                 // there are existing arrangements, without this early return,
                 // filters will always be planned as delta queries.
+                unreachable!(); // REMOVE THIS. JUST TRYING IF THIS IS HAPPENING IN ANY SLTs
                 return Err(TransformError::Internal(String::from(
                     "should be planned as differential plan",
                 )));
@@ -430,7 +445,7 @@ mod delta_queries {
             }
 
             // Convert the order information into specific (input, keys) information.
-            let orders = orders
+            let mut orders = orders
                 .into_iter()
                 .map(|o| {
                     o.into_iter()
@@ -441,8 +456,14 @@ mod delta_queries {
                 .collect::<Vec<_>>();
 
             // Implement arrangements in each of the inputs.
-            let lifted_mfp =
+            let (lifted_mfp, lifted_projections) =
                 super::implement_arrangements(inputs, available, orders.iter().flatten());
+
+            orders.iter_mut().for_each(|order| order.iter_mut().for_each(|(index, keys, _) | keys.iter_mut().for_each(|key| {
+                if let Some(proj) = &lifted_projections[*index] {
+                    key.permute(proj);
+                }
+            })));
 
             *implementation = JoinImplementation::DeltaQuery(orders);
 
@@ -588,7 +609,7 @@ mod differential {
             }
 
             // Implement arrangements in each of the inputs.
-            let lifted_mfp = super::implement_arrangements(inputs, available, order.iter());
+            let (lifted_mfp, lifted_projections) = super::implement_arrangements(inputs, available, order.iter());
 
             if start_keys.is_some() {
                 // now that the starting arrangement has been implemented,
@@ -596,6 +617,17 @@ mod differential {
                 // about the other inputs
                 order.remove(0);
             }
+
+            start_keys.iter_mut().for_each(|start_keys| start_keys.iter_mut().for_each(|start_key| {
+                if let Some(proj) = &lifted_projections[start] {
+                    start_key.permute(proj);
+                }
+            }));
+            order.iter_mut().for_each(|(index, keys, _) | keys.iter_mut().for_each(|key| {
+                if let Some(proj) = &lifted_projections[*index] {
+                    key.permute(proj);
+                }
+            }));
 
             // Install the implementation.
             *implementation = JoinImplementation::Differential((start, start_keys), order);
@@ -621,7 +653,7 @@ fn implement_arrangements<'a>(
     needed_arrangements: impl Iterator<
         Item = &'a (usize, Vec<MirScalarExpr>, Option<JoinInputCharacteristics>),
     >,
-) -> MapFilterProject {
+) -> (MapFilterProject, Vec<Option<Vec<usize>>>) {
     // Collect needed arrangements by source index.
     let mut needed = vec![Vec::new(); inputs.len()];
     for (index, key, _characteristics) in needed_arrangements {
@@ -629,6 +661,7 @@ fn implement_arrangements<'a>(
     }
 
     let mut lifted_mfps = vec![None; inputs.len()];
+    let mut lifted_projections = vec![None; inputs.len()];
 
     // Transform inputs[index] based on needed and available arrangements.
     // Specifically, lift intervening mfps if all arrangements exist.
@@ -649,17 +682,18 @@ fn implement_arrangements<'a>(
         while let MirRelationExpr::ArrangeBy { input: inner, .. } = &mut inputs[index] {
             inputs[index] = inner.take_dangerous();
         }
-        if !needed.is_empty() {
-            // If a mfp was lifted in order to install the arrangement, permute
-            // the arrangement.
-            if let Some(lifted_mfp) = &lifted_mfps[index] {
-                let (_, _, project) = lifted_mfp.as_map_filter_project();
-                for arr in needed.iter_mut() {
-                    for key in arr.iter_mut() {
-                        key.permute(&project);
-                    }
+        // If a mfp was lifted in order to install the arrangement, permute
+        // the arrangement.
+        if let Some(lifted_mfp) = &lifted_mfps[index] {
+            let (_, _, project) = lifted_mfp.as_map_filter_project();
+            for arr in needed.iter_mut() {
+                for key in arr.iter_mut() {
+                    key.permute(&project);
                 }
             }
+            lifted_projections[index] = Some(project);
+        }
+        if !needed.is_empty() {
             inputs[index] = MirRelationExpr::arrange_by(inputs[index].take_dangerous(), needed);
         }
     }
@@ -692,10 +726,13 @@ fn implement_arrangements<'a>(
             combined_project.extend(new_join_mapper.global_columns(index));
         }
     }
-    combined_mfp
-        .map(combined_map)
-        .filter(combined_filter)
-        .project(combined_project)
+    (
+        combined_mfp
+            .map(combined_map)
+            .filter(combined_filter)
+            .project(combined_project),
+        lifted_projections
+    )
 }
 
 fn install_lifted_mfp(
