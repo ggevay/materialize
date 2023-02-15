@@ -416,13 +416,21 @@ mod delta_queries {
             implementation,
         } = &mut new_join
         {
-            if inputs.len() < 2 {
+            if inputs.len() <= 2 {
+                // if inputs.len() == 0 then something is very wrong.
+                //
+                // if inputs.len() == 1:
                 // Single input joins are filters and should be planned as
                 // differential plans instead of delta queries. Because a
                 // a filter gets converted into a single input join only when
                 // there are existing arrangements, without this early return,
                 // filters will always be planned as delta queries.
-                unreachable!(); // REMOVE THIS. JUST TRYING IF THIS IS HAPPENING IN ANY SLTs
+                // ggevay: This is an old comment, and I can't find how a single-input join could
+                // actually occur. It is not happening in any of our slts currently.
+                //
+                // if inputs.len() == 2:
+                // We decided to always plan this as a differential join for now, see here:
+                // https://github.com/MaterializeInc/materialize/pull/16099#issuecomment-1316857374
                 return Err(TransformError::Internal(String::from(
                     "should be planned as differential plan",
                 )));
