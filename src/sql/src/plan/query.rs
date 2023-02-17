@@ -307,7 +307,7 @@ pub fn plan_insert_query(
         if let Some(src_idx) = col_to_source.get(&col_idx) {
             project_key.push(*src_idx);
         } else {
-            let hir = plan_default_expr(scx, default, &col_typ.scalar_type)?;
+            let hir = plan_default_expr(scx, default.clone(), &col_typ.scalar_type)?;
             project_key.push(expr_arity + map_exprs.len());
             map_exprs.push(hir);
         }
@@ -339,7 +339,10 @@ pub fn plan_insert_query(
             for (select_item, column_name) in expand_select_item(ecx, &si, &table_func_names)? {
                 let expr = match &select_item {
                     ExpandedSelectItem::InputOrdinal(i) => HirScalarExpr::column(*i),
-                    ExpandedSelectItem::Expr(expr) => plan_expr(ecx, expr)?.type_as_any(ecx)?,
+                    ExpandedSelectItem::Expr(expr) => {
+                        transform_ast::transform_expr(scx, expr.clone().to_mut())?;
+                        plan_expr(ecx, expr)?.type_as_any(ecx)?
+                    },
                 };
                 output_columns.push(column_name);
                 let typ = ecx.column_type(&expr);
@@ -491,7 +494,7 @@ pub fn plan_copy_from_rows(
         if let Some(src_idx) = col_to_source.get(&col_idx) {
             project_key.push(*src_idx);
         } else {
-            let hir = plan_default_expr(&scx, default, &col_typ.scalar_type)?;
+            let hir = plan_default_expr(&scx, default.clone(), &col_typ.scalar_type)?;
             project_key.push(typ.arity() + map_exprs.len());
             map_exprs.push(hir);
         }
@@ -893,9 +896,10 @@ pub fn plan_secret_as(
 
 pub fn plan_default_expr(
     scx: &StatementContext,
-    expr: &Expr<Aug>,
+    mut expr: Expr<Aug>,
     target_ty: &ScalarType,
 ) -> Result<HirScalarExpr, PlanError> {
+    transform_ast::transform_expr(scx, &mut expr)?;
     let qcx = QueryContext::root(scx, QueryLifetime::OneShot(scx.pcx()?));
     let ecx = &ExprContext {
         qcx: &qcx,
@@ -906,7 +910,7 @@ pub fn plan_default_expr(
         allow_subqueries: false,
         allow_windows: false,
     };
-    let hir = plan_expr(ecx, expr)?.cast_to(ecx, CastContext::Assignment, target_ty)?;
+    let hir = plan_expr(ecx, &expr)?.cast_to(ecx, CastContext::Assignment, target_ty)?;
     Ok(hir)
 }
 

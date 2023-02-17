@@ -220,7 +220,7 @@ pub fn plan_create_table(
                 ColumnOption::Default(expr) => {
                     // Ensure expression can be planned and yields the correct
                     // type.
-                    let _ = query::plan_default_expr(scx, expr, &ty)?;
+                    let _ = query::plan_default_expr(scx, expr.clone(), &ty)?;
                     default = expr.clone();
                 }
                 ColumnOption::Unique { is_primary } => {

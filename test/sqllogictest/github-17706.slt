@@ -1,0 +1,38 @@
+# Copyright Materialize, Inc. and contributors. All rights reserved.
+#
+# Use of this software is governed by the Business Source License
+# included in the LICENSE file at the root of this repository.
+#
+# As of the Change Date specified in that file, in accordance with
+# the Business Source License, use of this software will be governed
+# by the Apache License, Version 2.0.
+
+# Regression test for https://github.com/MaterializeInc/materialize/issues/17706
+mode cockroach
+
+# In `plan_default_expr`, `transform_expr` will run the `Desugarer`, which eliminates `Expr::Nested` (which is the
+# parens around the 0)
+statement ok
+CREATE TABLE t1(b integer DEFAULT (0));
+
+# `Expr::Between` is also eliminated by the `Desugarer`
+query error operator does not exist: boolean >= integer
+CREATE TABLE t2(b bool DEFAULT false BETWEEN 3 and 7);
+
+statement ok
+CREATE TABLE t3(a integer, b integer DEFAULT ((((((((((((42)))))))))))));
+
+# Test what happens when INSERT calls `plan_default_expr`
+statement ok
+INSERT INTO t3 VALUES (5);
+
+query II
+SELECT * FROM t3;
+----
+5  42
+
+statement ok
+CREATE TABLE t4 (a INT, b INT, c INT);
+
+statement ok
+INSERT INTO t4 (a) VALUES (2),(3) RETURNING a, (c);
