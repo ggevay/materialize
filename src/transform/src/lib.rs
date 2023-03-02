@@ -488,6 +488,13 @@ impl Optimizer {
                 limit: 100,
                 transforms: vec![
                     Box::new(crate::join_implementation::JoinImplementation::default()),
+
+                    Box::new(crate::union_cancel::UnionBranchCancellation),
+                    Box::new(crate::redundant_join::RedundantJoin::default()),
+                    Box::new(crate::fusion::join::Join),
+
+                    Box::new(crate::join_implementation::JoinImplementation::default()),
+
                     Box::new(crate::column_knowledge::ColumnKnowledge::default()),
                     Box::new(crate::fold_constants::FoldConstants { limit: Some(10000) }),
                     Box::new(crate::demand::Demand::default()),
