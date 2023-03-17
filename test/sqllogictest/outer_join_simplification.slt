@@ -213,36 +213,19 @@ foo left join bar on foo.a = bar.a
 Explained Query:
   Return
     Union
-      Get l1
+      Get l0
       Map (0)
         Union
           Negate
             Project ()
-              Get l1
+              Get l0
           Constant
             - ()
   With
-    cte l1 =
+    cte l0 =
       Reduce aggregates=[count(*)]
         Project ()
-          Union
-            Map (null)
-              Union
-                Negate
-                  Project ()
-                    Get l0
-                Project ()
-                  Get materialize.public.foo
-            Get l0
-    cte l0 =
-      Project (#2)
-        Join on=(#0 = #1) type=differential
-          ArrangeBy keys=[[#0]]
-            Project (#1)
-              Get materialize.public.foo
-          ArrangeBy keys=[[#0]]
-            Project (#0, #1)
-              Get materialize.public.baz
+          Get materialize.public.foo
 
 Source materialize.public.bar
   filter=((#0) IS NOT NULL)
