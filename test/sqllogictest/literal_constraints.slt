@@ -113,15 +113,15 @@ Explained Query:
       Get l0 // { arity: 1 }
       Map (0) // { arity: 1 }
         Union // { arity: 0 }
-          Negate // { arity: 0 }
-            Project () // { arity: 0 }
+          Project () // { arity: 0 }
+            Negate // { arity: 1 }
               Get l0 // { arity: 1 }
           Constant // { arity: 0 }
             - ()
   With
     cte l0 =
       Reduce aggregates=[count(*)] // { arity: 1 }
-        Project () // { arity: 0 }
+        Project (#0, #1) // { arity: 2 }
           ReadExistingIndex materialize.public.t1 lookup_values=[(2, "l2"); (3, "l3")]
 
 Used Indexes:
@@ -154,12 +154,15 @@ Explained Query:
         project=(#0)
         map=(0)
         Union
-          Negate
-            Get::Arrangement l0
-              project=()
-              key=
-              raw=false
-              arrangements[0]={ key=[], permutation=id, thinning=(#0) }
+          Mfp
+            project=()
+            Negate
+              ArrangeBy
+                input_key=[]
+                raw=true
+                Get::PassArrangements l0
+                  raw=false
+                  arrangements[0]={ key=[], permutation=id, thinning=(#0) }
           Constant
             - ()
   With
@@ -167,13 +170,12 @@ Explained Query:
       Reduce::Accumulable
         simple_aggrs[0]=(0, 0, count(*))
         val_plan
-          project=(#0)
+          project=(#2)
           map=(true)
-        key_plan=id
+        key_plan
+          project=()
         Join::Linear
           linear_stage[0]
-            closure
-              project=()
             lookup={ relation=0, key=[#0, #1] }
             stream={ key=[#0, #1], thinning=() }
           source={ relation=1, key=[#0, #1] }
@@ -743,15 +745,16 @@ WHERE
     t1.a = 2 AND t1.b = 'l2'
 ----
 Explained Query:
-  CrossJoin type=differential // { arity: 3 }
-    implementation
-      %0:t1[×]e » %1:t2[×]e
-    ArrangeBy keys=[[]] // { arity: 2 }
-      Project (#0, #1) // { arity: 2 }
-        ReadExistingIndex materialize.public.t1 lookup_value=(2, "l2")
-    ArrangeBy keys=[[]] // { arity: 1 }
-      Project (#2) // { arity: 1 }
-        ReadExistingIndex materialize.public.t2 lookup_value=(2)
+  Project (#0, #1, #4) // { arity: 3 }
+    CrossJoin type=differential // { arity: 5 }
+      implementation
+        %0:t1[×]e » %1:t2[×]e
+      ArrangeBy keys=[[]] // { arity: 2 }
+        Project (#0, #1) // { arity: 2 }
+          ReadExistingIndex materialize.public.t1 lookup_value=(2, "l2")
+      ArrangeBy keys=[[]] // { arity: 3 }
+        Project (#0..=#2) // { arity: 3 }
+          ReadExistingIndex materialize.public.t2 lookup_value=(2)
 
 Used Indexes:
   - materialize.public.idx_t1_a_b

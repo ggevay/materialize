@@ -25,9 +25,8 @@ Explained Query:
         Get materialize.public.t1 // { arity: 2 }
       ArrangeBy keys=[[#0]] // { arity: 1 }
         Distinct group_by=[#0] // { arity: 1 }
-          Project (#0) // { arity: 1 }
-            Filter (#0 > 1) // { arity: 2 }
-              Get materialize.public.t1 // { arity: 2 }
+          Filter (#0 > 1) // { arity: 2 }
+            Get materialize.public.t1 // { arity: 2 }
 
 EOF
 

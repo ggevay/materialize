@@ -529,30 +529,34 @@ SELECT a FROM t EXCEPT ALL SELECT b FROM mv
                       }
                     },
                     {
-                      "Negate": {
+                      "Mfp": {
                         "input": {
-                          "Get": {
-                            "id": {
-                              "Global": {
-                                "User": 7
-                              }
-                            },
-                            "keys": {
-                              "raw": true,
-                              "arranged": []
-                            },
-                            "plan": {
-                              "Collection": {
-                                "expressions": [],
-                                "predicates": [],
-                                "projection": [
-                                  0
-                                ],
-                                "input_arity": 1
+                          "Negate": {
+                            "input": {
+                              "Get": {
+                                "id": {
+                                  "Global": {
+                                    "User": 7
+                                  }
+                                },
+                                "keys": {
+                                  "raw": true,
+                                  "arranged": []
+                                },
+                                "plan": "PassArrangements"
                               }
                             }
                           }
-                        }
+                        },
+                        "mfp": {
+                          "expressions": [],
+                          "predicates": [],
+                          "projection": [
+                            1
+                          ],
+                          "input_arity": 2
+                        },
+                        "input_key_val": null
                       }
                     }
                   ]
@@ -604,19 +608,7 @@ SELECT a FROM t EXCEPT ALL SELECT b FROM mv
       }
     }
   ],
-  "sources": [
-    {
-      "id": "materialize.public.mv",
-      "op": {
-        "expressions": [],
-        "predicates": [],
-        "projection": [
-          1
-        ],
-        "input_arity": 2
-      }
-    }
-  ]
+  "sources": []
 }
 EOF
 
@@ -776,30 +768,34 @@ WITH cte(x) as (SELECT a FROM t EXCEPT ALL SELECT b FROM mv)
                           }
                         },
                         {
-                          "Negate": {
+                          "Mfp": {
                             "input": {
-                              "Get": {
-                                "id": {
-                                  "Global": {
-                                    "User": 7
-                                  }
-                                },
-                                "keys": {
-                                  "raw": true,
-                                  "arranged": []
-                                },
-                                "plan": {
-                                  "Collection": {
-                                    "expressions": [],
-                                    "predicates": [],
-                                    "projection": [
-                                      0
-                                    ],
-                                    "input_arity": 1
+                              "Negate": {
+                                "input": {
+                                  "Get": {
+                                    "id": {
+                                      "Global": {
+                                        "User": 7
+                                      }
+                                    },
+                                    "keys": {
+                                      "raw": true,
+                                      "arranged": []
+                                    },
+                                    "plan": "PassArrangements"
                                   }
                                 }
                               }
-                            }
+                            },
+                            "mfp": {
+                              "expressions": [],
+                              "predicates": [],
+                              "projection": [
+                                1
+                              ],
+                              "input_arity": 2
+                            },
+                            "input_key_val": null
                           }
                         }
                       ]
@@ -850,166 +846,169 @@ WITH cte(x) as (SELECT a FROM t EXCEPT ALL SELECT b FROM mv)
             }
           },
           "body": {
-            "Union": {
-              "inputs": [
-                {
-                  "Get": {
-                    "id": {
-                      "Local": 0
-                    },
-                    "keys": {
-                      "raw": false,
-                      "arranged": [
-                        [
-                          [
-                            {
-                              "Column": 0
-                            }
-                          ],
-                          {
-                            "0": 0
-                          },
-                          []
-                        ]
-                      ]
-                    },
-                    "plan": {
-                      "Arrangement": [
-                        [
-                          {
-                            "Column": 0
-                          }
-                        ],
-                        null,
-                        {
-                          "expressions": [
-                            {
-                              "CallBinary": {
-                                "func": "AddInt32",
-                                "expr1": {
+            "Mfp": {
+              "input": {
+                "Union": {
+                  "inputs": [
+                    {
+                      "Get": {
+                        "id": {
+                          "Local": 0
+                        },
+                        "keys": {
+                          "raw": false,
+                          "arranged": [
+                            [
+                              [
+                                {
                                   "Column": 0
-                                },
-                                "expr2": {
-                                  "Literal": [
-                                    {
-                                      "Ok": {
-                                        "data": [
-                                          4,
-                                          1,
-                                          0,
-                                          0,
-                                          0
-                                        ]
-                                      }
-                                    },
-                                    {
-                                      "scalar_type": "Int32",
-                                      "nullable": false
-                                    }
-                                  ]
                                 }
+                              ],
+                              {
+                                "0": 0
+                              },
+                              []
+                            ]
+                          ]
+                        },
+                        "plan": {
+                          "Arrangement": [
+                            [
+                              {
+                                "Column": 0
                               }
+                            ],
+                            null,
+                            {
+                              "expressions": [
+                                {
+                                  "CallBinary": {
+                                    "func": "AddInt32",
+                                    "expr1": {
+                                      "Column": 0
+                                    },
+                                    "expr2": {
+                                      "Literal": [
+                                        {
+                                          "Ok": {
+                                            "data": [
+                                              4,
+                                              1,
+                                              0,
+                                              0,
+                                              0
+                                            ]
+                                          }
+                                        },
+                                        {
+                                          "scalar_type": "Int32",
+                                          "nullable": false
+                                        }
+                                      ]
+                                    }
+                                  }
+                                }
+                              ],
+                              "predicates": [],
+                              "projection": [
+                                0,
+                                1
+                              ],
+                              "input_arity": 1
                             }
-                          ],
-                          "predicates": [],
-                          "projection": [
-                            1
-                          ],
-                          "input_arity": 1
+                          ]
                         }
-                      ]
-                    }
-                  }
-                },
-                {
-                  "Get": {
-                    "id": {
-                      "Local": 0
+                      }
                     },
-                    "keys": {
-                      "raw": false,
-                      "arranged": [
-                        [
-                          [
-                            {
-                              "Column": 0
-                            }
-                          ],
-                          {
-                            "0": 0
-                          },
-                          []
-                        ]
-                      ]
-                    },
-                    "plan": {
-                      "Arrangement": [
-                        [
-                          {
-                            "Column": 0
-                          }
-                        ],
-                        null,
-                        {
-                          "expressions": [
-                            {
-                              "CallBinary": {
-                                "func": "SubInt32",
-                                "expr1": {
+                    {
+                      "Get": {
+                        "id": {
+                          "Local": 0
+                        },
+                        "keys": {
+                          "raw": false,
+                          "arranged": [
+                            [
+                              [
+                                {
                                   "Column": 0
-                                },
-                                "expr2": {
-                                  "Literal": [
-                                    {
-                                      "Ok": {
-                                        "data": [
-                                          4,
-                                          1,
-                                          0,
-                                          0,
-                                          0
-                                        ]
-                                      }
-                                    },
-                                    {
-                                      "scalar_type": "Int32",
-                                      "nullable": false
-                                    }
-                                  ]
                                 }
+                              ],
+                              {
+                                "0": 0
+                              },
+                              []
+                            ]
+                          ]
+                        },
+                        "plan": {
+                          "Arrangement": [
+                            [
+                              {
+                                "Column": 0
                               }
+                            ],
+                            null,
+                            {
+                              "expressions": [
+                                {
+                                  "CallBinary": {
+                                    "func": "SubInt32",
+                                    "expr1": {
+                                      "Column": 0
+                                    },
+                                    "expr2": {
+                                      "Literal": [
+                                        {
+                                          "Ok": {
+                                            "data": [
+                                              4,
+                                              1,
+                                              0,
+                                              0,
+                                              0
+                                            ]
+                                          }
+                                        },
+                                        {
+                                          "scalar_type": "Int32",
+                                          "nullable": false
+                                        }
+                                      ]
+                                    }
+                                  }
+                                }
+                              ],
+                              "predicates": [],
+                              "projection": [
+                                0,
+                                1
+                              ],
+                              "input_arity": 1
                             }
-                          ],
-                          "predicates": [],
-                          "projection": [
-                            1
-                          ],
-                          "input_arity": 1
+                          ]
                         }
-                      ]
+                      }
                     }
-                  }
+                  ]
                 }
-              ]
+              },
+              "mfp": {
+                "expressions": [],
+                "predicates": [],
+                "projection": [
+                  1
+                ],
+                "input_arity": 2
+              },
+              "input_key_val": null
             }
           }
         }
       }
     }
   ],
-  "sources": [
-    {
-      "id": "materialize.public.mv",
-      "op": {
-        "expressions": [],
-        "predicates": [],
-        "projection": [
-          1
-        ],
-        "input_arity": 2
-      }
-    }
-  ]
+  "sources": []
 }
 EOF
 
@@ -1159,30 +1158,44 @@ SELECT x * 5 FROM cte WHERE x = 5
                           }
                         },
                         {
-                          "Negate": {
+                          "Mfp": {
                             "input": {
-                              "Get": {
-                                "id": {
-                                  "Global": {
-                                    "User": 7
-                                  }
-                                },
-                                "keys": {
-                                  "raw": true,
-                                  "arranged": []
-                                },
-                                "plan": {
-                                  "Collection": {
-                                    "expressions": [],
-                                    "predicates": [],
-                                    "projection": [
-                                      0
-                                    ],
-                                    "input_arity": 1
+                              "Negate": {
+                                "input": {
+                                  "Get": {
+                                    "id": {
+                                      "Global": {
+                                        "User": 7
+                                      }
+                                    },
+                                    "keys": {
+                                      "raw": true,
+                                      "arranged": []
+                                    },
+                                    "plan": {
+                                      "Collection": {
+                                        "expressions": [],
+                                        "predicates": [],
+                                        "projection": [
+                                          0,
+                                          1
+                                        ],
+                                        "input_arity": 2
+                                      }
+                                    }
                                   }
                                 }
                               }
-                            }
+                            },
+                            "mfp": {
+                              "expressions": [],
+                              "predicates": [],
+                              "projection": [
+                                1
+                              ],
+                              "input_arity": 2
+                            },
+                            "input_key_val": null
                           }
                         }
                       ]
@@ -1310,6 +1323,7 @@ SELECT x * 5 FROM cte WHERE x = 5
           ]
         ],
         "projection": [
+          0,
           1
         ],
         "input_arity": 2
@@ -1653,24 +1667,7 @@ FROM t
                       ]
                     ]
                   },
-                  "plan": {
-                    "Arrangement": [
-                      [
-                        {
-                          "Column": 0
-                        }
-                      ],
-                      null,
-                      {
-                        "expressions": [],
-                        "predicates": [],
-                        "projection": [
-                          1
-                        ],
-                        "input_arity": 2
-                      }
-                    ]
-                  }
+                  "plan": "PassArrangements"
                 }
               },
               "key_val_plan": {
@@ -1679,7 +1676,7 @@ FROM t
                     "expressions": [],
                     "predicates": [],
                     "projection": [],
-                    "input_arity": 1
+                    "input_arity": 2
                   }
                 },
                 "val_plan": {
@@ -1687,10 +1684,10 @@ FROM t
                     "expressions": [],
                     "predicates": [],
                     "projection": [
-                      0,
-                      0
+                      1,
+                      1
                     ],
-                    "input_arity": 1
+                    "input_arity": 2
                   }
                 }
               },
@@ -1700,14 +1697,14 @@ FROM t
                     {
                       "func": "SumInt32",
                       "expr": {
-                        "Column": 0
+                        "Column": 1
                       },
                       "distinct": false
                     },
                     {
                       "func": "Count",
                       "expr": {
-                        "Column": 0
+                        "Column": 1
                       },
                       "distinct": true
                     }
@@ -1719,7 +1716,7 @@ FROM t
                       {
                         "func": "SumInt32",
                         "expr": {
-                          "Column": 0
+                          "Column": 1
                         },
                         "distinct": false
                       }
@@ -1732,7 +1729,7 @@ FROM t
                       {
                         "func": "Count",
                         "expr": {
-                          "Column": 0
+                          "Column": 1
                         },
                         "distinct": true
                       }
@@ -1740,7 +1737,11 @@ FROM t
                   ]
                 }
               },
-              "input_key": null
+              "input_key": [
+                {
+                  "Column": 0
+                }
+              ]
             }
           },
           "body": {
@@ -1794,42 +1795,60 @@ FROM t
                       "Union": {
                         "inputs": [
                           {
-                            "Negate": {
+                            "Mfp": {
                               "input": {
-                                "Get": {
-                                  "id": {
-                                    "Local": 0
-                                  },
-                                  "keys": {
-                                    "raw": false,
-                                    "arranged": [
-                                      [
-                                        [],
-                                        {
-                                          "0": 0,
-                                          "1": 1
-                                        },
-                                        [
-                                          0,
-                                          1
-                                        ]
-                                      ]
-                                    ]
-                                  },
-                                  "plan": {
-                                    "Arrangement": [
-                                      [],
-                                      null,
-                                      {
+                                "Negate": {
+                                  "input": {
+                                    "ArrangeBy": {
+                                      "input": {
+                                        "Get": {
+                                          "id": {
+                                            "Local": 0
+                                          },
+                                          "keys": {
+                                            "raw": false,
+                                            "arranged": [
+                                              [
+                                                [],
+                                                {
+                                                  "0": 0,
+                                                  "1": 1
+                                                },
+                                                [
+                                                  0,
+                                                  1
+                                                ]
+                                              ]
+                                            ]
+                                          },
+                                          "plan": "PassArrangements"
+                                        }
+                                      },
+                                      "forms": {
+                                        "raw": true,
+                                        "arranged": []
+                                      },
+                                      "input_key": [],
+                                      "input_mfp": {
                                         "expressions": [],
                                         "predicates": [],
-                                        "projection": [],
+                                        "projection": [
+                                          0,
+                                          1
+                                        ],
                                         "input_arity": 2
                                       }
-                                    ]
+                                    }
                                   }
                                 }
-                              }
+                              },
+                              "mfp": {
+                                "expressions": [],
+                                "predicates": [],
+                                "projection": [],
+                                "input_arity": 2
+                              },
+                              "input_key_val": null
                             }
                           },
                           {
@@ -2059,24 +2078,7 @@ FROM t
                       ]
                     ]
                   },
-                  "plan": {
-                    "Arrangement": [
-                      [
-                        {
-                          "Column": 0
-                        }
-                      ],
-                      null,
-                      {
-                        "expressions": [],
-                        "predicates": [],
-                        "projection": [
-                          1
-                        ],
-                        "input_arity": 2
-                      }
-                    ]
-                  }
+                  "plan": "PassArrangements"
                 }
               },
               "key_val_plan": {
@@ -2085,7 +2087,7 @@ FROM t
                     "expressions": [],
                     "predicates": [],
                     "projection": [],
-                    "input_arity": 1
+                    "input_arity": 2
                   }
                 },
                 "val_plan": {
@@ -2093,10 +2095,10 @@ FROM t
                     "expressions": [],
                     "predicates": [],
                     "projection": [
-                      0,
-                      0
+                      1,
+                      1
                     ],
-                    "input_arity": 1
+                    "input_arity": 2
                   }
                 }
               },
@@ -2123,7 +2125,11 @@ FROM t
                   }
                 }
               },
-              "input_key": null
+              "input_key": [
+                {
+                  "Column": 0
+                }
+              ]
             }
           },
           "body": {
@@ -2177,42 +2183,60 @@ FROM t
                       "Union": {
                         "inputs": [
                           {
-                            "Negate": {
+                            "Mfp": {
                               "input": {
-                                "Get": {
-                                  "id": {
-                                    "Local": 0
-                                  },
-                                  "keys": {
-                                    "raw": false,
-                                    "arranged": [
-                                      [
-                                        [],
-                                        {
-                                          "0": 0,
-                                          "1": 1
-                                        },
-                                        [
-                                          0,
-                                          1
-                                        ]
-                                      ]
-                                    ]
-                                  },
-                                  "plan": {
-                                    "Arrangement": [
-                                      [],
-                                      null,
-                                      {
+                                "Negate": {
+                                  "input": {
+                                    "ArrangeBy": {
+                                      "input": {
+                                        "Get": {
+                                          "id": {
+                                            "Local": 0
+                                          },
+                                          "keys": {
+                                            "raw": false,
+                                            "arranged": [
+                                              [
+                                                [],
+                                                {
+                                                  "0": 0,
+                                                  "1": 1
+                                                },
+                                                [
+                                                  0,
+                                                  1
+                                                ]
+                                              ]
+                                            ]
+                                          },
+                                          "plan": "PassArrangements"
+                                        }
+                                      },
+                                      "forms": {
+                                        "raw": true,
+                                        "arranged": []
+                                      },
+                                      "input_key": [],
+                                      "input_mfp": {
                                         "expressions": [],
                                         "predicates": [],
-                                        "projection": [],
+                                        "projection": [
+                                          0,
+                                          1
+                                        ],
                                         "input_arity": 2
                                       }
-                                    ]
+                                    }
                                   }
                                 }
-                              }
+                              },
+                              "mfp": {
+                                "expressions": [],
+                                "predicates": [],
+                                "projection": [],
+                                "input_arity": 2
+                              },
+                              "input_key_val": null
                             }
                           },
                           {
@@ -2740,24 +2764,7 @@ FROM t
                       ]
                     ]
                   },
-                  "plan": {
-                    "Arrangement": [
-                      [
-                        {
-                          "Column": 0
-                        }
-                      ],
-                      null,
-                      {
-                        "expressions": [],
-                        "predicates": [],
-                        "projection": [
-                          1
-                        ],
-                        "input_arity": 2
-                      }
-                    ]
-                  }
+                  "plan": "PassArrangements"
                 }
               },
               "key_val_plan": {
@@ -2766,7 +2773,7 @@ FROM t
                     "expressions": [],
                     "predicates": [],
                     "projection": [],
-                    "input_arity": 1
+                    "input_arity": 2
                   }
                 },
                 "val_plan": {
@@ -2778,7 +2785,7 @@ FROM t
                             "CastInt32ToString": null
                           },
                           "expr": {
-                            "Column": 0
+                            "Column": 1
                           }
                         }
                       },
@@ -2807,7 +2814,7 @@ FROM t
                                     "CallBinary": {
                                       "func": "TextConcat",
                                       "expr1": {
-                                        "Column": 1
+                                        "Column": 2
                                       },
                                       "expr2": {
                                         "Literal": [
@@ -2876,7 +2883,7 @@ FROM t
                                     "CallBinary": {
                                       "func": "TextConcat",
                                       "expr1": {
-                                        "Column": 1
+                                        "Column": 2
                                       },
                                       "expr2": {
                                         "Literal": [
@@ -2923,10 +2930,10 @@ FROM t
                     ],
                     "predicates": [],
                     "projection": [
-                      2,
-                      3
+                      3,
+                      4
                     ],
-                    "input_arity": 1
+                    "input_arity": 2
                   }
                 }
               },
@@ -2971,7 +2978,7 @@ FROM t
                                               "CastInt32ToString": null
                                             },
                                             "expr": {
-                                              "Column": 0
+                                              "Column": 1
                                             }
                                           }
                                         },
@@ -3058,7 +3065,7 @@ FROM t
                                               "CastInt32ToString": null
                                             },
                                             "expr": {
-                                              "Column": 0
+                                              "Column": 1
                                             }
                                           }
                                         },
@@ -3110,7 +3117,11 @@ FROM t
                   ]
                 }
               },
-              "input_key": null
+              "input_key": [
+                {
+                  "Column": 0
+                }
+              ]
             }
           },
           "body": {
@@ -3164,42 +3175,60 @@ FROM t
                       "Union": {
                         "inputs": [
                           {
-                            "Negate": {
+                            "Mfp": {
                               "input": {
-                                "Get": {
-                                  "id": {
-                                    "Local": 0
-                                  },
-                                  "keys": {
-                                    "raw": false,
-                                    "arranged": [
-                                      [
-                                        [],
-                                        {
-                                          "0": 0,
-                                          "1": 1
-                                        },
-                                        [
-                                          0,
-                                          1
-                                        ]
-                                      ]
-                                    ]
-                                  },
-                                  "plan": {
-                                    "Arrangement": [
-                                      [],
-                                      null,
-                                      {
+                                "Negate": {
+                                  "input": {
+                                    "ArrangeBy": {
+                                      "input": {
+                                        "Get": {
+                                          "id": {
+                                            "Local": 0
+                                          },
+                                          "keys": {
+                                            "raw": false,
+                                            "arranged": [
+                                              [
+                                                [],
+                                                {
+                                                  "0": 0,
+                                                  "1": 1
+                                                },
+                                                [
+                                                  0,
+                                                  1
+                                                ]
+                                              ]
+                                            ]
+                                          },
+                                          "plan": "PassArrangements"
+                                        }
+                                      },
+                                      "forms": {
+                                        "raw": true,
+                                        "arranged": []
+                                      },
+                                      "input_key": [],
+                                      "input_mfp": {
                                         "expressions": [],
                                         "predicates": [],
-                                        "projection": [],
+                                        "projection": [
+                                          0,
+                                          1
+                                        ],
                                         "input_arity": 2
                                       }
-                                    ]
+                                    }
                                   }
                                 }
-                              }
+                              },
+                              "mfp": {
+                                "expressions": [],
+                                "predicates": [],
+                                "projection": [],
+                                "input_arity": 2
+                              },
+                              "input_key_val": null
                             }
                           },
                           {
@@ -3814,24 +3843,7 @@ FROM t
                       ]
                     ]
                   },
-                  "plan": {
-                    "Arrangement": [
-                      [
-                        {
-                          "Column": 0
-                        }
-                      ],
-                      null,
-                      {
-                        "expressions": [],
-                        "predicates": [],
-                        "projection": [
-                          1
-                        ],
-                        "input_arity": 2
-                      }
-                    ]
-                  }
+                  "plan": "PassArrangements"
                 }
               },
               "key_val_plan": {
@@ -3840,7 +3852,7 @@ FROM t
                     "expressions": [],
                     "predicates": [],
                     "projection": [],
-                    "input_arity": 1
+                    "input_arity": 2
                   }
                 },
                 "val_plan": {
@@ -3852,7 +3864,7 @@ FROM t
                             "CastInt32ToString": null
                           },
                           "expr": {
-                            "Column": 0
+                            "Column": 1
                           }
                         }
                       },
@@ -3881,7 +3893,7 @@ FROM t
                                     "CallBinary": {
                                       "func": "TextConcat",
                                       "expr1": {
-                                        "Column": 1
+                                        "Column": 2
                                       },
                                       "expr2": {
                                         "Literal": [
@@ -3950,7 +3962,7 @@ FROM t
                                     "CallBinary": {
                                       "func": "TextConcat",
                                       "expr1": {
-                                        "Column": 1
+                                        "Column": 2
                                       },
                                       "expr2": {
                                         "Literal": [
@@ -3997,14 +4009,14 @@ FROM t
                     ],
                     "predicates": [],
                     "projection": [
-                      0,
-                      2,
-                      0,
-                      0,
-                      0,
-                      3
+                      1,
+                      3,
+                      1,
+                      1,
+                      1,
+                      4
                     ],
-                    "input_arity": 1
+                    "input_arity": 2
                   }
                 }
               },
@@ -4015,14 +4027,14 @@ FROM t
                       {
                         "func": "Count",
                         "expr": {
-                          "Column": 0
+                          "Column": 1
                         },
                         "distinct": true
                       },
                       {
                         "func": "SumInt32",
                         "expr": {
-                          "Column": 0
+                          "Column": 1
                         },
                         "distinct": false
                       }
@@ -4034,7 +4046,7 @@ FROM t
                         {
                           "func": "SumInt32",
                           "expr": {
-                            "Column": 0
+                            "Column": 1
                           },
                           "distinct": false
                         }
@@ -4047,7 +4059,7 @@ FROM t
                         {
                           "func": "Count",
                           "expr": {
-                            "Column": 0
+                            "Column": 1
                           },
                           "distinct": true
                         }
@@ -4115,7 +4127,7 @@ FROM t
                                                 "CastInt32ToString": null
                                               },
                                               "expr": {
-                                                "Column": 0
+                                                "Column": 1
                                               }
                                             }
                                           },
@@ -4202,7 +4214,7 @@ FROM t
                                                 "CastInt32ToString": null
                                               },
                                               "expr": {
-                                                "Column": 0
+                                                "Column": 1
                                               }
                                             }
                                           },
@@ -4263,7 +4275,11 @@ FROM t
                   ]
                 }
               },
-              "input_key": null
+              "input_key": [
+                {
+                  "Column": 0
+                }
+              ]
             }
           },
           "body": {
@@ -4329,50 +4345,72 @@ FROM t
                       "Union": {
                         "inputs": [
                           {
-                            "Negate": {
+                            "Mfp": {
                               "input": {
-                                "Get": {
-                                  "id": {
-                                    "Local": 0
-                                  },
-                                  "keys": {
-                                    "raw": false,
-                                    "arranged": [
-                                      [
-                                        [],
-                                        {
-                                          "0": 0,
-                                          "1": 1,
-                                          "2": 2,
-                                          "3": 3,
-                                          "4": 4,
-                                          "5": 5
-                                        },
-                                        [
+                                "Negate": {
+                                  "input": {
+                                    "ArrangeBy": {
+                                      "input": {
+                                        "Get": {
+                                          "id": {
+                                            "Local": 0
+                                          },
+                                          "keys": {
+                                            "raw": false,
+                                            "arranged": [
+                                              [
+                                                [],
+                                                {
+                                                  "0": 0,
+                                                  "1": 1,
+                                                  "2": 2,
+                                                  "3": 3,
+                                                  "4": 4,
+                                                  "5": 5
+                                                },
+                                                [
+                                                  0,
+                                                  1,
+                                                  2,
+                                                  3,
+                                                  4,
+                                                  5
+                                                ]
+                                              ]
+                                            ]
+                                          },
+                                          "plan": "PassArrangements"
+                                        }
+                                      },
+                                      "forms": {
+                                        "raw": true,
+                                        "arranged": []
+                                      },
+                                      "input_key": [],
+                                      "input_mfp": {
+                                        "expressions": [],
+                                        "predicates": [],
+                                        "projection": [
                                           0,
                                           1,
                                           2,
                                           3,
                                           4,
                                           5
-                                        ]
-                                      ]
-                                    ]
-                                  },
-                                  "plan": {
-                                    "Arrangement": [
-                                      [],
-                                      null,
-                                      {
-                                        "expressions": [],
-                                        "predicates": [],
-                                        "projection": [],
+                                        ],
                                         "input_arity": 6
                                       }
-                                    ]
+                                    }
                                   }
                                 }
-                              }
+                              },
+                              "mfp": {
+                                "expressions": [],
+                                "predicates": [],
+                                "projection": [],
+                                "input_arity": 6
+                              },
+                              "input_key_val": null
                             }
                           },
                           {
@@ -4637,9 +4675,10 @@ WHERE a = c AND d = e AND b + d > 42
                         "expressions": [],
                         "predicates": [],
                         "projection": [
-                          0
+                          0,
+                          1
                         ],
-                        "input_arity": 1
+                        "input_arity": 2
                       }
                     }
                   }
@@ -4654,9 +4693,12 @@ WHERE a = c AND d = e AND b + d > 42
                         }
                       ],
                       {
-                        "0": 0
+                        "0": 0,
+                        "1": 1
                       },
-                      []
+                      [
+                        1
+                      ]
                     ]
                   ]
                 },
@@ -4665,9 +4707,10 @@ WHERE a = c AND d = e AND b + d > 42
                   "expressions": [],
                   "predicates": [],
                   "projection": [
-                    0
+                    0,
+                    1
                   ],
-                  "input_arity": 1
+                  "input_arity": 2
                 }
               }
             }
@@ -4813,7 +4856,7 @@ WHERE a = c AND d = e AND b + d > 42
                           1,
                           2
                         ],
-                        "input_arity": 3
+                        "input_arity": 4
                       }
                     }
                   }
@@ -4921,7 +4964,8 @@ WHERE a = c AND d = e AND b + d > 42
           ]
         ],
         "projection": [
-          0
+          0,
+          1
         ],
         "input_arity": 2
       }

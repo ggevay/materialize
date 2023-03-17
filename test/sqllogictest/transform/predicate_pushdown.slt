@@ -121,9 +121,8 @@ Explained Query:
   Union // { arity: 1 }
     Map (3) // { arity: 1 }
       Distinct // { arity: 0 }
-        Project () // { arity: 0 }
-          Filter (#0 = 3) // { arity: 3 }
-            Get materialize.public.x // { arity: 3 }
+        Filter (#0 = 3) // { arity: 3 }
+          Get materialize.public.x // { arity: 3 }
     Filter (#0 = 3) // { arity: 1 }
       Get materialize.public.y // { arity: 1 }
 
@@ -369,14 +368,13 @@ WHERE
         r.schema_id = s.id AND (r.type = 'materialized-view' OR (r.type = 'view' AND s.name != 'doesntmatter'))
 ----
 Explained Query:
-  Project (#1, #3) // { arity: 2 }
-    Filter ((#4 = "materialized-view") OR ((#4 = "view") AND (#1 != "doesntmatter"))) // { arity: 5 }
-      Join on=(#0 = #2) type=differential // { arity: 5 }
+  Project (#3, #5) // { arity: 2 }
+    Filter ((#6 = "materialized-view") OR ((#6 = "view") AND (#3 != "doesntmatter"))) // { arity: 7 }
+      Join on=(#0 = #4) type=differential // { arity: 7 }
         implementation
           %1[#0]Kef » %0:mz_schemas[#0]Kef
-        ArrangeBy keys=[[#0]] // { arity: 2 }
-          Project (#0, #3) // { arity: 2 }
-            Get mz_catalog.mz_schemas // { arity: 4 }
+        ArrangeBy keys=[[#0]] // { arity: 4 }
+          Get mz_catalog.mz_schemas // { arity: 4 }
         ArrangeBy keys=[[#0]] // { arity: 3 }
           Union // { arity: 3 }
             Project (#2, #3, #5) // { arity: 3 }
@@ -434,15 +432,13 @@ Explained Query:
           Get l0
         ArrangeBy keys=[[#0]]
           TopK group_by=[#0] limit=5 monotonic=false
-            Project (#0)
-              Join on=(#0 = #1) type=differential
-                ArrangeBy keys=[[#0]]
-                  Distinct group_by=[#0]
-                    Get l0
-                ArrangeBy keys=[[#0]]
-                  Project (#0)
-                    Filter ((#0 = 41) OR (#0 = 42))
-                      Get materialize.public.x
+            Join on=(#0 = #1) type=differential
+              ArrangeBy keys=[[#0]]
+                Distinct group_by=[#0]
+                  Get l0
+              ArrangeBy keys=[[#0]]
+                Filter ((#0 = 41) OR (#0 = 42))
+                  Get materialize.public.x
   With
     cte l0 =
       Filter ((#0 = 41) OR (#0 = 42))

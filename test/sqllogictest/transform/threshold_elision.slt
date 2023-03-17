@@ -71,9 +71,9 @@ Explained Query:
   Union
     Project (#0)
       Get materialize.public.people
-    Map (5)
-      Negate
-        Project ()
+    Project (#4)
+      Map (5)
+        Negate
           Filter (#0 = 5)
             Get materialize.public.people
 
@@ -91,13 +91,14 @@ EXCEPT ALL
 )
 ----
 Explained Query:
-  Union
-    Project (#0)
-      Get materialize.public.people
-    Negate
+  Threshold
+    Union
       Project (#0)
-        Filter (#3) IS NOT NULL
-          Get materialize.public.people
+        Get materialize.public.people
+      Project (#0)
+        Negate
+          Filter (#3) IS NOT NULL
+            Get materialize.public.people
 
 EOF
 
@@ -110,14 +111,12 @@ SELECT name FROM people WHERE id > 1
 ----
 Explained Query:
   Union
-    Distinct group_by=[#0]
-      Project (#1)
-        Get materialize.public.people
+    Distinct group_by=[#1]
+      Get materialize.public.people
     Negate
-      Distinct group_by=[#0]
-        Project (#1)
-          Filter (#0 > 1)
-            Get materialize.public.people
+      Distinct group_by=[#1]
+        Filter (#0 > 1)
+          Get materialize.public.people
 
 EOF
 
@@ -134,14 +133,12 @@ Explained Query:
     Union
       Project (#1)
         Reduce group_by=[#1] aggregates=[max(#0)]
-          Project (#0, #1)
-            Get materialize.public.people
-      Negate
-        Project (#1)
+          Get materialize.public.people
+      Project (#1)
+        Negate
           Reduce group_by=[#1] aggregates=[max(#0)]
-            Project (#0, #1)
-              Filter (#0 > 1)
-                Get materialize.public.people
+            Filter (#0 > 1)
+              Get materialize.public.people
 
 EOF
 
@@ -171,16 +168,14 @@ EXCEPT ALL
 )
 ----
 Explained Query:
-  Return
+  Threshold
     Union
-      Get l0
-      Negate
-        TopK group_by=[#0] limit=1 monotonic=false
-          Get l0
-  With
-    cte l0 =
       Project (#0, #1)
         Get materialize.public.people
+      Project (#0, #1)
+        Negate
+          TopK group_by=[#0] limit=1 monotonic=false
+            Get materialize.public.people
 
 EOF
 
@@ -210,16 +205,14 @@ EXCEPT
 )
 ----
 Explained Query:
-  Return
+  Threshold
     Union
-      Get l0
-      Negate
-        TopK group_by=[#0] limit=1 monotonic=false
-          Get l0
-  With
-    cte l0 =
       Project (#0, #1)
         Get materialize.public.people
+      Project (#0, #1)
+        Negate
+          TopK group_by=[#0] limit=1 monotonic=false
+            Get materialize.public.people
 
 EOF
 
@@ -231,20 +224,20 @@ SELECT * FROM cte EXCEPT ALL SELECT * FROM cte where id > 5;
 ----
 Explained Query:
   Return
-    Union
-      Get l0
-      Negate
-        Filter (#0 > 5)
+    Threshold
+      Project (#0)
+        Union
           Get l0
+          Negate
+            Filter (#0 > 5)
+              Get l0
   With
     cte l0 =
       CrossJoin type=differential
         ArrangeBy keys=[[]]
-          Project (#0)
-            Get materialize.public.people
+          Get materialize.public.people
         ArrangeBy keys=[[]]
-          Project ()
-            Get materialize.public.bands
+          Get materialize.public.bands
 
 EOF
 
@@ -263,9 +256,8 @@ Explained Query:
           Get l0
   With
     cte l0 =
-      Distinct group_by=[#0]
-        Project (#1)
-          Get materialize.public.people
+      Distinct group_by=[#1]
+        Get materialize.public.people
 
 EOF
 
@@ -288,9 +280,8 @@ Explained Query:
           Get l0
   With
     cte l0 =
-      Reduce group_by=[extract_year_d(#0)] aggregates=[count(*)]
-        Project (#2)
-          Get materialize.public.people
+      Reduce group_by=[extract_year_d(#2)] aggregates=[count(*)]
+        Get materialize.public.people
 
 EOF
 
@@ -348,13 +339,12 @@ Explained Query:
     Union
       Project (#1)
         Get materialize.public.people
-      Negate
-        Project (#1)
-          Filter (#0 = 1)
-            Get materialize.public.people
-      Negate
-        Project (#1)
-          Filter (#0 = 2)
-            Get materialize.public.people
+      Project (#1)
+        Negate
+          Union
+            Filter (#0 = 1)
+              Get materialize.public.people
+            Filter (#0 = 2)
+              Get materialize.public.people
 
 EOF

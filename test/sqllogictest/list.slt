@@ -2894,14 +2894,12 @@ query T multiline
 EXPLAIN WITH(arity, join_impls) SELECT row_number() over () from (select f1 from m3 limit 1)
 ----
 Explained Query:
-  Project (#2) // { arity: 1 }
-    Map (record_get[0](#1)) // { arity: 3 }
-      FlatMap unnest_list(#0) // { arity: 2 }
-        Project (#1) // { arity: 1 }
-          Map (list[row(1, row(#0))]) // { arity: 2 }
-            TopK limit=1 monotonic=false // { arity: 1 }
-              Project (#0) // { arity: 1 }
-                Get materialize.public.m3 // { arity: 11 }
+  Project (#13) // { arity: 1 }
+    Map (record_get[0](#12)) // { arity: 14 }
+      FlatMap unnest_list(#11) // { arity: 13 }
+        Map (list[row(1, row(#0))]) // { arity: 12 }
+          TopK limit=1 monotonic=false // { arity: 11 }
+            Get materialize.public.m3 // { arity: 11 }
 
 Used Indexes:
   - materialize.public.m3_primary_idx

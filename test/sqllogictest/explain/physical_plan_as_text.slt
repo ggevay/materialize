@@ -160,12 +160,11 @@ Explained Query:
           key=#0
           raw=false
           arrangements[0]={ key=[#0], permutation=id, thinning=(#1) }
-        Negate
-          Get::Collection materialize.public.mv
-            raw=true
-
-Source materialize.public.mv
-  project=(#1)
+        Mfp
+          project=(#1)
+          Negate
+            Get::PassArrangements materialize.public.mv
+              raw=true
 
 Used Indexes:
   - materialize.public.t_a_idx
@@ -180,19 +179,21 @@ WITH cte(x) as (SELECT a FROM t EXCEPT ALL SELECT b FROM mv)
 ----
 Explained Query:
   Return
-    Union
-      Get::Arrangement l0
-        project=(#1)
-        map=((#0 + 1))
-        key=#0
-        raw=false
-        arrangements[0]={ key=[#0], permutation=id, thinning=() }
-      Get::Arrangement l0
-        project=(#1)
-        map=((#0 - 1))
-        key=#0
-        raw=false
-        arrangements[0]={ key=[#0], permutation=id, thinning=() }
+    Mfp
+      project=(#1)
+      Union
+        Get::Arrangement l0
+          project=(#0, #1)
+          map=((#0 + 1))
+          key=#0
+          raw=false
+          arrangements[0]={ key=[#0], permutation=id, thinning=() }
+        Get::Arrangement l0
+          project=(#0, #1)
+          map=((#0 - 1))
+          key=#0
+          raw=false
+          arrangements[0]={ key=[#0], permutation=id, thinning=() }
   With
     cte l0 =
       Threshold::Basic ensure_arrangement={ key=[#0], permutation=id, thinning=() }
@@ -205,12 +206,11 @@ Explained Query:
               key=#0
               raw=false
               arrangements[0]={ key=[#0], permutation=id, thinning=(#1) }
-            Negate
-              Get::Collection materialize.public.mv
-                raw=true
-
-Source materialize.public.mv
-  project=(#1)
+            Mfp
+              project=(#1)
+              Negate
+                Get::PassArrangements materialize.public.mv
+                  raw=true
 
 Used Indexes:
   - materialize.public.t_a_idx
@@ -248,12 +248,13 @@ Explained Query:
               arrangements[0]={ key=[#0], permutation=id, thinning=() }
               Constant
                 - (5)
-          Negate
-            Get::Collection materialize.public.mv
-              raw=true
+          Mfp
+            project=(#1)
+            Negate
+              Get::Collection materialize.public.mv
+                raw=true
 
 Source materialize.public.mv
-  project=(#1)
   filter=((#1 = 5))
 
 Used Indexes:
@@ -348,26 +349,28 @@ Explained Query:
         project=(#0, #1)
         map=(null, 0)
         Union
-          Negate
-            Get::Arrangement l0
-              project=()
-              key=
-              raw=false
-              arrangements[0]={ key=[], permutation=id, thinning=(#0, #1) }
+          Mfp
+            project=()
+            Negate
+              ArrangeBy
+                input_key=[]
+                raw=true
+                Get::PassArrangements l0
+                  raw=false
+                  arrangements[0]={ key=[], permutation=id, thinning=(#0, #1) }
           Constant
             - ()
   With
     cte l0 =
       Reduce::Accumulable
-        simple_aggrs[0]=(0, 0, sum(#0))
-        distinct_aggrs[0]=(1, 1, count(distinct #0))
+        simple_aggrs[0]=(0, 0, sum(#1))
+        distinct_aggrs[0]=(1, 1, count(distinct #1))
         val_plan
-          project=(#0, #0)
+          project=(#1, #1)
         key_plan
           project=()
-        Get::Arrangement materialize.public.t
-          project=(#1)
-          key=#0
+        input_key=#0
+        Get::PassArrangements materialize.public.t
           raw=false
           arrangements[0]={ key=[#0], permutation=id, thinning=(#1) }
 
@@ -426,12 +429,15 @@ Explained Query:
         project=(#0, #1)
         map=(null, null)
         Union
-          Negate
-            Get::Arrangement l0
-              project=()
-              key=
-              raw=false
-              arrangements[0]={ key=[], permutation=id, thinning=(#0, #1) }
+          Mfp
+            project=()
+            Negate
+              ArrangeBy
+                input_key=[]
+                raw=true
+                Get::PassArrangements l0
+                  raw=false
+                  arrangements[0]={ key=[], permutation=id, thinning=(#0, #1) }
           Constant
             - ()
   With
@@ -441,12 +447,11 @@ Explained Query:
         skips=[0, 0]
         buckets=[0, 0]
         val_plan
-          project=(#0, #0)
+          project=(#1, #1)
         key_plan
           project=()
-        Get::Arrangement materialize.public.t
-          project=(#1)
-          key=#0
+        input_key=#0
+        Get::PassArrangements materialize.public.t
           raw=false
           arrangements[0]={ key=[#0], permutation=id, thinning=(#1) }
 
@@ -505,27 +510,29 @@ Explained Query:
         project=(#0, #1)
         map=(null, null)
         Union
-          Negate
-            Get::Arrangement l0
-              project=()
-              key=
-              raw=false
-              arrangements[0]={ key=[], permutation=id, thinning=(#0, #1) }
+          Mfp
+            project=()
+            Negate
+              ArrangeBy
+                input_key=[]
+                raw=true
+                Get::PassArrangements l0
+                  raw=false
+                  arrangements[0]={ key=[], permutation=id, thinning=(#0, #1) }
           Constant
             - ()
   With
     cte l0 =
       Reduce::Basic
-        aggrs[0]=(0, string_agg(row(row((integer_to_text(#0) || "1"), ","))))
-        aggrs[1]=(1, string_agg(row(row((integer_to_text(#0) || "2"), ","))))
+        aggrs[0]=(0, string_agg(row(row((integer_to_text(#1) || "1"), ","))))
+        aggrs[1]=(1, string_agg(row(row((integer_to_text(#1) || "2"), ","))))
         val_plan
-          project=(#2, #3)
-          map=(integer_to_text(#0), row(row((#1 || "1"), ",")), row(row((#1 || "2"), ",")))
+          project=(#3, #4)
+          map=(integer_to_text(#1), row(row((#2 || "1"), ",")), row(row((#2 || "2"), ",")))
         key_plan
           project=()
-        Get::Arrangement materialize.public.t
-          project=(#1)
-          key=#0
+        input_key=#0
+        Get::PassArrangements materialize.public.t
           raw=false
           arrangements[0]={ key=[#0], permutation=id, thinning=(#1) }
 
@@ -601,12 +608,15 @@ Explained Query:
         project=(#0..=#5)
         map=(0, null, null, null, null, null)
         Union
-          Negate
-            Get::Arrangement l0
-              project=()
-              key=
-              raw=false
-              arrangements[0]={ key=[], permutation=id, thinning=(#0..=#5) }
+          Mfp
+            project=()
+            Negate
+              ArrangeBy
+                input_key=[]
+                raw=true
+                Get::PassArrangements l0
+                  raw=false
+                  arrangements[0]={ key=[], permutation=id, thinning=(#0..=#5) }
           Constant
             - ()
   With
@@ -614,23 +624,22 @@ Explained Query:
       Reduce::Collation
         aggregate_types=[a, b, h, h, a, b]
         accumulable
-          simple_aggrs[0]=(1, 4, sum(#0))
-          distinct_aggrs[0]=(0, 0, count(distinct #0))
+          simple_aggrs[0]=(1, 4, sum(#1))
+          distinct_aggrs[0]=(0, 0, count(distinct #1))
         hierarchical
           aggr_funcs=[min, max]
           skips=[2, 0]
           buckets=[2, 0]
         basic
-          aggrs[0]=(1, string_agg(row(row((integer_to_text(#0) || "1"), ","))))
-          aggrs[1]=(5, string_agg(row(row((integer_to_text(#0) || "2"), ","))))
+          aggrs[0]=(1, string_agg(row(row((integer_to_text(#1) || "1"), ","))))
+          aggrs[1]=(5, string_agg(row(row((integer_to_text(#1) || "2"), ","))))
         val_plan
-          project=(#0, #2, #0, #0, #0, #3)
-          map=(integer_to_text(#0), row(row((#1 || "1"), ",")), row(row((#1 || "2"), ",")))
+          project=(#1, #3, #1, #1, #1, #4)
+          map=(integer_to_text(#1), row(row((#2 || "1"), ",")), row(row((#2 || "2"), ",")))
         key_plan
           project=()
-        Get::Arrangement materialize.public.t
-          project=(#1)
-          key=#0
+        input_key=#0
+        Get::PassArrangements materialize.public.t
           raw=false
           arrangements[0]={ key=[#0], permutation=id, thinning=(#1) }
 
@@ -673,14 +682,13 @@ Explained Query:
         raw=true
     ArrangeBy
       raw=true
-      arrangements[0]={ key=[#0], permutation=id, thinning=() }
+      arrangements[0]={ key=[#0], permutation=id, thinning=(#1) }
       Get::Collection materialize.public.v
         raw=true
 
 Source materialize.public.u
   filter=((#0) IS NOT NULL AND (#1) IS NOT NULL)
 Source materialize.public.v
-  project=(#0)
   filter=((#0) IS NOT NULL)
 
 Used Indexes:

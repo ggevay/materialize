@@ -254,8 +254,7 @@ Explained Query:
       Get materialize.public.t1 // { arity: 1 }
     ArrangeBy keys=[[]] // { arity: 0 }
       Distinct // { arity: 0 }
-        Project () // { arity: 0 }
-          Get materialize.public.t2 // { arity: 1 }
+        Get materialize.public.t2 // { arity: 1 }
 
 EOF
 
@@ -273,8 +272,7 @@ Explained Query:
         Get materialize.public.t3 // { arity: 2 }
       ArrangeBy keys=[[]] // { arity: 0 }
         Distinct // { arity: 0 }
-          Project () // { arity: 0 }
-            Get materialize.public.t2 // { arity: 1 }
+          Get materialize.public.t2 // { arity: 1 }
 
 EOF
 
@@ -445,24 +443,25 @@ Explained Query:
           Get materialize.public.y // { arity: 1 }
         ArrangeBy keys=[[#0]] // { arity: 2 }
           Union // { arity: 2 }
-            Map (true) // { arity: 2 }
-              Get l1 // { arity: 1 }
+            Project (#0, #2) // { arity: 2 }
+              Map (true) // { arity: 3 }
+                Get l1 // { arity: 2 }
             Map (false) // { arity: 2 }
               Union // { arity: 1 }
-                Negate // { arity: 1 }
-                  Get l1 // { arity: 1 }
+                Project (#0) // { arity: 1 }
+                  Negate // { arity: 2 }
+                    Get l1 // { arity: 2 }
                 Get l0 // { arity: 1 }
   With
     cte l1 =
-      Project (#0) // { arity: 1 }
-        Join on=(#0 = #1) type=differential // { arity: 2 }
-          implementation
-            %0:l0[#0]UKA » %1[#0]UKA
-          ArrangeBy keys=[[#0]] // { arity: 1 }
-            Get l0 // { arity: 1 }
-          ArrangeBy keys=[[#0]] // { arity: 1 }
-            Distinct group_by=[#0] // { arity: 1 }
-              Get materialize.public.x // { arity: 1 }
+      Join on=(#0 = #1) type=differential // { arity: 2 }
+        implementation
+          %0:l0[#0]UKA » %1[#0]UKA
+        ArrangeBy keys=[[#0]] // { arity: 1 }
+          Get l0 // { arity: 1 }
+        ArrangeBy keys=[[#0]] // { arity: 1 }
+          Distinct group_by=[#0] // { arity: 1 }
+            Get materialize.public.x // { arity: 1 }
     cte l0 =
       Distinct group_by=[#0] // { arity: 1 }
         Get materialize.public.y // { arity: 1 }
@@ -483,24 +482,25 @@ Explained Query:
             Get materialize.public.y // { arity: 1 }
           ArrangeBy keys=[[#0]] // { arity: 2 }
             Union // { arity: 2 }
-              Map (true) // { arity: 2 }
-                Get l1 // { arity: 1 }
+              Project (#0, #2) // { arity: 2 }
+                Map (true) // { arity: 3 }
+                  Get l1 // { arity: 2 }
               Map (false) // { arity: 2 }
                 Union // { arity: 1 }
-                  Negate // { arity: 1 }
-                    Get l1 // { arity: 1 }
+                  Project (#0) // { arity: 1 }
+                    Negate // { arity: 2 }
+                      Get l1 // { arity: 2 }
                   Get l0 // { arity: 1 }
   With
     cte l1 =
-      Project (#0) // { arity: 1 }
-        Join on=(#0 = #1) type=differential // { arity: 2 }
-          implementation
-            %0:l0[#0]UKA » %1[#0]UKA
-          ArrangeBy keys=[[#0]] // { arity: 1 }
-            Get l0 // { arity: 1 }
-          ArrangeBy keys=[[#0]] // { arity: 1 }
-            Distinct group_by=[#0] // { arity: 1 }
-              Get materialize.public.x // { arity: 1 }
+      Join on=(#0 = #1) type=differential // { arity: 2 }
+        implementation
+          %0:l0[#0]UKA » %1[#0]UKA
+        ArrangeBy keys=[[#0]] // { arity: 1 }
+          Get l0 // { arity: 1 }
+        ArrangeBy keys=[[#0]] // { arity: 1 }
+          Distinct group_by=[#0] // { arity: 1 }
+            Get materialize.public.x // { arity: 1 }
     cte l0 =
       Distinct group_by=[#0] // { arity: 1 }
         Get materialize.public.y // { arity: 1 }
@@ -532,15 +532,14 @@ Explained Query:
   With
     cte l1 =
       Distinct group_by=[#0] // { arity: 1 }
-        Project (#0) // { arity: 1 }
-          Filter (#0 <= #1) // { arity: 2 }
-            CrossJoin type=differential // { arity: 2 }
-              implementation
-                %0:l0[×] » %1:x[×]
-              ArrangeBy keys=[[]] // { arity: 1 }
-                Get l0 // { arity: 1 }
-              ArrangeBy keys=[[]] // { arity: 1 }
-                Get materialize.public.x // { arity: 1 }
+        Filter (#0 <= #1) // { arity: 2 }
+          CrossJoin type=differential // { arity: 2 }
+            implementation
+              %0:l0[×] » %1:x[×]
+            ArrangeBy keys=[[]] // { arity: 1 }
+              Get l0 // { arity: 1 }
+            ArrangeBy keys=[[]] // { arity: 1 }
+              Get materialize.public.x // { arity: 1 }
     cte l0 =
       Distinct group_by=[#0] // { arity: 1 }
         Get materialize.public.y // { arity: 1 }
@@ -646,7 +645,6 @@ WHERE a IN (9, 0)
 Explained Query:
   Map (1) // { arity: 1 }
     Distinct // { arity: 0 }
-      Project () // { arity: 0 }
-        Get materialize.public.y // { arity: 1 }
+      Get materialize.public.y // { arity: 1 }
 
 EOF

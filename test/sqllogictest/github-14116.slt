@@ -44,25 +44,23 @@ Explained Query:
             Union // { arity: 0 }
               Negate // { arity: 0 }
                 Distinct // { arity: 0 }
-                  Project () // { arity: 0 }
-                    Get l1 // { arity: 1 }
+                  Get l1 // { arity: 1 }
               Constant // { arity: 0 }
                 - ()
   With
     cte l1 =
       Union // { arity: 1 }
-        Get l0 // { arity: 1 }
-        Map (error("more than one record produced in subquery")) // { arity: 1 }
-          Project () // { arity: 0 }
+        Project (#2) // { arity: 1 }
+          Get l0 // { arity: 3 }
+        Project (#1) // { arity: 1 }
+          Map (error("more than one record produced in subquery")) // { arity: 2 }
             Filter (#0 > 1) // { arity: 1 }
               Reduce aggregates=[count(*)] // { arity: 1 }
-                Project () // { arity: 0 }
-                  Get l0 // { arity: 1 }
+                Get l0 // { arity: 3 }
     cte l0 =
-      Project (#2) // { arity: 1 }
-        Reduce group_by=[#0, #1] aggregates=[count(*)] // { arity: 3 }
-          Filter (#0 = #0) AND (#1 = #1) // { arity: 2 }
-            Get materialize.public.test2 // { arity: 2 }
+      Reduce group_by=[#0, #1] aggregates=[count(*)] // { arity: 3 }
+        Filter (#0 = #0) AND (#1 = #1) // { arity: 2 }
+          Get materialize.public.test2 // { arity: 2 }
 
 Source materialize.public.test2
   filter=((#0 = #0) AND (#1 = #1))

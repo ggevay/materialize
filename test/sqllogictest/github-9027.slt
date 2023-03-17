@@ -73,66 +73,64 @@ Explained Query:
       source={ relation=1, key=[#0] }
       ArrangeBy
         raw=true
-        arrangements[0]={ key=[#0], permutation=id, thinning=() }
-        Get::PassArrangements l0
+        arrangements[0]={ key=[#0], permutation=id, thinning=(#1..=#24) }
+        Get::PassArrangements l1
           raw=true
       Reduce::Distinct
         val_plan
           project=()
-        key_plan=id
+        key_plan
+          project=(#16)
         Join::Linear
           linear_stage[1]
             closure
-              project=(#0)
-              filter=(((#3 = 1997-07-06) OR (date_to_timestamp(#2) = (#1 - 7 days))))
+              project=(#10..=#25, #0..=#9)
+              filter=(((#22 = 1997-07-06) OR (date_to_timestamp(#21) = (#5 - 7 days))))
             lookup={ relation=0, key=[] }
-            stream={ key=[], thinning=(#0, #1) }
+            stream={ key=[], thinning=(#0..=#9) }
           linear_stage[0]
+            closure
+              project=(#0, #0..=#8)
             lookup={ relation=2, key=[#0] }
             stream={ key=[#0], thinning=() }
           source={ relation=1, key=[#0] }
-          ArrangeBy
+          Get::PassArrangements l0
             raw=true
-            arrangements[0]={ key=[], permutation=id, thinning=(#0, #1) }
-            Get::Collection materialize.public.lineitem
-              project=(#1, #2)
-              raw=true
+            arrangements[0]={ key=[], permutation=id, thinning=(#0..=#15) }
           Reduce::Distinct
             val_plan
               project=()
-            key_plan=id
-            Get::PassArrangements l0
+            key_plan
+              project=(#0)
+            Get::PassArrangements l1
               raw=true
           ArrangeBy
             raw=true
-            arrangements[0]={ key=[#0], permutation=id, thinning=(#1) }
+            arrangements[0]={ key=[#0], permutation=id, thinning=(#1..=#8) }
             Get::Collection materialize.public.orders
               filter=((#0) IS NOT NULL)
               raw=true
   With
-    cte l0 =
+    cte l1 =
       Join::Linear
         linear_stage[0]
           lookup={ relation=1, key=[] }
-          stream={ key=[], thinning=(#0) }
+          stream={ key=[], thinning=(#0..=#15) }
         source={ relation=0, key=[] }
+        Get::PassArrangements l0
+          raw=true
+          arrangements[0]={ key=[], permutation=id, thinning=(#0..=#15) }
         ArrangeBy
           raw=true
-          arrangements[0]={ key=[], permutation=id, thinning=(#0) }
-          Get::Collection materialize.public.lineitem
-            project=(#0)
+          arrangements[0]={ key=[], permutation=id, thinning=(#0..=#8) }
+          Get::PassArrangements materialize.public.orders
             raw=true
-        ArrangeBy
+    cte l0 =
+      ArrangeBy
+        raw=true
+        arrangements[0]={ key=[], permutation=id, thinning=(#0..=#15) }
+        Get::PassArrangements materialize.public.lineitem
           raw=true
-          arrangements[0]={ key=[], permutation=id, thinning=() }
-          Get::Collection materialize.public.orders
-            project=()
-            raw=true
-
-Source materialize.public.orders
-  project=(#0, #4)
-Source materialize.public.lineitem
-  project=(#0, #11, #12)
 
 EOF
 

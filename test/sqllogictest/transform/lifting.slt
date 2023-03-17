@@ -76,10 +76,9 @@ select a, b from t where a = 1 group by a, b
 Explained Query:
   Project (#1, #0) // { arity: 2 }
     Map (1) // { arity: 2 }
-      Distinct group_by=[#0] // { arity: 1 }
-        Project (#1) // { arity: 1 }
-          Filter (#0 = 1) // { arity: 2 }
-            Get materialize.public.t // { arity: 2 }
+      Distinct group_by=[#1] // { arity: 1 }
+        Filter (#0 = 1) // { arity: 2 }
+          Get materialize.public.t // { arity: 2 }
 
 Source materialize.public.t
   filter=((#0 = 1))
@@ -93,9 +92,8 @@ select a, b from t where b = 1 group by a, b
 Explained Query:
   Map (1) // { arity: 2 }
     Distinct group_by=[#0] // { arity: 1 }
-      Project (#0) // { arity: 1 }
-        Filter (#1 = 1) // { arity: 2 }
-          Get materialize.public.t // { arity: 2 }
+      Filter (#1 = 1) // { arity: 2 }
+        Get materialize.public.t // { arity: 2 }
 
 Source materialize.public.t
   filter=((#1 = 1))
@@ -109,15 +107,14 @@ explain with(arity, join_impls)
 select * from (select 1, a+1 from t), t;
 ----
 Explained Query:
-  Project (#3, #0..=#2) // { arity: 4 }
-    Map (1) // { arity: 4 }
-      CrossJoin type=differential // { arity: 3 }
+  Project (#5, #2..=#4) // { arity: 4 }
+    Map (1) // { arity: 6 }
+      CrossJoin type=differential // { arity: 5 }
         implementation
           %0:t[×] » %1:t[×]
-        ArrangeBy keys=[[]] // { arity: 1 }
-          Project (#2) // { arity: 1 }
-            Map ((#0 + 1)) // { arity: 3 }
-              Get materialize.public.t // { arity: 2 }
+        ArrangeBy keys=[[]] // { arity: 3 }
+          Map ((#0 + 1)) // { arity: 3 }
+            Get materialize.public.t // { arity: 2 }
         ArrangeBy keys=[[]] // { arity: 2 }
           Get materialize.public.t // { arity: 2 }
 
@@ -128,15 +125,14 @@ explain with(arity, join_impls)
 select * from (select b+1, 2, 1, a+1 from t), t;
 ----
 Explained Query:
-  Project (#0, #4, #5, #1..=#3) // { arity: 6 }
-    Map (2, 1) // { arity: 6 }
-      CrossJoin type=differential // { arity: 4 }
+  Project (#2, #6, #7, #3..=#5) // { arity: 6 }
+    Map (2, 1) // { arity: 8 }
+      CrossJoin type=differential // { arity: 6 }
         implementation
           %0:t[×] » %1:t[×]
-        ArrangeBy keys=[[]] // { arity: 2 }
-          Project (#2, #3) // { arity: 2 }
-            Map ((#1 + 1), (#0 + 1)) // { arity: 4 }
-              Get materialize.public.t // { arity: 2 }
+        ArrangeBy keys=[[]] // { arity: 4 }
+          Map ((#1 + 1), (#0 + 1)) // { arity: 4 }
+            Get materialize.public.t // { arity: 2 }
         ArrangeBy keys=[[]] // { arity: 2 }
           Get materialize.public.t // { arity: 2 }
 
@@ -147,15 +143,14 @@ explain with(arity, join_impls)
 select * from (select 3, b+1, 2, a+2, 1, a+1 from t), t;
 ----
 Explained Query:
-  Project (#5, #0, #6, #1, #7, #2..=#4) // { arity: 8 }
-    Map (3, 2, 1) // { arity: 8 }
-      CrossJoin type=differential // { arity: 5 }
+  Project (#7, #2, #8, #3, #9, #4..=#6) // { arity: 8 }
+    Map (3, 2, 1) // { arity: 10 }
+      CrossJoin type=differential // { arity: 7 }
         implementation
           %0:t[×] » %1:t[×]
-        ArrangeBy keys=[[]] // { arity: 3 }
-          Project (#2..=#4) // { arity: 3 }
-            Map ((#1 + 1), (#0 + 2), (#0 + 1)) // { arity: 5 }
-              Get materialize.public.t // { arity: 2 }
+        ArrangeBy keys=[[]] // { arity: 5 }
+          Map ((#1 + 1), (#0 + 2), (#0 + 1)) // { arity: 5 }
+            Get materialize.public.t // { arity: 2 }
         ArrangeBy keys=[[]] // { arity: 2 }
           Get materialize.public.t // { arity: 2 }
 
@@ -189,17 +184,22 @@ explain with(arity, join_impls)
 select c1, c1 + a from (select 1 as c1, x as c2, 3 as c3 from generate_series(1, 3) as x union all select 1, x, 3 from generate_series(5, 8) as x), t;
 ----
 Explained Query:
-  Project (#2, #1) // { arity: 2 }
-    Map ((1 + #0), 1) // { arity: 3 }
-      CrossJoin type=differential // { arity: 1 }
+  Project (#4, #3) // { arity: 2 }
+    Map ((1 + #1), 1) // { arity: 5 }
+      CrossJoin type=differential // { arity: 3 }
         implementation
           %0[×] » %1:t[×]
-        ArrangeBy keys=[[]] // { arity: 0 }
-          Constant // { arity: 0 }
-            - (() x 7)
         ArrangeBy keys=[[]] // { arity: 1 }
-          Project (#0) // { arity: 1 }
-            Get materialize.public.t // { arity: 2 }
+          Constant // { arity: 1 }
+            - (1)
+            - (2)
+            - (3)
+            - (5)
+            - (6)
+            - (7)
+            - (8)
+        ArrangeBy keys=[[]] // { arity: 2 }
+          Get materialize.public.t // { arity: 2 }
 
 EOF
 
@@ -220,17 +220,16 @@ explain with(types)
 select c.* from (select f1, f2 from (select f2, f1 from (select 1 as f1), generate_series(2, 4) as f2) group by f2, f1) as c, t;
 ----
 Explained Query:
-  Project (#1, #0) // { types: "(integer, integer)" }
-    Map (1) // { types: "(integer, integer)" }
-      CrossJoin type=differential // { types: "(integer)" }
+  Project (#3, #0) // { types: "(integer, integer)" }
+    Map (1) // { types: "(integer, integer?, integer?, integer)" }
+      CrossJoin type=differential // { types: "(integer, integer?, integer?)" }
         ArrangeBy keys=[[]] // { types: "(integer)" }
           Constant // { types: "(integer)" }
             - (2)
             - (3)
             - (4)
-        ArrangeBy keys=[[]] // { types: "()" }
-          Project () // { types: "()" }
-            Get materialize.public.t // { types: "(integer?, integer?)" }
+        ArrangeBy keys=[[]] // { types: "(integer?, integer?)" }
+          Get materialize.public.t // { types: "(integer?, integer?)" }
 
 EOF
 
@@ -239,9 +238,9 @@ explain with(types)
 select c.* from (select f2, f1, f3 from (select f3, f2, f1 from generate_series(2, 4) as f2, generate_series(3, 5) as f3, (select 1 as f1)) group by f2, f3, f1) as c, t;
 ----
 Explained Query:
-  Project (#0, #2, #1) // { types: "(integer, integer, integer)" }
-    Map (1) // { types: "(integer, integer, integer)" }
-      CrossJoin type=differential // { types: "(integer, integer)" }
+  Project (#0, #4, #1) // { types: "(integer, integer, integer)" }
+    Map (1) // { types: "(integer, integer, integer?, integer?, integer)" }
+      CrossJoin type=differential // { types: "(integer, integer, integer?, integer?)" }
         ArrangeBy keys=[[]] // { types: "(integer, integer)" }
           Constant // { types: "(integer, integer)" }
             - (2, 3)
@@ -253,9 +252,8 @@ Explained Query:
             - (4, 3)
             - (4, 4)
             - (4, 5)
-        ArrangeBy keys=[[]] // { types: "()" }
-          Project () // { types: "()" }
-            Get materialize.public.t // { types: "(integer?, integer?)" }
+        ArrangeBy keys=[[]] // { types: "(integer?, integer?)" }
+          Get materialize.public.t // { types: "(integer?, integer?)" }
 
 EOF
 
@@ -264,11 +262,10 @@ query T multiline
 explain with(arity, join_impls) select * from (select 1 as a from t), generate_series(a+1, 4);
 ----
 Explained Query:
-  Project (#1, #0) // { arity: 2 }
-    Map (1) // { arity: 2 }
-      FlatMap generate_series(2, 4, 1) // { arity: 1 }
-        Project () // { arity: 0 }
-          Get materialize.public.t // { arity: 2 }
+  Project (#3, #2) // { arity: 2 }
+    Map (1) // { arity: 4 }
+      FlatMap generate_series(2, 4, 1) // { arity: 3 }
+        Get materialize.public.t // { arity: 2 }
 
 EOF
 
@@ -293,8 +290,7 @@ explain with(arity, join_impls) select 123 from (select distinct 234 from t);
 Explained Query:
   Map (123) // { arity: 1 }
     Distinct // { arity: 0 }
-      Project () // { arity: 0 }
-        Get materialize.public.t // { arity: 2 }
+      Get materialize.public.t // { arity: 2 }
 
 EOF
 
@@ -304,8 +300,7 @@ explain with(arity, join_impls) select distinct 123 from (select 234 from t);
 Explained Query:
   Map (123) // { arity: 1 }
     Distinct // { arity: 0 }
-      Project () // { arity: 0 }
-        Get materialize.public.t // { arity: 2 }
+      Get materialize.public.t // { arity: 2 }
 
 EOF
 
@@ -315,8 +310,7 @@ explain with(arity, join_impls) select distinct 123 from (select distinct 234 fr
 Explained Query:
   Map (123) // { arity: 1 }
     Distinct // { arity: 0 }
-      Project () // { arity: 0 }
-        Get materialize.public.t // { arity: 2 }
+      Get materialize.public.t // { arity: 2 }
 
 EOF
 
@@ -328,8 +322,7 @@ explain with(arity, join_impls) select * from (select distinct 123 from t);
 Explained Query:
   Map (123) // { arity: 1 }
     Distinct // { arity: 0 }
-      Project () // { arity: 0 }
-        Get materialize.public.t // { arity: 2 }
+      Get materialize.public.t // { arity: 2 }
 
 EOF
 
@@ -339,8 +332,7 @@ explain with(arity, join_impls) select distinct * from (select 123 from t);
 Explained Query:
   Map (123) // { arity: 1 }
     Distinct // { arity: 0 }
-      Project () // { arity: 0 }
-        Get materialize.public.t // { arity: 2 }
+      Get materialize.public.t // { arity: 2 }
 
 EOF
 
@@ -363,8 +355,7 @@ Explained Query:
   Project (#1) // { arity: 1 }
     Map (123) // { arity: 2 }
       Distinct group_by=[#0] // { arity: 1 }
-        Project (#0) // { arity: 1 }
-          Get materialize.public.t // { arity: 2 }
+        Get materialize.public.t // { arity: 2 }
 
 EOF
 
@@ -374,8 +365,7 @@ explain with(arity, join_impls) select distinct 123 from (select a from t);
 Explained Query:
   Map (123) // { arity: 1 }
     Distinct // { arity: 0 }
-      Project () // { arity: 0 }
-        Get materialize.public.t // { arity: 2 }
+      Get materialize.public.t // { arity: 2 }
 
 EOF
 
@@ -385,8 +375,7 @@ explain with(arity, join_impls) select distinct 123 from (select distinct a from
 Explained Query:
   Map (123) // { arity: 1 }
     Distinct // { arity: 0 }
-      Project () // { arity: 0 }
-        Get materialize.public.t // { arity: 2 }
+      Get materialize.public.t // { arity: 2 }
 
 EOF
 
@@ -398,8 +387,7 @@ explain with(arity, join_impls) select distinct a1.a, a1.literal from (select a,
 Explained Query:
   Map (123) // { arity: 2 }
     Distinct group_by=[#0] // { arity: 1 }
-      Project (#0) // { arity: 1 }
-        Get materialize.public.t // { arity: 2 }
+      Get materialize.public.t // { arity: 2 }
 
 EOF
 
@@ -409,8 +397,7 @@ explain with(arity, join_impls) select a1.a, a1.literal from (select distinct a,
 Explained Query:
   Map (123) // { arity: 2 }
     Distinct group_by=[#0] // { arity: 1 }
-      Project (#0) // { arity: 1 }
-        Get materialize.public.t // { arity: 2 }
+      Get materialize.public.t // { arity: 2 }
 
 EOF
 
@@ -420,8 +407,7 @@ explain with(arity, join_impls) select a1.a, a1.literal from (select distinct a,
 Explained Query:
   Map (123) // { arity: 2 }
     Distinct group_by=[#0] // { arity: 1 }
-      Project (#0) // { arity: 1 }
-        Get materialize.public.t // { arity: 2 }
+      Get materialize.public.t // { arity: 2 }
 
 EOF
 
@@ -431,8 +417,7 @@ explain with(arity, join_impls) select distinct a1.a, a1.literal from (select di
 Explained Query:
   Map (123) // { arity: 2 }
     Distinct group_by=[#0] // { arity: 1 }
-      Project (#0) // { arity: 1 }
-        Get materialize.public.t // { arity: 2 }
+      Get materialize.public.t // { arity: 2 }
 
 EOF
 
@@ -444,8 +429,7 @@ explain with(arity, join_impls) select distinct a1.a, 123 from (select a from t)
 Explained Query:
   Map (123) // { arity: 2 }
     Distinct group_by=[#0] // { arity: 1 }
-      Project (#0) // { arity: 1 }
-        Get materialize.public.t // { arity: 2 }
+      Get materialize.public.t // { arity: 2 }
 
 EOF
 
@@ -455,8 +439,7 @@ explain with(arity, join_impls) select distinct a1.a, 123 from (select distinct 
 Explained Query:
   Map (123) // { arity: 2 }
     Distinct group_by=[#0] // { arity: 1 }
-      Project (#0) // { arity: 1 }
-        Get materialize.public.t // { arity: 2 }
+      Get materialize.public.t // { arity: 2 }
 
 EOF
 
@@ -466,8 +449,7 @@ explain with(arity, join_impls) select distinct a1.a+2 from (select distinct a+1
 ----
 Explained Query:
   Distinct group_by=[((#0 + 1) + 2)] // { arity: 1 }
-    Project (#0) // { arity: 1 }
-      Get materialize.public.t // { arity: 2 }
+    Get materialize.public.t // { arity: 2 }
 
 EOF
 
@@ -477,8 +459,7 @@ explain with(arity, join_impls) select distinct a1.a, 123 from (select distinct 
 Explained Query:
   Map (123) // { arity: 2 }
     Distinct group_by=[(#0 + 1)] // { arity: 1 }
-      Project (#0) // { arity: 1 }
-        Get materialize.public.t // { arity: 2 }
+      Get materialize.public.t // { arity: 2 }
 
 EOF
 
@@ -488,8 +469,7 @@ explain with(arity, join_impls) select distinct a1.a+2, a1.literal from (select 
 Explained Query:
   Map (123) // { arity: 2 }
     Distinct group_by=[((#0 + 1) + 2)] // { arity: 1 }
-      Project (#0) // { arity: 1 }
-        Get materialize.public.t // { arity: 2 }
+      Get materialize.public.t // { arity: 2 }
 
 EOF
 
@@ -500,8 +480,7 @@ explain with(arity, join_impls) select distinct a1.a, a1.literal + 1 from (selec
 Explained Query:
   Map (124) // { arity: 2 }
     Distinct group_by=[#0] // { arity: 1 }
-      Project (#0) // { arity: 1 }
-        Get materialize.public.t // { arity: 2 }
+      Get materialize.public.t // { arity: 2 }
 
 EOF
 
@@ -540,9 +519,8 @@ Explained Query:
   Project (#0, #2, #3, #1) // { arity: 4 }
     Map (1, 2) // { arity: 4 }
       Reduce group_by=[#0] aggregates=[count(*)] // { arity: 2 }
-        Project (#0) // { arity: 1 }
-          Filter (#1 = 1) // { arity: 2 }
-            Get materialize.public.t // { arity: 2 }
+        Filter (#1 = 1) // { arity: 2 }
+          Get materialize.public.t // { arity: 2 }
 
 Source materialize.public.t
   filter=((#1 = 1))
@@ -557,9 +535,8 @@ Explained Query:
   Project (#0, #2, #1, #3) // { arity: 4 }
     Map (1, 2) // { arity: 4 }
       Reduce group_by=[#0] aggregates=[count(*)] // { arity: 2 }
-        Project (#0) // { arity: 1 }
-          Filter (#1 = 1) // { arity: 2 }
-            Get materialize.public.t // { arity: 2 }
+        Filter (#1 = 1) // { arity: 2 }
+          Get materialize.public.t // { arity: 2 }
 
 Source materialize.public.t
   filter=((#1 = 1))
@@ -573,9 +550,8 @@ select a, b, min(2), max(3) from t where b = 1 group by a, b;
 Explained Query:
   Map (1, 2, 3) // { arity: 4 }
     Distinct group_by=[#0] // { arity: 1 }
-      Project (#0) // { arity: 1 }
-        Filter (#1 = 1) // { arity: 2 }
-          Get materialize.public.t // { arity: 2 }
+      Filter (#1 = 1) // { arity: 2 }
+        Get materialize.public.t // { arity: 2 }
 
 Source materialize.public.t
   filter=((#1 = 1))
@@ -600,8 +576,7 @@ Explained Query:
   With
     cte l0 =
       Distinct // { arity: 0 }
-        Project () // { arity: 0 }
-          Get materialize.public.t // { arity: 2 }
+        Get materialize.public.t // { arity: 2 }
 
 EOF
 
@@ -622,8 +597,7 @@ Explained Query:
   With
     cte l0 =
       Distinct // { arity: 0 }
-        Project () // { arity: 0 }
-          Get materialize.public.t // { arity: 2 }
+        Get materialize.public.t // { arity: 2 }
 
 EOF
 
@@ -636,32 +610,29 @@ Explained Query:
       Get l1 // { arity: 1 }
       Map (null) // { arity: 1 }
         Union // { arity: 0 }
-          Negate // { arity: 0 }
-            Project () // { arity: 0 }
+          Project () // { arity: 0 }
+            Negate // { arity: 1 }
               Get l1 // { arity: 1 }
           Constant // { arity: 0 }
             - ()
   With
     cte l1 =
       Reduce aggregates=[min(#0)] // { arity: 1 }
-        Project (#0) // { arity: 1 }
-          Join on=(#0 = #1) type=differential // { arity: 2 }
-            implementation
-              %0:t_pk[#0]UKiif » %1[#0]Kiif
-            ArrangeBy keys=[[#0]] // { arity: 1 }
+        Join on=(#0 = #2) type=differential // { arity: 3 }
+          implementation
+            %0:t_pk[#0]UKiif » %1[#0]Kiif
+          ArrangeBy keys=[[#0]] // { arity: 2 }
+            Filter (#0 <= 195) AND (#0 >= 38) // { arity: 2 }
+              Get materialize.public.t_pk // { arity: 2 }
+          ArrangeBy keys=[[#0]] // { arity: 1 }
+            Union // { arity: 1 }
               Project (#0) // { arity: 1 }
-                Filter (#0 <= 195) AND (#0 >= 38) // { arity: 2 }
-                  Get materialize.public.t_pk // { arity: 2 }
-            ArrangeBy keys=[[#0]] // { arity: 1 }
-              Union // { arity: 1 }
-                Project (#0) // { arity: 1 }
-                  Get l0 // { arity: 2 }
-                Map (error("more than one record produced in subquery")) // { arity: 1 }
-                  Project () // { arity: 0 }
-                    Filter (#0 > 1) // { arity: 1 }
-                      Reduce aggregates=[count(*)] // { arity: 1 }
-                        Project () // { arity: 0 }
-                          Get l0 // { arity: 2 }
+                Get l0 // { arity: 2 }
+              Project (#1) // { arity: 1 }
+                Map (error("more than one record produced in subquery")) // { arity: 2 }
+                  Filter (#0 > 1) // { arity: 1 }
+                    Reduce aggregates=[count(*)] // { arity: 1 }
+                      Get l0 // { arity: 2 }
     cte l0 =
       Filter (#0 = 1308) // { arity: 2 }
         Get materialize.public.t // { arity: 2 }
@@ -682,32 +653,29 @@ Explained Query:
       Get l1 // { arity: 1 }
       Map (null) // { arity: 1 }
         Union // { arity: 0 }
-          Negate // { arity: 0 }
-            Project () // { arity: 0 }
+          Project () // { arity: 0 }
+            Negate // { arity: 1 }
               Get l1 // { arity: 1 }
           Constant // { arity: 0 }
             - ()
   With
     cte l1 =
       Reduce aggregates=[min(#0)] // { arity: 1 }
-        Project (#0) // { arity: 1 }
-          Join on=(#0 = #1) type=differential // { arity: 2 }
-            implementation
-              %0:t[#0]Kiif » %1[#0]Kiif
-            ArrangeBy keys=[[#0]] // { arity: 1 }
+        Join on=(#0 = #2) type=differential // { arity: 3 }
+          implementation
+            %0:t[#0]Kiif » %1[#0]Kiif
+          ArrangeBy keys=[[#0]] // { arity: 2 }
+            Filter (#0 <= 195) AND (#0 >= 38) // { arity: 2 }
+              Get materialize.public.t // { arity: 2 }
+          ArrangeBy keys=[[#0]] // { arity: 1 }
+            Union // { arity: 1 }
               Project (#0) // { arity: 1 }
-                Filter (#0 <= 195) AND (#0 >= 38) // { arity: 2 }
-                  Get materialize.public.t // { arity: 2 }
-            ArrangeBy keys=[[#0]] // { arity: 1 }
-              Union // { arity: 1 }
-                Project (#0) // { arity: 1 }
-                  Get l0 // { arity: 2 }
-                Map (error("more than one record produced in subquery")) // { arity: 1 }
-                  Project () // { arity: 0 }
-                    Filter (#0 > 1) // { arity: 1 }
-                      Reduce aggregates=[count(*)] // { arity: 1 }
-                        Project () // { arity: 0 }
-                          Get l0 // { arity: 2 }
+                Get l0 // { arity: 2 }
+              Project (#1) // { arity: 1 }
+                Map (error("more than one record produced in subquery")) // { arity: 2 }
+                  Filter (#0 > 1) // { arity: 1 }
+                    Reduce aggregates=[count(*)] // { arity: 1 }
+                      Get l0 // { arity: 2 }
     cte l0 =
       Filter (#0 = 1308) // { arity: 2 }
         Get materialize.public.t // { arity: 2 }
@@ -754,22 +722,21 @@ query T multiline
 explain with(arity, join_impls) select * from t1 as a1 join t1 as a2 on (a2.f2 = (select 6 from t1)) where a2.f2 = 9;
 ----
 Explained Query:
-  CrossJoin type=delta // { arity: 4 }
-    implementation
-      %0:t1 » %2[×]UA » %1:t1[×]Aef
-      %1:t1 » %2[×]UA » %0:t1[×]A
-      %2 » %1:t1[×]Aef » %0:t1[×]A
-    ArrangeBy keys=[[]] // { arity: 2 }
-      Get materialize.public.t1 // { arity: 2 }
-    ArrangeBy keys=[[]] // { arity: 2 }
-      Filter (#1 = 9) // { arity: 2 }
+  Project (#0..=#3) // { arity: 4 }
+    CrossJoin type=delta // { arity: 5 }
+      implementation
+        %0:t1 » %2[×]UA » %1:t1[×]Aef
+        %1:t1 » %2[×]UA » %0:t1[×]A
+        %2 » %1:t1[×]Aef » %0:t1[×]A
+      ArrangeBy keys=[[]] // { arity: 2 }
         Get materialize.public.t1 // { arity: 2 }
-    ArrangeBy keys=[[]] // { arity: 0 }
-      Project () // { arity: 0 }
+      ArrangeBy keys=[[]] // { arity: 2 }
+        Filter (#1 = 9) // { arity: 2 }
+          Get materialize.public.t1 // { arity: 2 }
+      ArrangeBy keys=[[]] // { arity: 1 }
         Filter error("more than one record produced in subquery") AND (#0 > 1) // { arity: 1 }
           Reduce aggregates=[count(*)] // { arity: 1 }
-            Project () // { arity: 0 }
-              Get materialize.public.t1 // { arity: 2 }
+            Get materialize.public.t1 // { arity: 2 }
 
 EOF
 

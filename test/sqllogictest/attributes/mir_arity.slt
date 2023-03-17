@@ -47,36 +47,34 @@ materialize.public.test1:
     Threshold // { arity: 4 }
       Union // { arity: 4 }
         Negate // { arity: 4 }
-          Distinct group_by=[#0..=#3] // { arity: 4 }
-            TopK order_by=[#1 asc nulls_last] limit=10 offset=1 monotonic=false // { arity: 4 }
-              Project (#0..=#2, #4) // { arity: 4 }
-                Map ((#3 + 1)) // { arity: 5 }
-                  Union // { arity: 4 }
-                    Map (null) // { arity: 4 }
-                      Union // { arity: 3 }
-                        Negate // { arity: 3 }
-                          Project (#0..=#2) // { arity: 3 }
-                            Join on=(#0 = #3) type=differential // { arity: 4 }
-                              ArrangeBy keys=[[#0]] // { arity: 3 }
-                                Get l0 // { arity: 3 }
-                              ArrangeBy keys=[[#0]] // { arity: 1 }
-                                Distinct group_by=[#0] // { arity: 1 }
-                                  Project (#0) // { arity: 1 }
-                                    Get l1 // { arity: 4 }
-                        Get l0 // { arity: 3 }
-                    Get l1 // { arity: 4 }
+          Distinct group_by=[#0..=#2, #4] // { arity: 4 }
+            TopK order_by=[#1 asc nulls_last] limit=10 offset=1 monotonic=false // { arity: 5 }
+              Map ((#3 + 1)) // { arity: 5 }
+                Union // { arity: 4 }
+                  Map (null) // { arity: 4 }
+                    Union // { arity: 3 }
+                      Project (#0..=#2) // { arity: 3 }
+                        Negate // { arity: 4 }
+                          Join on=(#0 = #3) type=differential // { arity: 4 }
+                            ArrangeBy keys=[[#0]] // { arity: 3 }
+                              Get l0 // { arity: 3 }
+                            ArrangeBy keys=[[#0]] // { arity: 1 }
+                              Distinct group_by=[#0] // { arity: 1 }
+                                Get l1 // { arity: 5 }
+                      Get l0 // { arity: 3 }
+                  Project (#0..=#3) // { arity: 4 }
+                    Get l1 // { arity: 5 }
         Constant // { arity: 4 }
           - (1, 2, 11, 12)
   With
     cte l1 =
-      Project (#0..=#3) // { arity: 4 }
-        Filter (#0) IS NOT NULL // { arity: 5 }
-          Join on=(#0 = #4) type=differential // { arity: 5 }
-            ArrangeBy keys=[[#0]] // { arity: 3 }
-              Filter (#0) IS NOT NULL // { arity: 3 }
-                Get l0 // { arity: 3 }
-            ArrangeBy keys=[[#1]] // { arity: 2 }
-              Get materialize.public.u // { arity: 2 }
+      Filter (#0) IS NOT NULL // { arity: 5 }
+        Join on=(#0 = #4) type=differential // { arity: 5 }
+          ArrangeBy keys=[[#0]] // { arity: 3 }
+            Filter (#0) IS NOT NULL // { arity: 3 }
+              Get l0 // { arity: 3 }
+          ArrangeBy keys=[[#1]] // { arity: 2 }
+            Get materialize.public.u // { arity: 2 }
     cte l0 =
       FlatMap generate_series(#0, #1, 1) // { arity: 3 }
         Get materialize.public.t // { arity: 2 }
@@ -109,17 +107,16 @@ SELECT u.g as g, w.g as h FROM u, u as w WHERE u.g = w.g
 ----
 Explained Query:
   Return // { arity: 2 }
-    Project (#0, #0) // { arity: 2 }
-      Join on=(#0 = #1) type=differential // { arity: 2 }
-        Get l0 // { arity: 1 }
-        Get l0 // { arity: 1 }
+    Project (#2, #2) // { arity: 2 }
+      Join on=(#2 = #5) type=differential // { arity: 6 }
+        Get l0 // { arity: 3 }
+        Get l0 // { arity: 3 }
   With
     cte l0 =
-      ArrangeBy keys=[[#0]] // { arity: 1 }
-        Project (#2) // { arity: 1 }
-          Filter (#0) IS NOT NULL // { arity: 3 }
-            Map ((#0 + 1)) // { arity: 3 }
-              Get materialize.public.u // { arity: 2 }
+      ArrangeBy keys=[[#2]] // { arity: 3 }
+        Filter (#0) IS NOT NULL // { arity: 3 }
+          Map ((#0 + 1)) // { arity: 3 }
+            Get materialize.public.u // { arity: 2 }
 
 Used Indexes:
   - materialize.public.u_d_idx
@@ -141,25 +138,22 @@ Explained Query:
         ArrangeBy keys=[[#0]] // { arity: 1 }
           Union // { arity: 1 }
             Project (#0) // { arity: 1 }
-              Filter (#1 = 1) // { arity: 2 }
-                Get l0 // { arity: 2 }
+              Filter (#2 = 1) // { arity: 3 }
+                Get l0 // { arity: 3 }
             Project (#0) // { arity: 1 }
               Filter error("more than one record produced in subquery") AND (#1 > 1) // { arity: 2 }
                 Reduce group_by=[#0] aggregates=[count(*)] // { arity: 2 }
-                  Project (#0) // { arity: 1 }
-                    Get l0 // { arity: 2 }
+                  Get l0 // { arity: 3 }
   With
     cte l0 =
-      Project (#0, #2) // { arity: 2 }
-        Join on=(#0 = #1) type=differential // { arity: 3 }
-          ArrangeBy keys=[[#0]] // { arity: 1 }
-            Distinct group_by=[#0] // { arity: 1 }
-              Project (#1) // { arity: 1 }
-                Filter (#1) IS NOT NULL // { arity: 2 }
-                  Get materialize.public.u // { arity: 2 }
-          ArrangeBy keys=[[#0]] // { arity: 2 }
-            Filter (#0) IS NOT NULL // { arity: 2 }
-              Get materialize.public.v // { arity: 2 }
+      Join on=(#0 = #1) type=differential // { arity: 3 }
+        ArrangeBy keys=[[#0]] // { arity: 1 }
+          Distinct group_by=[#1] // { arity: 1 }
+            Filter (#1) IS NOT NULL // { arity: 2 }
+              Get materialize.public.u // { arity: 2 }
+        ArrangeBy keys=[[#0]] // { arity: 2 }
+          Filter (#0) IS NOT NULL // { arity: 2 }
+            Get materialize.public.v // { arity: 2 }
 
 Source materialize.public.v
   filter=((#0) IS NOT NULL)

@@ -32,9 +32,8 @@ EXPLAIN WITH(arity, join_impls) SELECT DISTINCT ON (c) a FROM abc
 ----
 Explained Query:
   Project (#0) // { arity: 1 }
-    TopK group_by=[#1] limit=1 monotonic=false // { arity: 2 }
-      Project (#0, #2) // { arity: 2 }
-        Get materialize.public.abc // { arity: 3 }
+    TopK group_by=[#2] limit=1 monotonic=false // { arity: 3 }
+      Get materialize.public.abc // { arity: 3 }
 
 EOF
 

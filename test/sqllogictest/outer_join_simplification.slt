@@ -50,9 +50,8 @@ Explained Query:
       ArrangeBy keys=[[#0]]
         Get materialize.public.foo
       ArrangeBy keys=[[#0]]
-        Project (#0)
-          Filter (#0) IS NOT NULL
-            Get materialize.public.bar
+        Filter (#0) IS NOT NULL
+          Get materialize.public.bar
 
 Source materialize.public.bar
   filter=((#0) IS NOT NULL)
@@ -70,22 +69,21 @@ Explained Query:
     Union
       Map (null, null)
         Union
-          Negate
-            Project (#0..=#2)
+          Project (#0..=#2)
+            Negate
               Get l0
           Get materialize.public.foo_raw
-      Project (#0..=#2, #0, #3)
+      Project (#0..=#2, #0, #4)
         Get l0
   With
     cte l0 =
-      Project (#0..=#2, #4)
-        Join on=(#0 = #3) type=differential
-          ArrangeBy keys=[[#0]]
-            Filter (#0) IS NOT NULL
-              Get materialize.public.foo_raw
-          ArrangeBy keys=[[#0]]
-            Filter (#0) IS NOT NULL
-              Get materialize.public.bar
+      Join on=(#0 = #3) type=differential
+        ArrangeBy keys=[[#0]]
+          Filter (#0) IS NOT NULL
+            Get materialize.public.foo_raw
+        ArrangeBy keys=[[#0]]
+          Filter (#0) IS NOT NULL
+            Get materialize.public.bar
 
 Source materialize.public.bar
   filter=((#0) IS NOT NULL)
@@ -105,23 +103,21 @@ Explained Query:
       Project (#3, #4, #0..=#2)
         Map (null, null)
           Union
-            Negate
-              Project (#0..=#2)
+            Project (#0..=#2)
+              Negate
                 Join on=(#0 = #3) type=differential
                   Get l0
-                  ArrangeBy keys=[[#0]]
-                    Project (#0)
-                      Get l1
+                  Get l1
             Get materialize.public.foo_raw
       Project (#0, #1, #0, #3, #4)
         Join on=(#0 = #2) type=differential
-          ArrangeBy keys=[[#0]]
-            Get l1
+          Get l1
           Get l0
   With
     cte l1 =
-      Filter (#0) IS NOT NULL
-        Get materialize.public.bar
+      ArrangeBy keys=[[#0]]
+        Filter (#0) IS NOT NULL
+          Get materialize.public.bar
     cte l0 =
       ArrangeBy keys=[[#0]]
         Filter (#0) IS NOT NULL
@@ -145,56 +141,53 @@ Explained Query:
     Union
       Map (null, null)
         Union
-          Negate
-            Project (#0..=#7)
+          Project (#0..=#7)
+            Negate
               Get l4
           Get l3
-      Project (#0..=#7, #6, #8)
+      Project (#0..=#7, #6, #9)
         Get l4
   With
     cte l4 =
-      Project (#0..=#7, #9)
-        Join on=(#6 = #8) type=differential
-          ArrangeBy keys=[[#6]]
-            Filter (#6) IS NOT NULL
-              Get l3
-          ArrangeBy keys=[[#0]]
-            Get materialize.public.quux
+      Join on=(#6 = #8) type=differential
+        ArrangeBy keys=[[#6]]
+          Filter (#6) IS NOT NULL
+            Get l3
+        ArrangeBy keys=[[#0]]
+          Get materialize.public.quux
     cte l3 =
       Union
         Map (null, null, null)
           Union
-            Negate
-              Project (#0..=#4)
+            Project (#0..=#4)
+              Negate
                 Get l2
             Get l1
-        Project (#0..=#4, #1, #5, #6)
+        Project (#0..=#4, #1, #6, #7)
           Get l2
     cte l2 =
-      Project (#0..=#4, #6, #7)
-        Join on=(#1 = #5) type=differential
-          ArrangeBy keys=[[#1]]
-            Get l1
-          ArrangeBy keys=[[#0]]
-            Get materialize.public.baz
+      Join on=(#1 = #5) type=differential
+        ArrangeBy keys=[[#1]]
+          Get l1
+        ArrangeBy keys=[[#0]]
+          Get materialize.public.baz
     cte l1 =
       Union
         Map (null, null)
           Union
-            Negate
-              Project (#0..=#2)
+            Project (#0..=#2)
+              Negate
                 Get l0
             Get materialize.public.foo
-        Project (#0..=#2, #0, #3)
+        Project (#0..=#2, #0, #4)
           Get l0
     cte l0 =
-      Project (#0..=#2, #4)
-        Join on=(#0 = #3) type=differential
-          ArrangeBy keys=[[#0]]
-            Get materialize.public.foo
-          ArrangeBy keys=[[#0]]
-            Filter (#0) IS NOT NULL
-              Get materialize.public.bar
+      Join on=(#0 = #3) type=differential
+        ArrangeBy keys=[[#0]]
+          Get materialize.public.foo
+        ArrangeBy keys=[[#0]]
+          Filter (#0) IS NOT NULL
+            Get materialize.public.bar
 
 Source materialize.public.bar
   filter=((#0) IS NOT NULL)
@@ -216,33 +209,30 @@ Explained Query:
       Get l1
       Map (0)
         Union
-          Negate
-            Project ()
+          Project ()
+            Negate
               Get l1
           Constant
             - ()
   With
     cte l1 =
       Reduce aggregates=[count(*)]
-        Project ()
-          Union
-            Map (null)
-              Union
+        Union
+          Map (null)
+            Union
+              Project ()
                 Negate
-                  Project ()
-                    Get l0
-                Project ()
-                  Get materialize.public.foo
+                  Get l0
+              Project ()
+                Get materialize.public.foo
+          Project (#4)
             Get l0
     cte l0 =
-      Project (#2)
-        Join on=(#0 = #1) type=differential
-          ArrangeBy keys=[[#0]]
-            Project (#1)
-              Get materialize.public.foo
-          ArrangeBy keys=[[#0]]
-            Project (#0, #1)
-              Get materialize.public.baz
+      Join on=(#1 = #3) type=differential
+        ArrangeBy keys=[[#1]]
+          Get materialize.public.foo
+        ArrangeBy keys=[[#0]]
+          Get materialize.public.baz
 
 Source materialize.public.bar
   filter=((#0) IS NOT NULL)
@@ -262,38 +252,36 @@ Explained Query:
     Union
       Map (null, null)
         Union
-          Negate
-            Project (#0..=#5)
+          Project (#0..=#5)
+            Negate
               Get l3
           Get l2
-      Project (#0..=#5, #4, #6)
+      Project (#0..=#5, #4, #7)
         Get l3
   With
     cte l3 =
-      Project (#0..=#5, #7)
-        Join on=(#4 = #6) type=differential
-          ArrangeBy keys=[[#4]]
-            Filter (#4) IS NOT NULL
-              Get l2
-          ArrangeBy keys=[[#0]]
-            Get materialize.public.quux
+      Join on=(#4 = #6) type=differential
+        ArrangeBy keys=[[#4]]
+          Filter (#4) IS NOT NULL
+            Get l2
+        ArrangeBy keys=[[#0]]
+          Get materialize.public.quux
     cte l2 =
       Union
         Map (null, null, null)
           Union
-            Negate
-              Project (#0..=#2)
+            Project (#0..=#2)
+              Negate
                 Get l1
             Get l0
-        Project (#0..=#2, #1, #3, #4)
+        Project (#0..=#2, #1, #4, #5)
           Get l1
     cte l1 =
-      Project (#0..=#2, #4, #5)
-        Join on=(#1 = #3) type=differential
-          ArrangeBy keys=[[#1]]
-            Get l0
-          ArrangeBy keys=[[#0]]
-            Get materialize.public.baz
+      Join on=(#1 = #3) type=differential
+        ArrangeBy keys=[[#1]]
+          Get l0
+        ArrangeBy keys=[[#0]]
+          Get materialize.public.baz
     cte l0 =
       Filter (#0 = 7)
         Get materialize.public.foo

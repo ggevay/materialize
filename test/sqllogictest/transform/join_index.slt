@@ -701,25 +701,25 @@ UNION ALL
 Explained Query:
   Return // { arity: 1 }
     Union // { arity: 1 }
-      CrossJoin type=delta // { arity: 1 }
-        implementation
-          %0:big » %2:l0[×]Ae » %1:big[×]A
-          %1:big » %2:l0[×]Ae » %0:big[×]A
-          %2:l0 » %0:big[×]A » %1:big[×]A
-        ArrangeBy keys=[[]] // { arity: 1 }
-          Project (#0) // { arity: 1 }
-            Get materialize.public.big // { arity: 14 }
-        ArrangeBy keys=[[]] // { arity: 0 }
-          Project () // { arity: 0 }
-            Get materialize.public.big // { arity: 14 }
-        ArrangeBy keys=[[]] // { arity: 0 }
-          Project () // { arity: 0 }
-            Get l0 // { arity: 15 }
       Project (#0) // { arity: 1 }
-        Get l0 // { arity: 15 }
+        CrossJoin type=delta // { arity: 42 }
+          implementation
+            %0:l0 » %2:l1[×]Ae » %1:l0[×]A
+            %1:l0 » %2:l1[×]Ae » %0:l0[×]A
+            %2:l1 » %0:l0[×]A » %1:l0[×]A
+          Get l0 // { arity: 14 }
+          Get l0 // { arity: 14 }
+          ArrangeBy keys=[[]] // { arity: 14 }
+            Project (#0..=#13) // { arity: 14 }
+              Get l1 // { arity: 15 }
+      Project (#0) // { arity: 1 }
+        Get l1 // { arity: 15 }
   With
-    cte l0 =
+    cte l1 =
       ReadExistingIndex materialize.public.big lookup_value=(5)
+    cte l0 =
+      ArrangeBy keys=[[]] // { arity: 14 }
+        Get materialize.public.big // { arity: 14 }
 
 Used Indexes:
   - materialize.public.big_idx_a
