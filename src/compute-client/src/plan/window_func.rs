@@ -7,8 +7,10 @@
 // the Business Source License, use of this software will be governed
 // by the Apache License, Version 2.0.
 
-use mz_expr::{AggregateExpr, AggregateFunc, MapFilterProject, MirRelationExpr, MirScalarExpr, TableFunc, VariadicFunc};
+use itertools::Itertools;
+use mz_expr::{AggregateExpr, AggregateFunc, EvalError, MapFilterProject, MirRelationExpr, MirScalarExpr, TableFunc, VariadicFunc};
 use mz_expr::visit::Visit;
+use mz_repr::{ColumnType, Datum, Row, ScalarType};
 
 /// Window function calls, which we want to render specially (e.g., use prefix sum), or transform
 /// away (e.g., ROW_NUMBER <= k to TopK).
@@ -58,36 +60,74 @@ pub fn match_window_func_mir_pattern(expr: &MirRelationExpr) -> Option<(MapFilte
                                                         }
                                                         _ => {assert!(false);}
                                                     }
-                                                    let _window_func_args = match &exprs[1] {
+                                                    let window_func_args = match &exprs[1] {
                                                         MirScalarExpr::CallVariadic {func: VariadicFunc::RecordCreate {..}, exprs} => {
-                                                            //todo
-                                                            exprs.clone()
+                                                            Some(exprs.clone())
                                                         }
-                                                        MirScalarExpr::Literal(..) => {
+                                                        MirScalarExpr::Literal(lit, lit_type) => {
                                                             // Can happen when the RecordCreate gets const-folded,
                                                             // i.e., when the window function arguments are constants.
-                                                            // todo
-                                                            Vec::new()
+                                                            match lit {
+                                                                Ok(lit_row) => {
+                                                                    match (lit_row.unpack_first(), lit_type) {
+                                                                        (
+                                                                            Datum::List(datum_list),
+                                                                            ColumnType {
+                                                                                scalar_type:
+                                                                                ScalarType::Record {
+                                                                                    fields: field_types,
+                                                                                    ..
+                                                                                },
+                                                                                ..
+                                                                            },
+                                                                        ) => {
+                                                                            Some(datum_list
+                                                                                .iter()
+                                                                                .zip(field_types)
+                                                                                .map(|(datum, (_, typ))| {
+                                                                                    MirScalarExpr::Literal(
+                                                                                        Ok(Row::pack_slice(&[datum])),
+                                                                                        typ.clone(),
+                                                                                    )
+                                                                                })
+                                                                                .collect()
+                                                                            )
+                                                                        },
+                                                                        _ => {
+                                                                            assert!(false);
+                                                                            None
+                                                                        }
+                                                                    }
+                                                                }
+                                                                Err(_) => None, // window func arguments const folded to an error
+                                                            }
                                                         }
                                                         e => {
                                                             assert!(false);
-                                                            Vec::new()
+                                                            None
                                                         }
                                                     };
 
-                                                    // match agg {
-                                                    //     AggregateExpr {
-                                                    //         func: AggregateFunc::LagLead {..},
-                                                    //         ..
-                                                    //     } => {
-                                                    //         Some(WindowFuncCall::Lag1(Lag1{expr: _window_func_args[0].clone()}))
-                                                    //     }
-                                                    //     _ => None,
-                                                    // }
+                                                    match window_func_args {
+                                                        None => None,
+                                                        Some(window_func_args) => {
+                                                            //todo
 
-                                                    //Some(WindowFuncCall::Lag1(Lag1{expr: _window_func_args[0].clone()}))
+                                                            // match agg {
+                                                            //     AggregateExpr {
+                                                            //         func: AggregateFunc::LagLead {..},
+                                                            //         ..
+                                                            //     } => {
+                                                            //         Some(WindowFuncCall::Lag1(Lag1{expr: _window_func_args[0].clone()}))
+                                                            //     }
+                                                            //     _ => None,
+                                                            // }
 
-                                                    Some(WindowFuncCall::Lag1(Lag1{expr: MirScalarExpr::column(0)}))
+                                                            Some(WindowFuncCall::Lag1(Lag1{expr: window_func_args[0].clone()}))
+
+                                                            //Some(WindowFuncCall::Lag1(Lag1{expr: MirScalarExpr::column(0)}))
+                                                        }
+                                                    }
 
                                                 }
                                                 _ => {

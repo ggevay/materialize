@@ -934,7 +934,7 @@ impl<T: timely::progress::Timestamp> Plan<T> {
         debug_info: LirDebugInfo<'_>,
     ) -> Result<(Self, AvailableCollections), String> {
 
-        //println!("from_mir: {}", expr.pretty());
+        println!("from_mir: {}", expr.pretty());
 
         test_match_window_func_mir_pattern(expr);
 
