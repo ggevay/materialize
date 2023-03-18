@@ -2476,16 +2476,12 @@ impl AggregateExpr {
 
     /// todo: docs
     pub fn is_window_func(&self) -> bool {
-        //todo: matches!
-        //  and more funcs
-        match self {
-            AggregateExpr {
-                func: AggregateFunc::LagLead {..},
-                //func: AggregateFunc::LagLead {..} | AggregateFunc::RowNumber {..} | AggregateFunc::DenseRank {..} | AggregateFunc::FirstValue {..} | AggregateFunc::LastValue {..},
-                ..
-            } => {true}
-            _ => {false}
-        }
+        //todo: more funcs
+        matches!(self, AggregateExpr {
+            func: AggregateFunc::LagLead {..},
+            //func: AggregateFunc::LagLead {..} | AggregateFunc::RowNumber {..} | AggregateFunc::DenseRank {..} | AggregateFunc::FirstValue {..} | AggregateFunc::LastValue {..},
+            ..
+        })
     }
 }
 
