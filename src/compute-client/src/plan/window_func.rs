@@ -7,20 +7,26 @@
 // the Business Source License, use of this software will be governed
 // by the Apache License, Version 2.0.
 
-use itertools::Itertools;
-use mz_expr::{AggregateExpr, AggregateFunc, EvalError, MapFilterProject, MirRelationExpr, MirScalarExpr, TableFunc, VariadicFunc};
+use mz_expr::{AggregateExpr, AggregateFunc, ColumnOrder, LagLeadType, MapFilterProject, MirRelationExpr, MirScalarExpr, TableFunc, VariadicFunc};
 use mz_expr::visit::Visit;
 use mz_repr::{ColumnType, Datum, Row, ScalarType};
 
 /// Window function calls, which we want to render specially (e.g., use prefix sum), or transform
 /// away (e.g., ROW_NUMBER <= k to TopK).
 pub enum WindowFuncCall {
-    Lag1(Lag1),
+    LagLead(LagLead),
 }
 
-// Offset=1, default=NULL
-pub struct Lag1 {
+pub struct LagLead {
+    lag_or_lead: LagLeadType,
+    // arguments:
     expr: MirScalarExpr,
+    offset: MirScalarExpr,
+    default: MirScalarExpr,
+    // shared window stuff (maybe move up into a shared struct):
+    partition_by: Vec<MirScalarExpr>,
+    order_by_exprs: Vec<MirScalarExpr>,
+    column_orders: Vec<ColumnOrder>,
 }
 
 pub fn match_window_func_mir_pattern(expr: &MirRelationExpr) -> Option<(MapFilterProject, WindowFuncCall)> {
@@ -49,7 +55,7 @@ pub fn match_window_func_mir_pattern(expr: &MirRelationExpr) -> Option<(MapFilte
                                     assert!(!agg.distinct);
                                     match &agg.expr {
                                         MirScalarExpr::CallVariadic {func: VariadicFunc::RecordCreate {..}, exprs} => {
-                                            let _order_by_exprs = &exprs[1..];
+                                            let order_by_exprs = &exprs[1..];
                                             match &exprs[0] {
                                                 MirScalarExpr::CallVariadic {func: VariadicFunc::RecordCreate {..}, exprs} => {
                                                     assert_eq!(exprs.len(), 2);
@@ -111,21 +117,23 @@ pub fn match_window_func_mir_pattern(expr: &MirRelationExpr) -> Option<(MapFilte
                                                     match window_func_args {
                                                         None => None,
                                                         Some(window_func_args) => {
-                                                            //todo
-
-                                                            // match agg {
-                                                            //     AggregateExpr {
-                                                            //         func: AggregateFunc::LagLead {..},
-                                                            //         ..
-                                                            //     } => {
-                                                            //         Some(WindowFuncCall::Lag1(Lag1{expr: _window_func_args[0].clone()}))
-                                                            //     }
-                                                            //     _ => None,
-                                                            // }
-
-                                                            Some(WindowFuncCall::Lag1(Lag1{expr: window_func_args[0].clone()}))
-
-                                                            //Some(WindowFuncCall::Lag1(Lag1{expr: MirScalarExpr::column(0)}))
+                                                            match agg {
+                                                                AggregateExpr {
+                                                                    func: AggregateFunc::LagLead { order_by, lag_lead },
+                                                                    ..
+                                                                } => {
+                                                                    Some(WindowFuncCall::LagLead(LagLead{
+                                                                        lag_or_lead: *lag_lead,
+                                                                        expr: window_func_args[0].clone(),
+                                                                        offset: window_func_args[1].clone(),
+                                                                        default: window_func_args[2].clone(),
+                                                                        partition_by: group_key.clone(),
+                                                                        order_by_exprs: order_by_exprs.to_vec(),
+                                                                        column_orders: order_by.clone(),
+                                                                    }))
+                                                                }
+                                                                _ => None,
+                                                            }
                                                         }
                                                     }
 

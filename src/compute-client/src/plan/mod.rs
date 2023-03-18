@@ -24,7 +24,6 @@ use mz_expr::{
     permutation_for_arrangement, CollectionPlan, EvalError, Id, JoinInputMapper, LocalId,
     MapFilterProject, MirRelationExpr, MirScalarExpr, OptimizedMirRelationExpr, TableFunc,
 };
-use mz_expr::visit::Visit;
 use mz_ore::soft_panic_or_log;
 use mz_proto::{IntoRustIfSome, ProtoType, RustType, TryFromProtoError};
 use mz_repr::{Diff, GlobalId, Row};
@@ -934,7 +933,7 @@ impl<T: timely::progress::Timestamp> Plan<T> {
         debug_info: LirDebugInfo<'_>,
     ) -> Result<(Self, AvailableCollections), String> {
 
-        println!("from_mir: {}", expr.pretty());
+        ///////println!("from_mir: {}", expr.pretty());
 
         test_match_window_func_mir_pattern(expr);
 

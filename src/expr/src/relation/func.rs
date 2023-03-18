@@ -1080,7 +1080,7 @@ where
 /// Identify whether the given aggregate function is Lag or Lead, since they share
 /// implementations.
 #[derive(
-    Arbitrary, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize, Hash, MzReflect,
+    Arbitrary, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize, Hash, MzReflect, Copy
 )]
 pub enum LagLeadType {
     Lag,
