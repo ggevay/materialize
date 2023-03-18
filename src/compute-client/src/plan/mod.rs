@@ -23,7 +23,6 @@ use mz_expr::JoinImplementation::{DeltaQuery, Differential, IndexedFilter, Unimp
 use mz_expr::{
     permutation_for_arrangement, CollectionPlan, EvalError, Id, JoinInputMapper, LocalId,
     MapFilterProject, MirRelationExpr, MirScalarExpr, OptimizedMirRelationExpr, TableFunc,
-    VariadicFunc,
 };
 use mz_expr::visit::Visit;
 use mz_ore::soft_panic_or_log;
@@ -935,8 +934,39 @@ impl<T: timely::progress::Timestamp> Plan<T> {
         debug_info: LirDebugInfo<'_>,
     ) -> Result<(Self, AvailableCollections), String> {
 
+        //println!("from_mir: {}", expr.pretty());
 
-        let _window_func_call = match_window_func_mir_pattern(expr);
+        let mut window_func_count = 0;
+        #[allow(deprecated)]
+        expr.visit_post_nolimit(&mut |e| {
+            match e {
+                MirRelationExpr::Reduce {aggregates, ..} => {
+                    if aggregates.iter().any(|agg| agg.is_window_func()) {
+                        window_func_count += 1;
+                    }
+                    assert!(aggregates.iter().filter(|agg| agg.is_window_func()).count() <= 1); //todo: handle it when it's more instead of asserting
+                }
+                _ => {}
+            }
+        });
+
+        let mut pattern_count = 0;
+        #[allow(deprecated)]
+        expr.visit_post_nolimit(&mut |e| {
+            let window_func_call = match_window_func_mir_pattern(e);
+            if window_func_call.is_some() {
+                pattern_count += 1;
+            }
+        });
+
+
+        // pattern_count can be more than window_func_count, because the pattern might match at
+        // different starting points in the top MFP.
+        assert_eq!(window_func_count > 0, pattern_count > 0);
+
+
+
+
 
 
         // We don't want to trace recursive calls, which is why the public `from_mir`
