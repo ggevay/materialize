@@ -33,7 +33,7 @@ use crate::plan::join::{DeltaJoinPlan, JoinPlan, LinearJoinPlan};
 use crate::plan::reduce::{KeyValPlan, ReducePlan};
 use crate::plan::threshold::ThresholdPlan;
 use crate::plan::top_k::TopKPlan;
-use crate::plan::window_func::match_window_func_mir_pattern;
+use crate::plan::window_func::{match_window_func_mir_pattern, test_match_window_func_mir_pattern};
 use crate::types::dataflows::{BuildDesc, DataflowDescription};
 
 pub mod join;
@@ -936,38 +936,7 @@ impl<T: timely::progress::Timestamp> Plan<T> {
 
         //println!("from_mir: {}", expr.pretty());
 
-        let mut window_func_count = 0;
-        #[allow(deprecated)]
-        expr.visit_post_nolimit(&mut |e| {
-            match e {
-                MirRelationExpr::Reduce {aggregates, ..} => {
-                    if aggregates.iter().any(|agg| agg.is_window_func()) {
-                        window_func_count += 1;
-                    }
-                    assert!(aggregates.iter().filter(|agg| agg.is_window_func()).count() <= 1); //todo: handle it when it's more instead of asserting
-                }
-                _ => {}
-            }
-        });
-
-        let mut pattern_count = 0;
-        #[allow(deprecated)]
-        expr.visit_post_nolimit(&mut |e| {
-            let window_func_call = match_window_func_mir_pattern(e);
-            if window_func_call.is_some() {
-                pattern_count += 1;
-            }
-        });
-
-
-        // pattern_count can be more than window_func_count, because the pattern might match at
-        // different starting points in the top MFP.
-        assert_eq!(window_func_count > 0, pattern_count > 0);
-
-
-
-
-
+        test_match_window_func_mir_pattern(expr);
 
         // We don't want to trace recursive calls, which is why the public `from_mir`
         // is annotated and delegates the work to a private (recursive) from_mir_inner.

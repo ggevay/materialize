@@ -61,14 +61,12 @@ pub fn match_window_func_mir_pattern(expr: &MirRelationExpr) -> Option<(MapFilte
                                                     let _window_func_args = match &exprs[1] {
                                                         MirScalarExpr::CallVariadic {func: VariadicFunc::RecordCreate {..}, exprs} => {
                                                             //todo
-                                                            ////////////pattern_count += 1;
                                                             exprs.clone()
                                                         }
                                                         MirScalarExpr::Literal(..) => {
                                                             // Can happen when the RecordCreate gets const-folded,
                                                             // i.e., when the window function arguments are constants.
                                                             // todo
-                                                            ////////////pattern_count += 1;
                                                             Vec::new()
                                                         }
                                                         e => {
@@ -126,4 +124,35 @@ pub fn match_window_func_mir_pattern(expr: &MirRelationExpr) -> Option<(MapFilte
         Some(window_function_call) => Some((top_mfp, window_function_call)),
         None => None,
     }
+}
+
+/// Compares the result of `match_window_func_mir_pattern`, which tries to parse window function
+/// call patterns with the results of a trivial window function call search.
+pub fn test_match_window_func_mir_pattern(expr: &MirRelationExpr) {
+    let mut window_func_count = 0;
+    #[allow(deprecated)]
+    expr.visit_post_nolimit(&mut |e| {
+        match e {
+            MirRelationExpr::Reduce {aggregates, ..} => {
+                if aggregates.iter().any(|agg| agg.is_window_func()) {
+                    window_func_count += 1;
+                }
+                assert!(aggregates.iter().filter(|agg| agg.is_window_func()).count() <= 1); //todo: handle it when it's more instead of asserting
+            }
+            _ => {}
+        }
+    });
+
+    let mut pattern_count = 0;
+    #[allow(deprecated)]
+    expr.visit_post_nolimit(&mut |e| {
+        let window_func_call = match_window_func_mir_pattern(e);
+        if window_func_call.is_some() {
+            pattern_count += 1;
+        }
+    });
+
+    // pattern_count can be more than window_func_count, because the pattern might match at
+    // different starting points in the top MFP.
+    assert_eq!(window_func_count > 0, pattern_count > 0);
 }
