@@ -18,17 +18,21 @@ pub enum WindowFuncCall {
 }
 
 pub struct LagLead {
-    lag_or_lead: LagLeadType,
+    pub input: Box<MirRelationExpr>,
+    pub lag_or_lead: LagLeadType,
     // arguments:
-    expr: MirScalarExpr,
-    offset: MirScalarExpr,
-    default: MirScalarExpr,
+    pub expr: MirScalarExpr,
+    pub offset: MirScalarExpr,
+    pub default: MirScalarExpr,
     // shared window stuff (maybe move up into a shared struct):
-    partition_by: Vec<MirScalarExpr>,
-    order_by_exprs: Vec<MirScalarExpr>,
-    column_orders: Vec<ColumnOrder>,
+    pub partition_by: Vec<MirScalarExpr>,
+    pub order_by_exprs: Vec<MirScalarExpr>,
+    pub column_orders: Vec<ColumnOrder>,
 }
 
+/// Parses the MIR pattern that the HIR lowering creates from a window function call.
+/// If the pattern matches, then the function returns the MFP that is at the top, and the parsed
+/// window function call.
 pub fn match_window_func_mir_pattern(expr: &MirRelationExpr) -> Option<(MapFilterProject, WindowFuncCall)> {
 
     let (top_mfp, below_the_top_mfp) = MapFilterProject::extract_from_expression(expr);
@@ -123,6 +127,7 @@ pub fn match_window_func_mir_pattern(expr: &MirRelationExpr) -> Option<(MapFilte
                                                                     ..
                                                                 } => {
                                                                     Some(WindowFuncCall::LagLead(LagLead{
+                                                                        input: input.clone(),
                                                                         lag_or_lead: *lag_lead,
                                                                         expr: window_func_args[0].clone(),
                                                                         offset: window_func_args[1].clone(),
@@ -200,7 +205,8 @@ pub fn test_match_window_func_mir_pattern(expr: &MirRelationExpr) {
         }
     });
 
-    // pattern_count can be more than window_func_count, because the pattern might match at
+    // One would think that these should always be exactly equal, but
+    // `pattern_count` can be more than `window_func_count`, because the pattern might match at
     // different starting points in the top MFP.
     assert_eq!(window_func_count > 0, pattern_count > 0);
 }

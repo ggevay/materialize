@@ -862,6 +862,7 @@ where
                 let input = self.render_plan(*input);
                 input.ensure_collections(keys, input_key, input_mfp, self.until.clone())
             }
+            Plan::Lag1 { .. } => {unimplemented!()} //todo
         }
     }
 }

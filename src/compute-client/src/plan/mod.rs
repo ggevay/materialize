@@ -20,19 +20,17 @@ use proptest_derive::Arbitrary;
 use serde::{Deserialize, Serialize};
 
 use mz_expr::JoinImplementation::{DeltaQuery, Differential, IndexedFilter, Unimplemented};
-use mz_expr::{
-    permutation_for_arrangement, CollectionPlan, EvalError, Id, JoinInputMapper, LocalId,
-    MapFilterProject, MirRelationExpr, MirScalarExpr, OptimizedMirRelationExpr, TableFunc,
-};
+use mz_expr::{permutation_for_arrangement, CollectionPlan, EvalError, Id, JoinInputMapper, LocalId, MapFilterProject, MirRelationExpr, MirScalarExpr, OptimizedMirRelationExpr, TableFunc, ColumnOrder, LagLeadType};
 use mz_ore::soft_panic_or_log;
 use mz_proto::{IntoRustIfSome, ProtoType, RustType, TryFromProtoError};
 use mz_repr::{Diff, GlobalId, Row};
 
 use crate::plan::join::{DeltaJoinPlan, JoinPlan, LinearJoinPlan};
+use crate::plan::Plan::Lag1;
 use crate::plan::reduce::{KeyValPlan, ReducePlan};
 use crate::plan::threshold::ThresholdPlan;
 use crate::plan::top_k::TopKPlan;
-use crate::plan::window_func::{match_window_func_mir_pattern, test_match_window_func_mir_pattern};
+use crate::plan::window_func::{LagLead, match_window_func_mir_pattern, test_match_window_func_mir_pattern, WindowFuncCall};
 use crate::types::dataflows::{BuildDesc, DataflowDescription};
 
 pub mod join;
@@ -343,6 +341,14 @@ pub enum Plan<T = mz_repr::Timestamp> {
         /// The MFP that must be applied to the input.
         input_mfp: MapFilterProject,
     },
+    Lag1 {
+        input: Box<Plan<T>>,
+        expr: MirScalarExpr,
+        default: MirScalarExpr,
+        partition_by: Vec<MirScalarExpr>,
+        order_by_exprs: Vec<MirScalarExpr>,
+        column_orders: Vec<ColumnOrder>,
+    },
 }
 
 impl<T> Plan<T> {
@@ -370,7 +376,8 @@ impl<T> Plan<T> {
             | TopK { input, .. }
             | Negate { input }
             | Threshold { input, .. }
-            | ArrangeBy { input, .. } => {
+            | ArrangeBy { input, .. }
+            | Lag1 { input, .. } => {
                 first = Some(&mut **input);
             }
             Join { inputs, .. } | Union { inputs } => {
@@ -657,6 +664,7 @@ impl RustType<ProtoPlan> for Plan {
                     }
                     .into(),
                 ),
+                Plan::Lag1 {..} => unimplemented!() //todo
             }),
         }
     }
@@ -959,11 +967,54 @@ impl<T: timely::progress::Timestamp> Plan<T> {
         mz_ore::stack::maybe_grow(|| Plan::from_mir_stack_safe(expr, arrangements, debug_info))
     }
 
+    fn window_func_to_lir(
+        expr: &MirRelationExpr,
+        arrangements: &mut BTreeMap<Id, AvailableCollections>,
+        debug_info: LirDebugInfo<'_>,
+    ) -> Result<Option<(Self, AvailableCollections)>, String> {
+        match match_window_func_mir_pattern(expr) {
+            Some((top_mfp, window_func_call)) => {
+                match window_func_call {
+                    WindowFuncCall::LagLead(
+                        LagLead {
+                            input,
+                            lag_or_lead: LagLeadType::Lag,
+                            expr,
+                            offset: MirScalarExpr::Literal(Ok(literal_row), typ),
+                            default,
+                            partition_by,
+                            order_by_exprs,
+                            column_orders,
+                        }) => {
+                        //todo: check that literal_row is 1
+                        //todo: use top_mfp
+
+                        let (input, keys) = Plan::from_mir_inner(&input, arrangements, debug_info)?;
+
+                        Ok(Some((Lag1{
+                            input: Box::new(input),
+                            expr,
+                            default,
+                            partition_by,
+                            order_by_exprs,
+                            column_orders,
+                        }, AvailableCollections::new_raw())))
+                    },
+                    _ => Ok(None)
+                }
+            },
+            None => Ok(None),
+        }
+    }
+
     fn from_mir_stack_safe(
         expr: &MirRelationExpr,
         arrangements: &mut BTreeMap<Id, AvailableCollections>,
         debug_info: LirDebugInfo<'_>,
     ) -> Result<(Self, AvailableCollections), String> {
+        if let Some((lir, available_collections)) = Self::window_func_to_lir(expr, arrangements, debug_info)? {
+            return Ok((lir, available_collections));
+        }
         // Extract a maximally large MapFilterProject from `expr`.
         // We will then try and push this in to the resulting expression.
         //
@@ -1873,6 +1924,9 @@ This is not expected to cause incorrect results, but could indicate a performanc
                         input_mfp: input_mfp.clone(),
                     })
                     .collect(),
+                Plan::Lag1 {
+                    ..
+                } => unimplemented!() //todo
             }
         }
     }
@@ -1943,7 +1997,8 @@ impl<T> CollectionPlan for Plan<T> {
             | Plan::Threshold {
                 input,
                 threshold_plan: _,
-            } => {
+            }
+            | Plan::Lag1 { input, .. } => {
                 input.depends_on_into(out);
             }
         }

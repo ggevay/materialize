@@ -351,6 +351,14 @@ impl DisplayText<PlanRenderingContext<'_, Plan>> for Plan {
                     input.fmt_text(f, ctx)
                 })?;
             }
+            Lag1 {input, ..} => {
+                writeln!(f, "{}Lag1", ctx.indent)?;
+                ctx.indented(|ctx| {
+                    // Render input
+                    input.fmt_text(f, ctx)
+                    // TODO: render other fields
+                })?;
+            }
         }
 
         Ok(())
