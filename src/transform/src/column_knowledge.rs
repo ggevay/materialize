@@ -11,7 +11,7 @@
 
 use std::collections::BTreeMap;
 
-use itertools::Itertools;
+use itertools::{zip_eq, Itertools};
 
 use mz_expr::visit::Visit;
 use mz_expr::JoinImplementation::IndexedFilter;
@@ -43,6 +43,10 @@ impl CheckedRecursion for ColumnKnowledge {
 }
 
 impl crate::Transform for ColumnKnowledge {
+    fn recursion_safe(&self) -> bool {
+        true
+    }
+
     /// Transforms an expression through accumulated knowledge.
     #[tracing::instrument(
         target = "optimizer"
@@ -106,13 +110,50 @@ impl ColumnKnowledge {
                     }
                     Ok(body_knowledge)
                 }
-                MirRelationExpr::LetRec {
-                    ids: _,
-                    values: _,
-                    body: _,
-                } => {
-                    // TODO
-                    Err(crate::TransformError::LetRecUnsupported)?
+                MirRelationExpr::LetRec { ids, values, body } => {
+                    // As a first approximation, we treat LetRec blocks as
+                    // barriers for this optimization.
+
+                    // A map to hold knowledge from shadowed bindings
+                    let mut shadowed_knowledge = BTreeMap::new();
+
+                    // We set knowledge[i][j] = DatumKnowledge::empty() for each
+                    // column j and CTE i.
+                    for (id, value) in zip_eq(ids.iter(), values.iter()) {
+                        let id = mz_expr::Id::Local(id.clone());
+                        let knowledge_new = vec![DatumKnowledge::empty(); value.arity()];
+                        if let Some(knowledge_old) = knowledge.insert(id, knowledge_new) {
+                            shadowed_knowledge.insert(id, knowledge_old);
+                        };
+                    }
+
+                    // For the first loop, we sequentially absorb into
+                    // knowledge[i][j] the result of descending into values[i].
+                    //
+                    // This is consistent with the WMR evaluation semantics of:
+                    // 1. sequential updates, and
+                    // 2. at least one iteration.
+                    for (id, value) in zip_eq(ids.iter(), values.iter_mut()) {
+                        let id = mz_expr::Id::Local(id.clone());
+                        let next_knowledge = self.harvest(value, knowledge, knowledge_stack)?;
+                        let prev_knowledge = knowledge.get_mut(&id).unwrap();
+                        for (prev, next) in zip_eq(prev_knowledge.iter_mut(), next_knowledge) {
+                            prev.absorb(&next) // Use absorb for the first iteration.
+                        }
+                    }
+
+                    // Descend into the body with the knowledge corresponding to one WMR iteration.
+                    let body_knowledge = self.harvest(body, knowledge, knowledge_stack)?;
+
+                    // Restore shadowed bindings.
+                    for id in ids.iter() {
+                        let id = mz_expr::Id::Local(id.clone());
+                        if let Some(old_knowledge) = shadowed_knowledge.remove(&id) {
+                            knowledge.insert(id, old_knowledge);
+                        }
+                    }
+
+                    Ok(body_knowledge)
                 }
                 MirRelationExpr::Project { input, outputs } => {
                     let input_knowledge = self.harvest(input, knowledge, knowledge_stack)?;
@@ -389,6 +430,21 @@ pub struct DatumKnowledge {
 }
 
 impl DatumKnowledge {
+    /// Constructs knowledge for a column that is known to come from an empty
+    /// collection. Useful when initializing knowledge for LetRec bindings.
+    ///
+    /// Note that DatumKnowledge::default() provides the bottom element w.r.t.
+    /// the induced partial DatumKnowledge order (see the field docs).
+    fn empty() -> Self {
+        // Strictly speaking we should evolve DatumKnowledge to an enum with two
+        // variants: Empty and NonEmpty and tweak the `union` operation such
+        // that `Empty union x = x`.
+        Self {
+            value: None,
+            nullable: false, // This is safe because the datum will never exist.
+        }
+    }
+
     // Intersects (strengthens) the possible states of a column.
     fn absorb(&mut self, other: &Self) {
         self.nullable &= other.nullable;
@@ -542,4 +598,18 @@ pub fn optimize(
     knowledge_datum.ok_or_else(|| {
         TransformError::Internal(String::from("unexpectedly empty stack in optimize"))
     })
+}
+
+#[allow(dead_code)] // keep debugging method around
+fn print_knowledge_vec<'a>(
+    knowledge: &BTreeMap<mz_expr::Id, Vec<DatumKnowledge>>,
+    ids: impl Iterator<Item = &'a mz_expr::LocalId>,
+) {
+    for id in ids {
+        let id = mz_expr::Id::Local(id.clone());
+        for (i, k) in knowledge.get(&id).unwrap().iter().enumerate() {
+            println!("{id}.#{i}: {k:?}");
+        }
+    }
+    println!("--------------");
 }
