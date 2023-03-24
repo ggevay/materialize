@@ -135,6 +135,13 @@ use mz_ore::stack::RecursionLimitError;
 #[macro_use]
 extern crate num_derive;
 
+/// Compute the conjunction of a variadic number of expressions.
+#[macro_export]
+macro_rules! all {
+    ($x:expr) => ($x);
+    ($($x:expr,)+) => ( $($x)&&+ )
+}
+
 /// Arguments that get threaded through all transforms.
 #[derive(Debug)]
 pub struct TransformArgs<'a> {
@@ -359,6 +366,22 @@ impl Default for FuseAndCollapse {
 }
 
 impl Transform for FuseAndCollapse {
+    fn recursion_safe(&self) -> bool {
+        all![
+            crate::canonicalization::FlatMapToMap.recursion_safe(),
+            crate::canonicalization::ProjectionExtraction.recursion_safe(),
+            crate::compound::UnionNegateFusion.recursion_safe(),
+            crate::fold_constants::FoldConstants { limit: Some(10000) }.recursion_safe(),
+            crate::fusion::Fusion.recursion_safe(),
+            crate::fusion::join::Join.recursion_safe(),
+            crate::fusion::reduce::Reduce.recursion_safe(),
+            crate::normalize_lets::NormalizeLets::new(false).recursion_safe(),
+            crate::projection_lifting::ProjectionLifting::default().recursion_safe(),
+            crate::redundant_join::RedundantJoin::default().recursion_safe(),
+            crate::union_cancel::UnionBranchCancellation.recursion_safe(),
+        ]
+    }
+
     #[tracing::instrument(
         target = "optimizer"
         level = "trace",
