@@ -318,9 +318,11 @@ Explained Query:
       implementation
         %0:foo[×] » %1:bar[×]
       ArrangeBy keys=[[]] // { arity: 2 }
-        Get materialize.public.foo // { arity: 2 }
+        Filter (#0) IS NOT NULL // { arity: 2 }
+          Get materialize.public.foo // { arity: 2 }
       ArrangeBy keys=[[]] // { arity: 2 }
-        Get materialize.public.bar // { arity: 2 }
+        Filter (#0) IS NOT NULL // { arity: 2 }
+          Get materialize.public.bar // { arity: 2 }
 
 Used Indexes:
   - materialize.public.foo_idx
@@ -349,9 +351,11 @@ Explained Query:
       implementation
         %0:foo[×] » %1:bar[×]
       ArrangeBy keys=[[]] // { arity: 2 }
-        Get materialize.public.foo // { arity: 2 }
+        Filter (#0) IS NOT NULL AND (#1) IS NOT NULL // { arity: 2 }
+          Get materialize.public.foo // { arity: 2 }
       ArrangeBy keys=[[]] // { arity: 2 }
-        Get materialize.public.bar // { arity: 2 }
+        Filter (#0) IS NOT NULL AND (#1) IS NOT NULL // { arity: 2 }
+          Get materialize.public.bar // { arity: 2 }
 
 Used Indexes:
   - materialize.public.foo_idx
