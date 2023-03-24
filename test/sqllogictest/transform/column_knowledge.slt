@@ -699,11 +699,11 @@ Explained Query:
     cte l0 =
       Distinct group_by=[1] // { arity: 1, types: "(integer)" }
         Union // { arity: 0, types: "()" }
-          Constant // { arity: 0, types: "()" }
-            - ()
           Project () // { arity: 0, types: "()" }
             Filter (#0 = 1) // { arity: 1, types: "(integer)" }
               Get l0 // { arity: 1, types: "(integer?)" }
+          Constant // { arity: 0, types: "()" }
+            - ()
 
 EOF
 
@@ -750,9 +750,8 @@ Explained Query:
     cte l0 =
       Distinct group_by=[#0] // { arity: 1, types: "(integer?)" }
         Union // { arity: 1, types: "(integer?)" }
-          Map (1) // { arity: 1, types: "(integer)" }
-            Constant // { arity: 0, types: "()" }
-              - ()
           Get l0 // { arity: 1, types: "(integer?)" }
+          Constant // { arity: 1, types: "(integer?)" }
+            - (1)
 
 EOF

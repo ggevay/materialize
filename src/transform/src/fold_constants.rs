@@ -32,6 +32,10 @@ pub struct FoldConstants {
 }
 
 impl crate::Transform for FoldConstants {
+    fn recursion_safe(&self) -> bool {
+        true
+    }
+
     #[tracing::instrument(
         target = "optimizer"
         level = "trace",
@@ -81,9 +85,7 @@ impl FoldConstants {
             MirRelationExpr::Constant { .. } => { /* handled after match */ }
             MirRelationExpr::Get { .. } => {}
             MirRelationExpr::Let { .. } => { /* constant prop done in NormalizeLets */ }
-            MirRelationExpr::LetRec { .. } => {
-                Err(crate::TransformError::LetRecUnsupported)?;
-            }
+            MirRelationExpr::LetRec { .. } => { /* constant prop done in NormalizeLets */ }
             MirRelationExpr::Reduce {
                 input,
                 group_key,
