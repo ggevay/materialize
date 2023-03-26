@@ -85,7 +85,10 @@ impl FoldConstants {
             MirRelationExpr::Constant { .. } => { /* handled after match */ }
             MirRelationExpr::Get { .. } => {}
             MirRelationExpr::Let { .. } => { /* constant prop done in NormalizeLets */ }
-            MirRelationExpr::LetRec { .. } => { /* constant prop done in NormalizeLets */ }
+            MirRelationExpr::LetRec { ids, values, body } => {
+                let mut expr = MirRelationExpr::LetRec { ids: ids.clone(), values: values.clone(), body: body.clone() };
+                crate::normalize_lets::inlining::inline_lets(&mut expr, false)?;
+            }
             MirRelationExpr::Reduce {
                 input,
                 group_key,

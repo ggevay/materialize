@@ -432,7 +432,7 @@ mod let_motion {
     }
 }
 
-mod inlining {
+pub mod inlining {
 
     use std::collections::BTreeMap;
 
@@ -461,7 +461,7 @@ mod inlining {
     /// Having inlined bindings, many of them may now be dead (with no transitive references from `body`).
     /// These can now be removed. They may not be exactly those bindings that were inlineable, as we may not always
     /// be able to apply inlining due to ordering (we cannot inline a binding into one that is not strictly later).
-    pub(super) fn inline_lets(
+    pub fn inline_lets(
         expr: &mut MirRelationExpr,
         inline_mfp: bool,
     ) -> Result<(), crate::TransformError> {

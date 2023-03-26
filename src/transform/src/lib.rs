@@ -367,19 +367,21 @@ impl Default for FuseAndCollapse {
 
 impl Transform for FuseAndCollapse {
     fn recursion_safe(&self) -> bool {
-        all![
-            crate::canonicalization::FlatMapToMap.recursion_safe(),
-            crate::canonicalization::ProjectionExtraction.recursion_safe(),
-            crate::compound::UnionNegateFusion.recursion_safe(),
-            crate::fold_constants::FoldConstants { limit: Some(10000) }.recursion_safe(),
-            crate::fusion::Fusion.recursion_safe(),
-            crate::fusion::join::Join.recursion_safe(),
-            crate::fusion::reduce::Reduce.recursion_safe(),
-            crate::normalize_lets::NormalizeLets::new(false).recursion_safe(),
-            crate::projection_lifting::ProjectionLifting::default().recursion_safe(),
-            crate::redundant_join::RedundantJoin::default().recursion_safe(),
-            crate::union_cancel::UnionBranchCancellation.recursion_safe(),
-        ]
+        // all![
+        //     crate::canonicalization::FlatMapToMap.recursion_safe(),
+        //     crate::canonicalization::ProjectionExtraction.recursion_safe(),
+        //     crate::compound::UnionNegateFusion.recursion_safe(),
+        //     crate::fold_constants::FoldConstants { limit: Some(10000) }.recursion_safe(),
+        //     crate::fusion::Fusion.recursion_safe(),
+        //     crate::fusion::join::Join.recursion_safe(),
+        //     crate::fusion::reduce::Reduce.recursion_safe(),
+        //     crate::normalize_lets::NormalizeLets::new(false).recursion_safe(),
+        //     crate::projection_lifting::ProjectionLifting::default().recursion_safe(),
+        //     crate::redundant_join::RedundantJoin::default().recursion_safe(),
+        //     crate::union_cancel::UnionBranchCancellation.recursion_safe(),
+        // ]
+
+        self.transforms.iter().all(|t| t.recursion_safe())
     }
 
     #[tracing::instrument(
