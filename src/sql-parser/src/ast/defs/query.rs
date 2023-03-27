@@ -186,12 +186,14 @@ impl_display!(SetOperator);
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum SelectOptionName {
     ExpectedGroupSize,
+    RecursionLimit
 }
 
 impl AstDisplay for SelectOptionName {
     fn fmt<W: fmt::Write>(&self, f: &mut AstFormatter<W>) {
         f.write_str(match self {
             SelectOptionName::ExpectedGroupSize => "EXPECTED GROUP SIZE",
+            SelectOptionName::RecursionLimit => "RECURSION LIMIT",
         })
     }
 }

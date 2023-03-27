@@ -108,8 +108,9 @@ use differential_dataflow::dynamic::pointstamp::PointStamp;
 use differential_dataflow::lattice::Lattice;
 use differential_dataflow::operators::arrange::Arrange;
 use differential_dataflow::operators::reduce::ReduceCore;
-use differential_dataflow::AsCollection;
+use differential_dataflow::{AsCollection, Collection};
 use timely::communication::Allocate;
+use timely::dataflow::operators::BranchWhen;
 use timely::dataflow::operators::to_stream::ToStream;
 use timely::dataflow::scopes::Child;
 use timely::dataflow::Scope;
@@ -121,7 +122,7 @@ use timely::PartialOrder;
 
 use mz_compute_client::plan::Plan;
 use mz_compute_client::types::dataflows::{BuildDesc, DataflowDescription, IndexDesc};
-use mz_expr::Id;
+use mz_expr::{EvalError, Id};
 use mz_repr::{GlobalId, Row};
 use mz_storage_client::controller::CollectionMetadata;
 use mz_storage_client::source::persist_source;
@@ -604,7 +605,7 @@ where
     /// This method recursively descends `LetRec` nodes, establishing nested scopes for each
     /// and establishing the appropriate recursive dependencies among the bound variables.
     /// Once non-`LetRec` nodes are reached it calls in to `render_plan` which will error if
-    /// furher `LetRec` variants are found.
+    /// further `LetRec` variants are found.
     ///
     /// The method requires that all variables conclude with a physical representation that
     /// contains a collection (i.e. a non-arrangement), and it will panic otherwise.
@@ -640,14 +641,39 @@ where
                 let (oks_v, err_v) = variables.remove(&Id::Local(*id)).unwrap();
                 // Set oks variable to `oks` but consolidated to ensure iteration ceases at fixed point.
                 use crate::typedefs::RowKeySpine;
-                oks_v.set(&oks.consolidate_named::<RowKeySpine<_, _, _>>("LetRecConsolidation"));
+
+                //oks_v.set(&oks.consolidate_named::<RowKeySpine<_, _, _>>("LetRecConsolidation"));
+
+                // We produce an error if the `hard_limit`th iteration produces any results, because
+                // these results would go into the `hard_limit + 1`th iteration.
+                let hard_limit = 20;
+                let oks_consolidated = oks.consolidate_named::<RowKeySpine<_, _, _>>("LetRecConsolidation");
+                let (in_limit, over_limit) = oks_consolidated.inner.branch_when(move |Product { inner: ps, .. }| {
+                    println!("##################### pointstamp: {:?}", ps);
+                    // We get None in the first iteration, because the `PointStamp` doesn't yet have
+                    // the `level`th element. It will get created when applying the summary for the
+                    // first time.
+                    let iteration_index = ps.vector.get(level).unwrap_or(&0);
+                    // The pointstamp starts counting from 0, so we need to add 1.
+                    iteration_index + 1 >= hard_limit
+                });
+                oks_v.set(&Collection::new(in_limit));
+
+                //todo: error type instead of InvalidParameterValue
+                //todo: add limit in error msg
+                //todo: add tip to raise the limit
+                //todo: add tip to set soft limit instead of hard limit
+                let err_with_limit = err.concat(&Collection::new(over_limit).map(|_data| DataflowError::EvalError(Box::new(EvalError::InvalidParameterValue(
+                    "Recursive query exceeded the hard recursion limit".to_owned(),
+                )))));
+
                 // Set err variable to the distinct elements of `err`.
                 // Distinctness is important, as we otherwise might add the same error each iteration,
                 // say if the limit of `oks` has an error. This would result in non-terminating rather
                 // than a clean report of the error. The trade-off is that we lose information about
                 // multiplicities of errors, but .. this seems to be the better call.
                 err_v.set(
-                    &err.arrange_named::<ErrSpine<DataflowError, _, _>>("Arrange recursive err")
+                    &err_with_limit.arrange_named::<ErrSpine<DataflowError, _, _>>("Arrange recursive err")
                         .reduce_abelian::<_, ErrSpine<_, _, _>>(
                             "Distinct recursive err",
                             move |_k, _s, t| t.push(((), 1)),

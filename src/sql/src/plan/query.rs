@@ -1626,7 +1626,11 @@ struct SelectPlan {
     project: Vec<usize>,
 }
 
-generate_extracted_config!(SelectOption, (ExpectedGroupSize, u64));
+generate_extracted_config!(
+    SelectOption,
+    (ExpectedGroupSize, u64),
+    (RecursionLimit, i64)
+);
 
 /// Plans a SELECT query. The SELECT query may contain an intrusive ORDER BY clause.
 ///
@@ -1658,6 +1662,7 @@ fn plan_view_select(
     // Extract query options.
     let SelectOptionExtracted {
         expected_group_size,
+        recursion_limit,
         seen: _,
     } = SelectOptionExtracted::try_from(s.options.clone())?;
 

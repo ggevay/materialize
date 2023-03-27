@@ -4757,12 +4757,19 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_select_option(&mut self) -> Result<SelectOption<Raw>, ParserError> {
-        self.expect_keywords(&[EXPECTED, GROUP, SIZE])?;
-        let name = SelectOptionName::ExpectedGroupSize;
-        Ok(SelectOption {
-            name,
-            value: self.parse_optional_option_value()?,
-        })
+        let possible_options = &[
+            (SelectOptionName::ExpectedGroupSize, vec![EXPECTED, GROUP, SIZE]),
+            (SelectOptionName::RecursionLimit, vec![RECURSION, LIMIT])
+        ];
+        for (name, keywords) in possible_options {
+            if self.parse_keywords(keywords) {
+                return Ok(SelectOption {
+                    name: name.clone(),
+                    value: self.parse_optional_option_value()?,
+                });
+            }
+        }
+        return Err(self.error(self.peek_prev_pos(), "Unrecognized SELECT option".to_owned()));
     }
 
     fn parse_set(&mut self) -> Result<Statement<Raw>, ParserError> {
