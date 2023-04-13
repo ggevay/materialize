@@ -642,7 +642,10 @@ where
                 let (oks_v, err_v) = variables.remove(&Id::Local(*id)).unwrap();
                 // Set oks variable to `oks` but consolidated to ensure iteration ceases at fixed point.
                 use crate::typedefs::RowKeySpine;
-                oks_v.set(&oks.consolidate_named::<RowKeySpine<_, _, _>>("LetRecConsolidation"));
+                oks_v.set(
+                    &oks.consolidate_named::<RowKeySpine<_, _, _>>("LetRecConsolidation")
+                        .inspect(|x| println!("{x:?}"))
+                );
                 // Set err variable to the distinct elements of `err`.
                 // Distinctness is important, as we otherwise might add the same error each iteration,
                 // say if the limit of `oks` has an error. This would result in non-terminating rather
