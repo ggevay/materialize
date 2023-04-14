@@ -112,6 +112,7 @@ use differential_dataflow::operators::reduce::ReduceCore;
 use differential_dataflow::{AsCollection, ExchangeData};
 use timely::communication::Allocate;
 use timely::container::columnation::Columnation;
+use timely::dataflow::operators::Inspect;
 use timely::dataflow::operators::to_stream::ToStream;
 use timely::dataflow::scopes::Child;
 use timely::dataflow::Scope;
@@ -628,7 +629,7 @@ where
 
                 self.insert_id(
                     Id::Local(*id),
-                    CollectionBundle::from_collections(oks_v.clone(), err_v.clone()),
+                    CollectionBundle::from_collections(oks_v.clone().inner.inspect(|x| println!("Incoming: {x:?}")).as_collection(), err_v.clone()),
                 );
                 variables.insert(Id::Local(*id), (oks_v, err_v));
             }
@@ -644,7 +645,7 @@ where
                 use crate::typedefs::RowKeySpine;
                 oks_v.set(
                     &oks.consolidate_named::<RowKeySpine<_, _, _>>("LetRecConsolidation")
-                        .inspect(|x| println!("{x:?}"))
+                        .inspect(|x| println!("Outgoing: {x:?}"))
                 );
                 // Set err variable to the distinct elements of `err`.
                 // Distinctness is important, as we otherwise might add the same error each iteration,
@@ -716,6 +717,7 @@ where
                         }
                     })
                     .to_stream(&mut self.scope)
+                    .inspect(|x| println!("constant stream: {x:?}"))
                     .as_collection();
 
                 let mut error_time: mz_repr::Timestamp = Timestamp::minimum();

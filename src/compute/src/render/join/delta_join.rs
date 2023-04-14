@@ -180,6 +180,8 @@ where
                             closure,
                         } = stage_plan;
 
+                        let inspected_update_stream = update_stream.inspect(|x| println!("update_stream: {x:?}"));
+
                         // We require different logic based on the relative order of the two inputs.
                         // If the `source` relation precedes the `lookup` relation, we present all
                         // updates with less or equal `time`, and otherwise we present only updates
@@ -190,43 +192,54 @@ where
                         let (oks, errs) =
                             match arrangements.get(&(lookup_relation, lookup_key)).unwrap() {
                                 Ok(local) => {
+                                    //let inspected_local = local.enter_region(region).inspect(|x| println!("input2: {x:?}"));
+                                    local.enter_region(region).stream.inspect(|x| println!("Ok input2: {x:?}"));
                                     if source_relation < lookup_relation {
                                         build_halfjoin(
-                                            update_stream,
+                                            inspected_update_stream,
                                             local.enter_region(region),
                                             stream_key,
                                             stream_thinning,
-                                            |t1, t2| t1.le(t2),
+                                            |t1, t2| {
+                                                t1.le(t2)
+                                            },
                                             closure,
                                         )
                                     } else {
                                         build_halfjoin(
-                                            update_stream,
+                                            inspected_update_stream,
                                             local.enter_region(region),
                                             stream_key,
                                             stream_thinning,
-                                            |t1, t2| t1.lt(t2),
+                                            |t1, t2| {
+                                                t1.lt(t2)
+                                            },
                                             closure,
                                         )
                                     }
                                 }
                                 Err(trace) => {
+                                    trace.enter_region(region).stream.inspect(|_x| println!("Err input2"));
                                     if source_relation < lookup_relation {
                                         build_halfjoin(
-                                            update_stream,
+                                            inspected_update_stream,
                                             trace.enter_region(region),
                                             stream_key,
                                             stream_thinning,
-                                            |t1, t2| t1.le(t2),
+                                            |t1, t2| {
+                                                t1.le(t2)
+                                            },
                                             closure,
                                         )
                                     } else {
                                         build_halfjoin(
-                                            update_stream,
+                                            inspected_update_stream,
                                             trace.enter_region(region),
                                             stream_key,
                                             stream_thinning,
-                                            |t1, t2| t1.lt(t2),
+                                            |t1, t2| {
+                                                t1.lt(t2)
+                                            },
                                             closure,
                                         )
                                     }
@@ -296,6 +309,7 @@ use differential_dataflow::trace::BatchReader;
 use differential_dataflow::trace::Cursor;
 use differential_dataflow::trace::TraceReader;
 use differential_dataflow::Collection;
+use timely::dataflow::operators::Inspect;
 
 /// Constructs a `half_join` from supplied arguments.
 ///

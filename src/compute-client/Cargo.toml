@@ -13,7 +13,7 @@ async-trait = "0.1.59"
 bytesize = "1.1.0"
 columnation = { git = "https://github.com/frankmcsherry/columnation" }
 chrono = { version = "0.4.23", default-features = false, features = ["std"] }
-differential-dataflow = { git = "https://github.com/TimelyDataflow/differential-dataflow.git" }
+differential-dataflow = { path = "/home/gabor/differential-dataflow" }
 futures = "0.3.25"
 http = "0.2.8"
 itertools = "0.10.5"

@@ -1686,6 +1686,18 @@ checksum = "0e25ea47919b1560c4e3b7fe0aaab9becf5b84a10325ddf7db0f0ba5e1026499"
 [[package]]
 name = "differential-dataflow"
 version = "0.12.0"
+dependencies = [
+ "abomonation",
+ "abomonation_derive",
+ "fnv",
+ "serde",
+ "serde_derive",
+ "timely",
+]
+
+[[package]]
+name = "differential-dataflow"
+version = "0.12.0"
 source = "git+https://github.com/TimelyDataflow/differential-dataflow.git#cc88469a4834faa179725d52e2beb7ab677bdb37"
 dependencies = [
  "abomonation",
@@ -1767,7 +1779,7 @@ source = "git+https://github.com/TimelyDataflow/differential-dataflow.git#cc8846
 dependencies = [
  "abomonation",
  "abomonation_derive",
- "differential-dataflow",
+ "differential-dataflow 0.12.0 (git+https://github.com/TimelyDataflow/differential-dataflow.git)",
  "serde",
  "serde_derive",
  "timely",
@@ -3378,7 +3390,7 @@ dependencies = [
  "datadriven",
  "dec",
  "derivative",
- "differential-dataflow",
+ "differential-dataflow 0.12.0",
  "enum-kinds",
  "fail",
  "futures",
@@ -3565,7 +3577,7 @@ dependencies = [
  "clap",
  "crossbeam-channel",
  "dec",
- "differential-dataflow",
+ "differential-dataflow 0.12.0",
  "futures",
  "mz-build-info",
  "mz-cluster-client",
@@ -3666,7 +3678,7 @@ dependencies = [
  "clap",
  "crossbeam-channel",
  "dec",
- "differential-dataflow",
+ "differential-dataflow 0.12.0",
  "dogsdogsdogs",
  "futures",
  "mz-build-info",
@@ -3704,7 +3716,7 @@ dependencies = [
  "bytesize",
  "chrono",
  "columnation",
- "differential-dataflow",
+ "differential-dataflow 0.12.0",
  "futures",
  "http",
  "itertools",
@@ -3748,7 +3760,7 @@ version = "0.0.0"
 dependencies = [
  "anyhow",
  "chrono",
- "differential-dataflow",
+ "differential-dataflow 0.12.0",
  "futures",
  "mz-build-info",
  "mz-cluster-client",
@@ -3989,7 +4001,7 @@ dependencies = [
  "chrono",
  "clap",
  "criterion",
- "differential-dataflow",
+ "differential-dataflow 0.12.0",
  "itertools",
  "maplit",
  "mz-avro",
@@ -4248,7 +4260,7 @@ dependencies = [
  "base64 0.13.1",
  "bytes",
  "deadpool-postgres",
- "differential-dataflow",
+ "differential-dataflow 0.12.0",
  "fail",
  "futures-util",
  "md-5",
@@ -4289,7 +4301,7 @@ dependencies = [
  "clap",
  "criterion",
  "datadriven",
- "differential-dataflow",
+ "differential-dataflow 0.12.0",
  "futures",
  "futures-task",
  "futures-util",
@@ -4507,7 +4519,7 @@ dependencies = [
  "columnation",
  "criterion",
  "dec",
- "differential-dataflow",
+ "differential-dataflow 0.12.0",
  "enum-kinds",
  "enum_dispatch",
  "fast-float",
@@ -4777,7 +4789,7 @@ version = "0.0.0"
 dependencies = [
  "anyhow",
  "criterion",
- "differential-dataflow",
+ "differential-dataflow 0.12.0",
  "fail",
  "futures",
  "mz-ore",
@@ -4831,7 +4843,7 @@ dependencies = [
  "csv-core",
  "datadriven",
  "dec",
- "differential-dataflow",
+ "differential-dataflow 0.12.0",
  "either",
  "fail",
  "futures",
@@ -4905,7 +4917,7 @@ dependencies = [
  "chrono",
  "dec",
  "derivative",
- "differential-dataflow",
+ "differential-dataflow 0.12.0",
  "futures",
  "http",
  "itertools",
@@ -5043,7 +5055,7 @@ dependencies = [
 name = "mz-timely-util"
 version = "0.0.0"
 dependencies = [
- "differential-dataflow",
+ "differential-dataflow 0.12.0",
  "futures-util",
  "mz-ore",
  "num-traits",
@@ -5061,7 +5073,7 @@ version = "0.0.0"
 dependencies = [
  "anyhow",
  "datadriven",
- "differential-dataflow",
+ "differential-dataflow 0.12.0",
  "itertools",
  "mz-compute-client",
  "mz-expr",
