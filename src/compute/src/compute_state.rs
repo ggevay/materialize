@@ -635,9 +635,11 @@ impl PendingPeek {
         let (mut cursor, storage) = self.trace_bundle.errs_mut().cursor();
         while cursor.key_valid(&storage) {
             let mut copies = 0;
+            println!("Before map_times");
             cursor.map_times(&storage, |time, diff| {
                 if time.less_equal(&self.peek.timestamp) {
                     copies += diff;
+                    println!("diff: {}", diff);
                 }
             });
             if copies < 0 {
@@ -648,6 +650,7 @@ impl PendingPeek {
                 ));
             }
             if copies > 0 {
+                println!("collect_finished_data is seeing an error `{}` with copies: {}", cursor.key(&storage).to_string(), copies);
                 return Err(cursor.key(&storage).to_string());
             }
             cursor.step_key(&storage);

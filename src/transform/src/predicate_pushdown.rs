@@ -154,7 +154,9 @@ impl PredicatePushdown {
                     // whether they are literal errors before working with them.
                     let input_type = input.typ();
                     for predicate in predicates.iter_mut() {
+                        println!("Before reduce: {}", predicate);
                         predicate.reduce(&input_type.column_types);
+                        println!("After reduce:  {}", predicate);
                     }
 
                     // It can be helpful to know if there are any non-literal errors,
@@ -449,9 +451,11 @@ impl PredicatePushdown {
                             }
                         }
                         MirRelationExpr::Negate { input: inner } => {
-                            let predicates = std::mem::take(predicates);
-                            *relation = inner.take_dangerous().filter(predicates).negate();
-                            self.action(relation, get_predicates)?;
+                            if !predicates.iter().any(|p| p.is_literal_err()) {
+                                let predicates = std::mem::take(predicates);
+                                *relation = inner.take_dangerous().filter(predicates).negate();
+                                self.action(relation, get_predicates)?;
+                            }
                         }
                         x => {
                             x.try_visit_mut_children(|e| self.action(e, get_predicates))?;
@@ -911,6 +915,8 @@ impl PredicatePushdown {
                 retained.push(predicate);
             }
         }
+        println!("retained: {:?}", retained);
+        println!("pushdown: {:?}", pushdown);
         Ok((retained, pushdown))
     }
 
