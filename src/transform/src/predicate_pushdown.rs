@@ -442,12 +442,16 @@ impl PredicatePushdown {
                             self.action(input, get_predicates)?;
                         }
                         MirRelationExpr::Union { base, inputs } => {
-                            let predicates = std::mem::take(predicates);
-                            *base = Box::new(base.take_dangerous().filter(predicates.clone()));
-                            self.action(base, get_predicates)?;
-                            for input in inputs {
-                                *input = input.take_dangerous().filter(predicates.clone());
-                                self.action(input, get_predicates)?;
+                            if !predicates.iter().any(|p| p.is_literal_err()) {
+                                let predicates = std::mem::take(predicates);
+                                *base = Box::new(base.take_dangerous().filter(predicates.clone()));
+                                self.action(base, get_predicates)?;
+                                for input in inputs {
+                                    *input = input.take_dangerous().filter(predicates.clone());
+                                    self.action(input, get_predicates)?;
+                                }
+                            } else {
+                                self.action(base, get_predicates)?;
                             }
                         }
                         MirRelationExpr::Negate { input: inner } => {
