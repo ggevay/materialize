@@ -344,6 +344,7 @@ impl VisitChildren<HirScalarExpr> for WindowExpr {
 pub enum WindowExprType {
     Scalar(ScalarWindowExpr),
     Value(ValueWindowExpr),
+    Aggregate(AggregateWindowExpr),
 }
 
 impl WindowExprType {
@@ -356,6 +357,7 @@ impl WindowExprType {
         match self {
             Self::Scalar(expr) => expr.visit_expressions(f),
             Self::Value(expr) => expr.visit_expressions(f),
+            Self::Aggregate(expr) => expr.visit_expressions(f),
         }
     }
 
@@ -368,6 +370,7 @@ impl WindowExprType {
         match self {
             Self::Scalar(expr) => expr.visit_expressions_mut(f),
             Self::Value(expr) => expr.visit_expressions_mut(f),
+            Self::Aggregate(expr) => expr.visit_expressions_mut(f),
         }
     }
 
@@ -380,6 +383,7 @@ impl WindowExprType {
         match self {
             Self::Scalar(expr) => expr.typ(outers, inner, params),
             Self::Value(expr) => expr.typ(outers, inner, params),
+            Self::Aggregate(expr) => expr.typ(outers, inner, params),
         }
     }
 }
@@ -392,6 +396,7 @@ impl VisitChildren<HirScalarExpr> for WindowExprType {
         match self {
             Self::Scalar(_) => (),
             Self::Value(expr) => expr.visit_children(f),
+            Self::Aggregate(expr) => expr.visit_children(f),
         }
     }
 
@@ -402,6 +407,7 @@ impl VisitChildren<HirScalarExpr> for WindowExprType {
         match self {
             Self::Scalar(_) => (),
             Self::Value(expr) => expr.visit_mut_children(f),
+            Self::Aggregate(expr) => expr.visit_mut_children(f),
         }
     }
 
@@ -413,6 +419,7 @@ impl VisitChildren<HirScalarExpr> for WindowExprType {
         match self {
             Self::Scalar(_) => Ok(()),
             Self::Value(expr) => expr.try_visit_children(f),
+            Self::Aggregate(expr) => expr.try_visit_children(f),
         }
     }
 
@@ -424,6 +431,7 @@ impl VisitChildren<HirScalarExpr> for WindowExprType {
         match self {
             Self::Scalar(_) => Ok(()),
             Self::Value(expr) => expr.try_visit_mut_children(f),
+            Self::Aggregate(expr) => expr.try_visit_mut_children(f),
         }
     }
 }
@@ -638,6 +646,99 @@ impl ValueWindowFunc {
                 input_type.scalar_type.nullable(true)
             }
         }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+pub struct AggregateWindowExpr {
+    pub aggregate_expr: AggregateExpr,
+    pub order_by: Vec<ColumnOrder>,
+    pub window_frame: WindowFrame,
+}
+
+impl AggregateWindowExpr {
+    #[deprecated = "Use `VisitChildren<HirScalarExpr>::visit_children` instead."]
+    pub fn visit_expressions<'a, F, E>(&'a self, f: &mut F) -> Result<(), E>
+    where
+        F: FnMut(&'a HirScalarExpr) -> Result<(), E>,
+    {
+        f(&self.aggregate_expr.expr)
+    }
+
+    #[deprecated = "Use `VisitChildren<HirScalarExpr>::visit_mut_children` instead."]
+    pub fn visit_expressions_mut<'a, F, E>(&'a mut self, f: &mut F) -> Result<(), E>
+    where
+        F: FnMut(&'a mut HirScalarExpr) -> Result<(), E>,
+    {
+        f(&mut self.aggregate_expr.expr)
+    }
+
+    fn typ(
+        &self,
+        outers: &[RelationType],
+        inner: &RelationType,
+        params: &BTreeMap<usize, ScalarType>,
+    ) -> ColumnType {
+        self.aggregate_expr
+            .func
+            .output_type(self.aggregate_expr.expr.typ(outers, inner, params))
+    }
+
+    pub fn into_expr(self) -> mz_expr::AggregateFunc {
+        // match self.func {
+        //     // Lag and Lead are fundamentally the same function, just with opposite directions
+        //     ValueWindowFunc::Lag => mz_expr::AggregateFunc::LagLead {
+        //         order_by: self.order_by,
+        //         lag_lead: mz_expr::LagLeadType::Lag,
+        //         ignore_nulls: self.ignore_nulls,
+        //     },
+        //     ValueWindowFunc::Lead => mz_expr::AggregateFunc::LagLead {
+        //         order_by: self.order_by,
+        //         lag_lead: mz_expr::LagLeadType::Lead,
+        //         ignore_nulls: self.ignore_nulls,
+        //     },
+        //     ValueWindowFunc::FirstValue => mz_expr::AggregateFunc::FirstValue {
+        //         order_by: self.order_by,
+        //         window_frame: self.window_frame,
+        //     },
+        //     ValueWindowFunc::LastValue => mz_expr::AggregateFunc::LastValue {
+        //         order_by: self.order_by,
+        //         window_frame: self.window_frame,
+        //     },
+        // }
+        todo!();
+    }
+}
+
+impl VisitChildren<HirScalarExpr> for AggregateWindowExpr {
+    fn visit_children<F>(&self, mut f: F)
+    where
+        F: FnMut(&HirScalarExpr),
+    {
+        f(&self.aggregate_expr.expr)
+    }
+
+    fn visit_mut_children<F>(&mut self, mut f: F)
+    where
+        F: FnMut(&mut HirScalarExpr),
+    {
+        f(&mut self.aggregate_expr.expr)
+    }
+
+    fn try_visit_children<F, E>(&self, mut f: F) -> Result<(), E>
+    where
+        F: FnMut(&HirScalarExpr) -> Result<(), E>,
+        E: From<RecursionLimitError>,
+    {
+        f(&self.aggregate_expr.expr)
+    }
+
+    fn try_visit_mut_children<F, E>(&mut self, mut f: F) -> Result<(), E>
+    where
+        F: FnMut(&mut HirScalarExpr) -> Result<(), E>,
+        E: From<RecursionLimitError>,
+    {
+        f(&mut self.aggregate_expr.expr)
     }
 }
 
