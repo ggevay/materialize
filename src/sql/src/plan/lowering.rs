@@ -1104,6 +1104,9 @@ impl HirScalarExpr {
                                 },
                             )?
                         }
+                        WindowExprType::Aggregate(func) => {
+                            todo!()
+                        }
                     }
                 }
             })

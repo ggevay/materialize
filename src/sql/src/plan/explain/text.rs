@@ -350,6 +350,9 @@ impl fmt::Display for HirScalarExpr {
                             Some(&value_window_expr.window_frame),
                         )
                     }
+                    WindowExprType::Aggregate(aggregate_window_expr) => {
+                        todo!()
+                    }
                 };
 
                 // Reconstruct the ORDER BY (see comment on `WindowExpr.order_by`).

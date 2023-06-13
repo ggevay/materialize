@@ -16,10 +16,6 @@ statement error db error: ERROR: window function pg_catalog\.row_number requires
 WITH t (x) AS (VALUES ('a'), ('b'), ('c'))
 SELECT row_number() FROM t
 
-statement error aggregate window functions not yet supported
-WITH t (x) AS (VALUES ('a'), ('b'), ('c'))
-SELECT array_agg(x) OVER () FROM t
-
 query IT
 WITH t (x) AS (VALUES ('a'), ('b'), ('c'))
 SELECT row_number() OVER (ORDER BY x), x FROM t
