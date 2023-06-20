@@ -1165,86 +1165,84 @@ impl HirScalarExpr {
                     }
                 }
 
-                get_inner.let_in_fallible(id_gen, |id_gen, mut get_inner| {
-                    let input_type = get_inner.typ();
+                let input_type = get_inner.typ();
 
-                    // Original columns of the relation
-                    let fields = input_type
-                        .column_types
-                        .iter()
-                        .take(input_arity)
-                        .map(|t| (ColumnName::from("?column?"), t.clone()))
-                        .collect_vec();
+                // Original columns of the relation
+                let fields = input_type
+                    .column_types
+                    .iter()
+                    .take(input_arity)
+                    .map(|t| (ColumnName::from("?column?"), t.clone()))
+                    .collect_vec();
 
-                    // Original row made into a record
-                    let original_row_record = MirScalarExpr::CallVariadic {
-                        func: mz_expr::VariadicFunc::RecordCreate {
-                            field_names: fields.iter().map(|(name, _)| name.clone()).collect_vec(),
+                // Original row made into a record
+                let original_row_record = MirScalarExpr::CallVariadic {
+                    func: mz_expr::VariadicFunc::RecordCreate {
+                        field_names: fields.iter().map(|(name, _)| name.clone()).collect_vec(),
+                    },
+                    exprs: (0..input_arity)
+                        .map(|column| MirScalarExpr::Column(column))
+                        .collect_vec(),
+                };
+                let original_row_record_type = ScalarType::Record {
+                    fields,
+                    custom_id: None,
+                };
+
+                let (agg_input, agg_input_type) = lower_args(
+                    id_gen,
+                    col_map,
+                    cte_map,
+                    &mut get_inner,
+                    subquery_map,
+                    order_by_mir,
+                    original_row_record,
+                    original_row_record_type,
+                )?;
+
+                let aggregate = mz_expr::AggregateExpr {
+                    func: mir_aggr_func,
+                    expr: agg_input,
+                    distinct: false,
+                };
+
+                // Actually call reduce with the window function
+                // The output of the aggregation function should be a list of tuples that has
+                // the result in the first position, and the original row in the second position
+                let mut reduce = get_inner
+                    .reduce(group_key.clone(), vec![aggregate.clone()], None)
+                    .flat_map(
+                        mz_expr::TableFunc::UnnestList {
+                            el_typ: aggregate
+                                .func
+                                .output_type(agg_input_type)
+                                .scalar_type
+                                .unwrap_list_element_type()
+                                .clone(),
                         },
-                        exprs: (0..input_arity)
-                            .map(|column| MirScalarExpr::Column(column))
-                            .collect_vec(),
-                    };
-                    let original_row_record_type = ScalarType::Record {
-                        fields,
-                        custom_id: None,
-                    };
+                        vec![MirScalarExpr::Column(group_key.len())],
+                    );
+                let record_col = reduce.arity() - 1;
 
-                    let (agg_input, agg_input_type) = lower_args(
-                        id_gen,
-                        col_map,
-                        cte_map,
-                        &mut get_inner,
-                        subquery_map,
-                        order_by_mir,
-                        original_row_record,
-                        original_row_record_type,
-                    )?;
-
-                    let aggregate = mz_expr::AggregateExpr {
-                        func: mir_aggr_func,
-                        expr: agg_input,
-                        distinct: false,
-                    };
-
-                    // Actually call reduce with the window function
-                    // The output of the aggregation function should be a list of tuples that has
-                    // the result in the first position, and the original row in the second position
-                    let mut reduce = get_inner
-                        .reduce(group_key.clone(), vec![aggregate.clone()], None)
-                        .flat_map(
-                            mz_expr::TableFunc::UnnestList {
-                                el_typ: aggregate
-                                    .func
-                                    .output_type(agg_input_type)
-                                    .scalar_type
-                                    .unwrap_list_element_type()
-                                    .clone(),
-                            },
-                            vec![MirScalarExpr::Column(group_key.len())],
-                        );
-                    let record_col = reduce.arity() - 1;
-
-                    // Unpack the record output by the window function
-                    for c in 0..input_arity {
-                        reduce = reduce.take_dangerous().map_one(MirScalarExpr::CallUnary {
-                            func: mz_expr::UnaryFunc::RecordGet(mz_expr::func::RecordGet(c)),
-                            expr: Box::new(MirScalarExpr::CallUnary {
-                                func: mz_expr::UnaryFunc::RecordGet(mz_expr::func::RecordGet(1)),
-                                expr: Box::new(MirScalarExpr::Column(record_col)),
-                            }),
-                        });
-                    }
-
-                    // Append the column with the result of the window function.
+                // Unpack the record output by the window function
+                for c in 0..input_arity {
                     reduce = reduce.take_dangerous().map_one(MirScalarExpr::CallUnary {
-                        func: mz_expr::UnaryFunc::RecordGet(mz_expr::func::RecordGet(0)),
-                        expr: Box::new(MirScalarExpr::Column(record_col)),
+                        func: mz_expr::UnaryFunc::RecordGet(mz_expr::func::RecordGet(c)),
+                        expr: Box::new(MirScalarExpr::CallUnary {
+                            func: mz_expr::UnaryFunc::RecordGet(mz_expr::func::RecordGet(1)),
+                            expr: Box::new(MirScalarExpr::Column(record_col)),
+                        }),
                     });
+                }
 
-                    let agg_col = record_col + 1 + input_arity;
-                    Ok::<_, PlanError>(reduce.project((record_col + 1..agg_col + 1).collect_vec()))
-                })
+                // Append the column with the result of the window function.
+                reduce = reduce.take_dangerous().map_one(MirScalarExpr::CallUnary {
+                    func: mz_expr::UnaryFunc::RecordGet(mz_expr::func::RecordGet(0)),
+                    expr: Box::new(MirScalarExpr::Column(record_col)),
+                });
+
+                let agg_col = record_col + 1 + input_arity;
+                Ok::<_, PlanError>(reduce.project((record_col + 1..agg_col + 1).collect_vec()))
             })?;
         Ok(MirScalarExpr::Column(inner.arity() - 1))
     }
