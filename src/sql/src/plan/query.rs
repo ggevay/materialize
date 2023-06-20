@@ -2732,7 +2732,7 @@ fn plan_table_function_internal(
                 func: ScalarWindowFunc::RowNumber,
                 order_by: vec![],
             }),
-            partition: vec![],
+            partition_by: vec![],
             order_by: vec![],
         })]);
         scope
@@ -4554,7 +4554,7 @@ fn plan_function<'a>(
                     func,
                     order_by: col_orders,
                 }),
-                partition,
+                partition_by: partition,
                 order_by,
             }));
         }
@@ -4585,7 +4585,7 @@ fn plan_function<'a>(
                     window_frame,
                     ignore_nulls: window_spec.ignore_nulls, // (RESPECT NULLS is the default)
                 }),
-                partition,
+                partition_by: partition,
                 order_by,
             }));
         }

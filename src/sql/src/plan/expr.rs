@@ -229,7 +229,7 @@ pub enum HirScalarExpr {
 /// order.
 pub struct WindowExpr {
     pub func: WindowExprType,
-    pub partition: Vec<HirScalarExpr>,
+    pub partition_by: Vec<HirScalarExpr>,
     // ORDER BY is represented in a complicated way: `plan_function_order_by` gave us two things:
     // - the `ColumnOrder`s we have put in `func` above,
     // - the `HirScalarExpr`s we have put in the following `order_by` field.
@@ -243,7 +243,7 @@ impl WindowExpr {
     {
         #[allow(deprecated)]
         self.func.visit_expressions(f)?;
-        for expr in self.partition.iter() {
+        for expr in self.partition_by.iter() {
             f(expr)?;
         }
         for expr in self.order_by.iter() {
@@ -258,7 +258,7 @@ impl WindowExpr {
     {
         #[allow(deprecated)]
         self.func.visit_expressions_mut(f)?;
-        for expr in self.partition.iter_mut() {
+        for expr in self.partition_by.iter_mut() {
             f(expr)?;
         }
         for expr in self.order_by.iter_mut() {
@@ -274,7 +274,7 @@ impl VisitChildren<HirScalarExpr> for WindowExpr {
         F: FnMut(&HirScalarExpr),
     {
         self.func.visit_children(&mut f);
-        for expr in self.partition.iter() {
+        for expr in self.partition_by.iter() {
             f(expr);
         }
         for expr in self.order_by.iter() {
@@ -287,7 +287,7 @@ impl VisitChildren<HirScalarExpr> for WindowExpr {
         F: FnMut(&mut HirScalarExpr),
     {
         self.func.visit_mut_children(&mut f);
-        for expr in self.partition.iter_mut() {
+        for expr in self.partition_by.iter_mut() {
             f(expr);
         }
         for expr in self.order_by.iter_mut() {
@@ -301,7 +301,7 @@ impl VisitChildren<HirScalarExpr> for WindowExpr {
         E: From<RecursionLimitError>,
     {
         self.func.try_visit_children(&mut f)?;
-        for expr in self.partition.iter() {
+        for expr in self.partition_by.iter() {
             f(expr)?;
         }
         for expr in self.order_by.iter() {
@@ -316,7 +316,7 @@ impl VisitChildren<HirScalarExpr> for WindowExpr {
         E: From<RecursionLimitError>,
     {
         self.func.try_visit_mut_children(&mut f)?;
-        for expr in self.partition.iter_mut() {
+        for expr in self.partition_by.iter_mut() {
             f(expr)?;
         }
         for expr in self.order_by.iter_mut() {
