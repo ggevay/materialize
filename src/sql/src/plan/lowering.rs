@@ -1133,117 +1133,115 @@ impl HirScalarExpr {
             ScalarType,
         ) -> Result<(MirScalarExpr, ColumnType), PlanError>,
     {
-        *inner = inner
+        let order_by_mir = order_by
+            .into_iter()
+            .map(|o| o.applied_to(id_gen, col_map, cte_map, inner, subquery_map))
+            .collect::<Result<Vec<_>, _>>()?;
+
+        // Record input arity here so that any group_keys that need to mutate inner
+        // don't add those columns to the aggregate input.
+        let input_arity = inner.typ().arity();
+        // The reduction that computes the window function must be keyed on the columns
+        // from the outer context, plus the expressions in the partition key. The current
+        // subquery will be 'executed' for every distinct row from the outer context so
+        // by putting the outer columns in the grouping key we isolate each re-execution.
+        let mut group_key = col_map
+            .inner
+            .iter()
+            .map(|(_, outer_col)| *outer_col)
+            .sorted()
+            .collect_vec();
+        for p in partition_by {
+            let key = p.applied_to(id_gen, col_map, cte_map, inner, subquery_map)?;
+            if let MirScalarExpr::Column(c) = key {
+                group_key.push(c);
+            } else {
+                *inner = inner.take_dangerous().map_one(key);
+                group_key.push(inner.arity() - 1);
+            }
+        }
+
+        let input_type = inner.typ();
+
+        // Original columns of the relation
+        let fields = input_type
+            .column_types
+            .iter()
+            .take(input_arity)
+            .map(|t| (ColumnName::from("?column?"), t.clone()))
+            .collect_vec();
+
+        // Original row made into a record
+        let original_row_record = MirScalarExpr::CallVariadic {
+            func: mz_expr::VariadicFunc::RecordCreate {
+                field_names: fields.iter().map(|(name, _)| name.clone()).collect_vec(),
+            },
+            exprs: (0..input_arity)
+                .map(|column| MirScalarExpr::Column(column))
+                .collect_vec(),
+        };
+        let original_row_record_type = ScalarType::Record {
+            fields,
+            custom_id: None,
+        };
+
+        let (agg_input, agg_input_type) = lower_args(
+            id_gen,
+            col_map,
+            cte_map,
+            inner,
+            subquery_map,
+            order_by_mir,
+            original_row_record,
+            original_row_record_type,
+        )?;
+
+        let aggregate = mz_expr::AggregateExpr {
+            func: mir_aggr_func,
+            expr: agg_input,
+            distinct: false,
+        };
+
+        // Actually call reduce with the window function
+        // The output of the aggregation function should be a list of tuples that has
+        // the result in the first position, and the original row in the second position
+        let mut reduce = inner
             .take_dangerous()
-            .let_in_fallible(id_gen, |id_gen, mut get_inner| {
-                let order_by_mir = order_by
-                    .into_iter()
-                    .map(|o| o.applied_to(id_gen, col_map, cte_map, &mut get_inner, subquery_map))
-                    .collect::<Result<Vec<_>, _>>()?;
+            .reduce(group_key.clone(), vec![aggregate.clone()], None)
+            .flat_map(
+                mz_expr::TableFunc::UnnestList {
+                    el_typ: aggregate
+                        .func
+                        .output_type(agg_input_type)
+                        .scalar_type
+                        .unwrap_list_element_type()
+                        .clone(),
+                },
+                vec![MirScalarExpr::Column(group_key.len())],
+            );
+        let record_col = reduce.arity() - 1;
 
-                // Record input arity here so that any group_keys that need to mutate get_inner
-                // don't add those columns to the aggregate input.
-                let input_arity = get_inner.typ().arity();
-                // The reduction that computes the window function must be keyed on the columns
-                // from the outer context, plus the expressions in the partition key. The current
-                // subquery will be 'executed' for every distinct row from the outer context so
-                // by putting the outer columns in the grouping key we isolate each re-execution.
-                let mut group_key = col_map
-                    .inner
-                    .iter()
-                    .map(|(_, outer_col)| *outer_col)
-                    .sorted()
-                    .collect_vec();
-                for p in partition_by {
-                    let key =
-                        p.applied_to(id_gen, col_map, cte_map, &mut get_inner, subquery_map)?;
-                    if let MirScalarExpr::Column(c) = key {
-                        group_key.push(c);
-                    } else {
-                        get_inner = get_inner.map_one(key);
-                        group_key.push(get_inner.arity() - 1);
-                    }
-                }
-
-                let input_type = get_inner.typ();
-
-                // Original columns of the relation
-                let fields = input_type
-                    .column_types
-                    .iter()
-                    .take(input_arity)
-                    .map(|t| (ColumnName::from("?column?"), t.clone()))
-                    .collect_vec();
-
-                // Original row made into a record
-                let original_row_record = MirScalarExpr::CallVariadic {
-                    func: mz_expr::VariadicFunc::RecordCreate {
-                        field_names: fields.iter().map(|(name, _)| name.clone()).collect_vec(),
-                    },
-                    exprs: (0..input_arity)
-                        .map(|column| MirScalarExpr::Column(column))
-                        .collect_vec(),
-                };
-                let original_row_record_type = ScalarType::Record {
-                    fields,
-                    custom_id: None,
-                };
-
-                let (agg_input, agg_input_type) = lower_args(
-                    id_gen,
-                    col_map,
-                    cte_map,
-                    &mut get_inner,
-                    subquery_map,
-                    order_by_mir,
-                    original_row_record,
-                    original_row_record_type,
-                )?;
-
-                let aggregate = mz_expr::AggregateExpr {
-                    func: mir_aggr_func,
-                    expr: agg_input,
-                    distinct: false,
-                };
-
-                // Actually call reduce with the window function
-                // The output of the aggregation function should be a list of tuples that has
-                // the result in the first position, and the original row in the second position
-                let mut reduce = get_inner
-                    .reduce(group_key.clone(), vec![aggregate.clone()], None)
-                    .flat_map(
-                        mz_expr::TableFunc::UnnestList {
-                            el_typ: aggregate
-                                .func
-                                .output_type(agg_input_type)
-                                .scalar_type
-                                .unwrap_list_element_type()
-                                .clone(),
-                        },
-                        vec![MirScalarExpr::Column(group_key.len())],
-                    );
-                let record_col = reduce.arity() - 1;
-
-                // Unpack the record output by the window function
-                for c in 0..input_arity {
-                    reduce = reduce.take_dangerous().map_one(MirScalarExpr::CallUnary {
-                        func: mz_expr::UnaryFunc::RecordGet(mz_expr::func::RecordGet(c)),
-                        expr: Box::new(MirScalarExpr::CallUnary {
-                            func: mz_expr::UnaryFunc::RecordGet(mz_expr::func::RecordGet(1)),
-                            expr: Box::new(MirScalarExpr::Column(record_col)),
-                        }),
-                    });
-                }
-
-                // Append the column with the result of the window function.
-                reduce = reduce.take_dangerous().map_one(MirScalarExpr::CallUnary {
-                    func: mz_expr::UnaryFunc::RecordGet(mz_expr::func::RecordGet(0)),
+        // Unpack the record output by the window function
+        for c in 0..input_arity {
+            reduce = reduce.take_dangerous().map_one(MirScalarExpr::CallUnary {
+                func: mz_expr::UnaryFunc::RecordGet(mz_expr::func::RecordGet(c)),
+                expr: Box::new(MirScalarExpr::CallUnary {
+                    func: mz_expr::UnaryFunc::RecordGet(mz_expr::func::RecordGet(1)),
                     expr: Box::new(MirScalarExpr::Column(record_col)),
-                });
+                }),
+            });
+        }
 
-                let agg_col = record_col + 1 + input_arity;
-                Ok::<_, PlanError>(reduce.project((record_col + 1..agg_col + 1).collect_vec()))
-            })?;
+        // Append the column with the result of the window function.
+        reduce = reduce.take_dangerous().map_one(MirScalarExpr::CallUnary {
+            func: mz_expr::UnaryFunc::RecordGet(mz_expr::func::RecordGet(0)),
+            expr: Box::new(MirScalarExpr::Column(record_col)),
+        });
+
+        let agg_col = record_col + 1 + input_arity;
+
+        *inner = reduce.project((record_col + 1..agg_col + 1).collect_vec());
+
         Ok(MirScalarExpr::Column(inner.arity() - 1))
     }
 
