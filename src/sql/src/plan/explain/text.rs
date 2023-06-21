@@ -351,7 +351,12 @@ impl fmt::Display for HirScalarExpr {
                         )
                     }
                     WindowExprType::Aggregate(aggregate_window_expr) => {
-                        todo!()
+                        write!(f, "{}", aggregate_window_expr.aggregate_expr)?;
+                        (
+                            &aggregate_window_expr.order_by,
+                            false,
+                            Some(&aggregate_window_expr.window_frame),
+                        )
                     }
                 };
 

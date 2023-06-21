@@ -1842,7 +1842,8 @@ pub mod monoids {
             | AggregateFunc::DenseRank { .. }
             | AggregateFunc::LagLead { .. }
             | AggregateFunc::FirstValue { .. }
-            | AggregateFunc::LastValue { .. } => None,
+            | AggregateFunc::LastValue { .. }
+            | AggregateFunc::WindowAggregate { .. } => None,
         }
     }
 }

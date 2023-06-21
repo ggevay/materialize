@@ -524,6 +524,16 @@ EOF
 
 query T multiline
 EXPLAIN RAW PLAN AS TEXT FOR
+SELECT
+    sum(b + 8) over (partition by b%6 order by b + 33 desc rows between 2 preceding and 3 following)
+FROM t;
+----
+aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+
+EOF
+
+query T multiline
+EXPLAIN RAW PLAN AS TEXT FOR
 WITH MUTUALLY RECURSIVE
     foo (a int, b int) AS (SELECT 1, 2 UNION SELECT a, 7 FROM bar),
     bar (a int) as (SELECT a FROM foo)
