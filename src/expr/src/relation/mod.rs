@@ -2550,6 +2550,10 @@ impl AggregateExpr {
                 }
             }
 
+            AggregateFunc::WindowAggregate { .. } => {
+                todo!()
+            }
+
             // All other variants should return the argument to the aggregation.
             AggregateFunc::MaxNumeric
             | AggregateFunc::MaxInt16

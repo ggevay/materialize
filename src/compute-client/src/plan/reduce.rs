@@ -924,7 +924,8 @@ fn reduction_type(func: &AggregateFunc) -> ReductionType {
         | AggregateFunc::DenseRank { .. }
         | AggregateFunc::LagLead { .. }
         | AggregateFunc::FirstValue { .. }
-        | AggregateFunc::LastValue { .. } => ReductionType::Basic,
+        | AggregateFunc::LastValue { .. }
+        | AggregateFunc::WindowAggregate { .. } => ReductionType::Basic,
     }
 }
 

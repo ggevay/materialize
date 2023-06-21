@@ -1179,6 +1179,11 @@ pub enum AggregateFunc {
         order_by: Vec<ColumnOrder>,
         window_frame: WindowFrame,
     },
+    WindowAggregate {
+        wrapped_aggregate: Box<AggregateFunc>,
+        order_by: Vec<ColumnOrder>,
+        window_frame: WindowFrame,
+    },
     /// Accumulates any number of `Datum::Dummy`s into `Datum::Dummy`.
     ///
     /// Useful for removing an expensive aggregation while maintaining the shape
@@ -1386,17 +1391,26 @@ impl RustType<ProtoAggregateFunc> for AggregateFunc {
                 AggregateFunc::FirstValue {
                     order_by,
                     window_frame,
-                } => Kind::FirstValue(proto_aggregate_func::ProtoWindowFrame {
+                } => Kind::FirstValue(proto_aggregate_func::ProtoFramedWindowFunc {
                     order_by: Some(order_by.into_proto()),
                     window_frame: Some(window_frame.into_proto()),
                 }),
                 AggregateFunc::LastValue {
                     order_by,
                     window_frame,
-                } => Kind::LastValue(proto_aggregate_func::ProtoWindowFrame {
+                } => Kind::LastValue(proto_aggregate_func::ProtoFramedWindowFunc {
                     order_by: Some(order_by.into_proto()),
                     window_frame: Some(window_frame.into_proto()),
                 }),
+                AggregateFunc::WindowAggregate {
+                    wrapped_aggregate,
+                    order_by,
+                    window_frame,
+                } => Kind::WindowAggregate(Box::new(proto_aggregate_func::ProtoWindowAggregate {
+                    wrapped_aggregate: Some(wrapped_aggregate.into_proto()),
+                    order_by: Some(order_by.into_proto()),
+                    window_frame: Some(window_frame.into_proto()),
+                })),
                 AggregateFunc::Dummy => Kind::Dummy(()),
             }),
         }
@@ -1494,18 +1508,29 @@ impl RustType<ProtoAggregateFunc> for AggregateFunc {
             Kind::FirstValue(pfv) => AggregateFunc::FirstValue {
                 order_by: pfv
                     .order_by
-                    .into_rust_if_some("ProtoWindowFrame::order_by")?,
+                    .into_rust_if_some("ProtoFramedWindowFunc::order_by")?,
                 window_frame: pfv
                     .window_frame
-                    .into_rust_if_some("ProtoWindowFrame::window_frame")?,
+                    .into_rust_if_some("ProtoFramedWindowFunc::window_frame")?,
             },
             Kind::LastValue(pfv) => AggregateFunc::LastValue {
                 order_by: pfv
                     .order_by
-                    .into_rust_if_some("ProtoWindowFrame::order_by")?,
+                    .into_rust_if_some("ProtoFramedWindowFunc::order_by")?,
                 window_frame: pfv
                     .window_frame
-                    .into_rust_if_some("ProtoWindowFrame::window_frame")?,
+                    .into_rust_if_some("ProtoFramedWindowFunc::window_frame")?,
+            },
+            Kind::WindowAggregate(paf) => AggregateFunc::WindowAggregate {
+                wrapped_aggregate: paf
+                    .wrapped_aggregate
+                    .into_rust_if_some("ProtoWindowAggregate::wrapped_aggregate")?,
+                order_by: paf
+                    .order_by
+                    .into_rust_if_some("ProtoWindowAggregate::order_by")?,
+                window_frame: paf
+                    .window_frame
+                    .into_rust_if_some("ProtoWindowAggregate::window_frame")?,
             },
             Kind::Dummy(()) => AggregateFunc::Dummy,
         })
@@ -1583,6 +1608,9 @@ impl AggregateFunc {
                 order_by,
                 window_frame,
             } => last_value(datums, temp_storage, order_by, window_frame),
+            AggregateFunc::WindowAggregate {
+                ..
+            } => todo!(),
             AggregateFunc::Dummy => Datum::Dummy,
         }
     }
@@ -2126,6 +2154,20 @@ impl fmt::Display for AggregateFunc {
             } => {
                 f.write_str("last_value")?;
                 f.write_str("[")?;
+                write!(f, "order_by=[{}]", separated(", ", order_by))?;
+                if *window_frame != WindowFrame::default() {
+                    write!(f, " {}", window_frame)?;
+                }
+                f.write_str("]")
+            }
+            AggregateFunc::WindowAggregate {
+                wrapped_aggregate,
+                order_by,
+                window_frame,
+            } => {
+                f.write_str("window_agg")?;
+                f.write_str("[")?;
+                write!(f, "{} ", wrapped_aggregate)?;
                 write!(f, "order_by=[{}]", separated(", ", order_by))?;
                 if *window_frame != WindowFrame::default() {
                     write!(f, " {}", window_frame)?;
