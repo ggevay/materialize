@@ -32,6 +32,7 @@ use mz_repr::adt::array::ArrayDimension;
 use mz_repr::adt::numeric::NumericMaxScale;
 use mz_repr::*;
 use serde::{Deserialize, Serialize};
+use mz_expr::AggregateFunc::WindowAggregate;
 
 use crate::plan::error::PlanError;
 use crate::plan::query::ExprContext;
@@ -524,7 +525,10 @@ impl ScalarWindowFunc {
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct ValueWindowExpr {
     pub func: ValueWindowFunc,
-    pub args: Box<HirScalarExpr>, // arg list encoded in a record, e.g., `lag(row(#1, 3, null))`
+    // If the argument list has a single element (e.g., for `first_value`), then it's that element.
+    // If the argument list has multiple elements (e.g., for `lag`), then it's encoded in a record,
+    // e.g., `row(#1, 3, null)`.
+    pub args: Box<HirScalarExpr>,
     pub order_by: Vec<ColumnOrder>,
     pub window_frame: WindowFrame,
     pub ignore_nulls: bool,
@@ -685,28 +689,11 @@ impl AggregateWindowExpr {
     }
 
     pub fn into_expr(self) -> mz_expr::AggregateFunc {
-        // match self.func {
-        //     // Lag and Lead are fundamentally the same function, just with opposite directions
-        //     ValueWindowFunc::Lag => mz_expr::AggregateFunc::LagLead {
-        //         order_by: self.order_by,
-        //         lag_lead: mz_expr::LagLeadType::Lag,
-        //         ignore_nulls: self.ignore_nulls,
-        //     },
-        //     ValueWindowFunc::Lead => mz_expr::AggregateFunc::LagLead {
-        //         order_by: self.order_by,
-        //         lag_lead: mz_expr::LagLeadType::Lead,
-        //         ignore_nulls: self.ignore_nulls,
-        //     },
-        //     ValueWindowFunc::FirstValue => mz_expr::AggregateFunc::FirstValue {
-        //         order_by: self.order_by,
-        //         window_frame: self.window_frame,
-        //     },
-        //     ValueWindowFunc::LastValue => mz_expr::AggregateFunc::LastValue {
-        //         order_by: self.order_by,
-        //         window_frame: self.window_frame,
-        //     },
-        // }
-        todo!();
+        WindowAggregate {
+            wrapped_aggregate: Box::new(self.aggregate_expr.func.into_expr()),
+            order_by: self.order_by,
+            window_frame: self.window_frame,
+        }
     }
 }
 

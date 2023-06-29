@@ -1752,6 +1752,28 @@ impl AggregateFunc {
                     custom_id: None,
                 }
             }
+            AggregateFunc::WindowAggregate { wrapped_aggregate, .. } => {
+                // The input type for a window aggregate is ((OriginalRow, Arg), OrderByExprs...)
+                let fields = input_type.scalar_type.unwrap_record_element_type();
+                let original_row_type = fields[0].unwrap_record_element_type()[0]
+                    .clone()
+                    .nullable(false);
+                let arg_type = fields[0].unwrap_record_element_type()[1]
+                    .clone()
+                    .nullable(true);
+                let wrapped_aggr_out_type = wrapped_aggregate.output_type(arg_type);
+
+                ScalarType::List {
+                    element_type: Box::new(ScalarType::Record {
+                        fields: vec![
+                            (ColumnName::from("?window_agg?"), wrapped_aggr_out_type),
+                            (ColumnName::from("?record?"), original_row_type),
+                        ],
+                        custom_id: None,
+                    }),
+                    custom_id: None,
+                }
+            }
             // Note AggregateFunc::MaxString, MinString rely on returning input
             // type as output type to support the proper return type for
             // character input.
