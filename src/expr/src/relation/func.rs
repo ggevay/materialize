@@ -845,9 +845,9 @@ where
         result.push((lagged_value, *original_row));
     }
 
-    let result = result.into_iter().map(|(lag, original_row)| {
+    let result = result.into_iter().map(|(result_value, original_row)| {
         temp_storage.make_datum(|packer| {
-            packer.push_list(vec![lag, original_row]);
+            packer.push_list(vec![result_value, original_row]);
         })
     });
 
@@ -938,9 +938,9 @@ where
         result.push((first_value, *original_row));
     }
 
-    let result = result.into_iter().map(|(lag, original_row)| {
+    let result = result.into_iter().map(|(result_value, original_row)| {
         temp_storage.make_datum(|packer| {
-            packer.push_list(vec![lag, original_row]);
+            packer.push_list(vec![result_value, original_row]);
         })
     });
 
@@ -1059,6 +1059,62 @@ where
         };
 
         result.push((last_value, *original_row));
+    }
+
+    let result = result.into_iter().map(|(result_value, original_row)| {
+        temp_storage.make_datum(|packer| {
+            packer.push_list(vec![result_value, original_row]);
+        })
+    });
+
+    temp_storage.make_datum(|packer| {
+        packer.push_list(result);
+    })
+}
+
+// The expected input is in the format of [((OriginalRow, InputValue), OrderByExprs...)]
+fn window_aggr<'a, I>(
+    datums: I,
+    temp_storage: &'a RowArena,
+    wrapped_aggregate: &Box<AggregateFunc>,
+    order_by: &[ColumnOrder],
+    window_frame: &WindowFrame,
+) -> Datum<'a>
+    where
+        I: IntoIterator<Item = Datum<'a>>,
+{
+    // Sort the datums according to the ORDER BY expressions and return the ((OriginalRow, InputValue), OrderByRow) record
+    // The OrderByRow is kept around because it is required to compute the peer groups in RANGE mode
+    let datums = order_aggregate_datums_with_rank(datums, order_by);
+
+    // Decode the input (OriginalRow, InputValue) into separate datums, while keeping the OrderByRow
+    let datums = datums
+        .into_iter()
+        .map(|(d, order_by_row)| {
+            let mut iter = d.unwrap_list().iter();
+            let original_row = iter.next().unwrap();
+            let input_value = iter.next().unwrap();
+
+            (input_value, original_row, order_by_row)
+        })
+        .collect_vec();
+
+    let length = datums.len();
+    let mut result: Vec<(Datum, Datum)> = Vec::with_capacity(length);
+
+    //todo:
+    //  - kulon az az eset amikor az egesz partition-t summolni kell. Ez tobbfelekeppen is lehet:
+    //   - no ORDER BY
+    //   - UNBOUNDED PRECEDING and UNBOUNDED FOLLOWING
+    //  - kulon eset a default frame (linearis)
+    //  - kulon eset a default frame, de ROWS mode
+    //  - OFFSET
+    //    - lehet, hogy megis kene az inverzes csuszoablakos ugy, mert ugyebar nagy offseteket sokaig nem tervezunk kezelni prefix summal
+
+    for (idx, (current_datum, original_row, order_by_row)) in datums.iter().enumerate() {
+        let result_value = todo!();
+
+        result.push((result_value, *original_row));
     }
 
     let result = result.into_iter().map(|(lag, original_row)| {
@@ -1609,8 +1665,10 @@ impl AggregateFunc {
                 window_frame,
             } => last_value(datums, temp_storage, order_by, window_frame),
             AggregateFunc::WindowAggregate {
-                ..
-            } => todo!(),
+                wrapped_aggregate,
+                order_by,
+                window_frame,
+            } => window_aggr(datums, temp_storage, wrapped_aggregate, order_by, window_frame),
             AggregateFunc::Dummy => Datum::Dummy,
         }
     }
