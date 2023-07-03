@@ -44,6 +44,8 @@ use crate::relation::{
 };
 use crate::scalar::func::{add_timestamp_months, jsonb_stringify};
 use crate::EvalError;
+use crate::WindowFrameBound::{CurrentRow, UnboundedPreceding};
+use crate::WindowFrameUnits::Rows;
 
 include!(concat!(env!("OUT_DIR"), "/mz_expr.relation.func.rs"));
 
@@ -1103,19 +1105,58 @@ fn window_aggr<'a, I>(
     let mut result: Vec<(Datum, Datum)> = Vec::with_capacity(length);
 
     //todo:
-    //  - kulon az az eset amikor az egesz partition-t summolni kell. Ez tobbfelekeppen is lehet:
+    //  *- kulon az az eset amikor az egesz partition-t summolni kell. Ez tobbfelekeppen is lehet:
     //   - no ORDER BY
     //   - UNBOUNDED PRECEDING and UNBOUNDED FOLLOWING
     //  - kulon eset a default frame (linearis)
-    //  - kulon eset a default frame, de ROWS mode
+    //    - illetve lehetne a forditottja, amikor a current row-tol a vegeig
+    //    - kulon eset a default frame, de ROWS mode
+    //    - akarjuk azt kezelni amikor egyi kiranyba UNBOUNDE de masik iranyba OFFSET?
     //  - OFFSET
-    //    - lehet, hogy megis kene az inverzes csuszoablakos ugy, mert ugyebar nagy offseteket sokaig nem tervezunk kezelni prefix summal
+    //    - lehet, hogy megis kene az inverzes csuszoablakos ugy, mert ugyebar nagy offseteket sokaig nem tervezunk kezelni prefix summal (`reduction_type`)
+    //    - a min/max-ra talan egyelore nem kell trukkozni, de azert belinkelni ezt todo-nak: http://codercareer.blogspot.com/2012/02/no-33-maximums-in-sliding-windows.html
 
-    for (idx, (current_datum, original_row, order_by_row)) in datums.iter().enumerate() {
-        let result_value = todo!();
+    if order_by.is_empty() || (matches!(window_frame.start_bound, WindowFrameBound::UnboundedPreceding) && matches!(window_frame.end_bound, WindowFrameBound::UnboundedFollowing)) {
+        // No ORDER BY, or UNBOUNDED frame in both directions. Aggregate is simply computed on the
+        // entire partition.
+        let input_values = datums.iter().map(|(input_value, original_row, order_by_row)| input_value.clone());
+        let result_value = wrapped_aggregate.eval(input_values, temp_storage);
+        // Every row will get the above aggregate as result.
+        for (_current_datum, original_row, _order_by_row) in datums.iter() {
+            result.push((result_value, *original_row));
+        }
+    } else {
 
-        result.push((result_value, *original_row));
+        // match (&window_frame.units, &window_frame.start_bound, &window_frame.end_bound) {
+        //     // The following two (_, UnboundedPreceding, CurrentRow) cases could be merged into the
+        //     // more general case of (_, UnboundedPreceding, _) below, but CurrentRow is probably 95%
+        //     // of these cases, so let's make this simple and fast.
+        //     (Rows, UnboundedPreceding, CurrentRow) => {
+        //
+        //     }
+        // }
+
+        if matches!(window_frame.end_bound, WindowFrameBound::CurrentRow) {
+
+
+        }
+
+        for (idx, (current_datum, original_row, order_by_row)) in datums.iter().enumerate() {
+            let result_value = todo!();
+
+            result.push((result_value, *original_row));
+        }
+
     }
+    // else {
+    //
+    //     for (idx, (current_datum, original_row, order_by_row)) in datums.iter().enumerate() {
+    //         let result_value = todo!();
+    //
+    //         result.push((result_value, *original_row));
+    //     }
+    // }
+
 
     let result = result.into_iter().map(|(lag, original_row)| {
         temp_storage.make_datum(|packer| {
