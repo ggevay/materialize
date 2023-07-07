@@ -128,6 +128,8 @@ pub enum TryFromProtoError {
     InvalidUrl(url::ParseError),
     /// Failed to parse bitflags.
     InvalidBitFlags(String),
+    /// TODO: refactor like pattern errors?
+    LikePatternError(String),
 }
 
 impl TryFromProtoError {
@@ -154,15 +156,15 @@ impl From<CharTryFromError> for TryFromProtoError {
     }
 }
 
-impl RustType<String> for regex::Regex {
-    fn into_proto(&self) -> String {
-        self.as_str().to_string()
-    }
-
-    fn from_proto(proto: String) -> Result<Self, TryFromProtoError> {
-        Ok(regex::Regex::new(&proto)?)
-    }
-}
+// impl RustType<String> for regex::Regex {
+//     fn into_proto(&self) -> String {
+//         self.as_str().to_string()
+//     }
+//
+//     fn from_proto(proto: String) -> Result<Self, TryFromProtoError> {
+//         Ok(regex::Regex::new(&proto)?)
+//     }
+// }
 
 // These From impls pull a bunch of deps into this crate that are otherwise
 // unnecessary. Are they worth it?
@@ -217,6 +219,7 @@ impl std::fmt::Display for TryFromProtoError {
             GlobError(error) => error.fmt(f),
             InvalidUrl(error) => error.fmt(f),
             InvalidBitFlags(error) => error.fmt(f),
+            LikePatternError(error) => error.fmt(f),
         }
     }
 }
@@ -249,6 +252,7 @@ impl std::error::Error for TryFromProtoError {
             GlobError(error) => Some(error),
             InvalidUrl(error) => Some(error),
             InvalidBitFlags(_) => None,
+            LikePatternError(error) => None, //TODO: we should forward it
         }
     }
 }
