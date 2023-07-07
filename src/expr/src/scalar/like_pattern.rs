@@ -90,7 +90,7 @@ pub fn normalize_pattern(pattern: &str, escape: EscapeBehavior) -> Result<String
 }
 
 // This implementation supports a couple of different methods of matching
-// text against a SQL LIKE pattern.
+// text against a SQL LIKE or ILIKE pattern.
 //
 // The most general approach is to convert the LIKE pattern into a
 // regular expression and use the well-tested Regex library to perform the
@@ -100,7 +100,7 @@ pub fn normalize_pattern(pattern: &str, escape: EscapeBehavior) -> Result<String
 // That said, regular expressions aren't that efficient. For most patterns
 // we can do better using built-in string matching.
 
-/// An object that can test whether a string matches a LIKE pattern.
+/// An object that can test whether a string matches a LIKE or ILIKE pattern.
 #[derive(Debug, Clone, Deserialize, Serialize, Derivative, MzReflect)]
 #[derivative(Eq, PartialEq, Ord, PartialOrd, Hash)]
 pub struct Matcher {
@@ -134,13 +134,15 @@ impl RustType<ProtoMatcher> for Matcher {
     }
 
     fn from_proto(proto: ProtoMatcher) -> Result<Self, TryFromProtoError> {
-        Ok(Matcher {
-            pattern: proto.pattern,
-            case_insensitive: proto.case_insensitive,
-            matcher_impl: proto
-                .matcher_impl
-                .into_rust_if_some("ProtoMatcher::matcher_impl")?,
-        })
+        // Ok(Matcher {
+        //     pattern: proto.pattern.clone(),
+        //     case_insensitive: proto.case_insensitive,
+        //     matcher_impl: proto
+        //         .matcher_impl
+        //         .into_rust_if_some("ProtoMatcher::matcher_impl")?,
+        // })
+
+        compile(proto.pattern.as_str(), proto.case_insensitive).map_err(|err| todo!())
     }
 }
 
@@ -197,8 +199,14 @@ pub fn compile(pattern: &str, case_insensitive: bool) -> Result<Matcher, EvalErr
     }
     let subpatterns = build_subpatterns(pattern)?;
     let matcher_impl = match case_insensitive || subpatterns.len() > MAX_SUBPATTERNS {
-        false => MatcherImpl::String(subpatterns),
-        true => MatcherImpl::Regex(build_regex(&subpatterns, case_insensitive)?),
+        false => {
+            println!("##### MatcherImpl::String");
+            MatcherImpl::String(subpatterns)
+        },
+        true => {
+            println!("##### MatcherImpl::Regex");
+            MatcherImpl::Regex(build_regex(&subpatterns, case_insensitive)?)
+        },
     };
     Ok(Matcher {
         pattern: pattern.into(),
@@ -434,6 +442,7 @@ fn build_regex(subpatterns: &[Subpattern], case_insensitive: bool) -> Result<Reg
     let mut rb = RegexBuilder::new(&r);
     rb.dot_matches_new_line(true);
     rb.case_insensitive(case_insensitive);
+    println!("------case_insensitive: {}", case_insensitive);
     match rb.build() {
         Ok(regex) => Ok(regex),
         Err(regex::Error::CompiledTooBig(_)) => Err(EvalError::LikePatternTooLong),

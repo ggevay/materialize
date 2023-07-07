@@ -156,6 +156,7 @@ impl From<CharTryFromError> for TryFromProtoError {
 
 impl RustType<String> for regex::Regex {
     fn into_proto(&self) -> String {
+        println!("+++++++++++++++ self.as_str().to_string(): {}", self.as_str().to_string());
         self.as_str().to_string()
     }
 
