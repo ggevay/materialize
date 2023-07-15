@@ -156,16 +156,6 @@ impl From<CharTryFromError> for TryFromProtoError {
     }
 }
 
-// impl RustType<String> for regex::Regex {
-//     fn into_proto(&self) -> String {
-//         self.as_str().to_string()
-//     }
-//
-//     fn from_proto(proto: String) -> Result<Self, TryFromProtoError> {
-//         Ok(regex::Regex::new(&proto)?)
-//     }
-// }
-
 // These From impls pull a bunch of deps into this crate that are otherwise
 // unnecessary. Are they worth it?
 

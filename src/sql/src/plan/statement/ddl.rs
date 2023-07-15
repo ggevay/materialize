@@ -1710,9 +1710,7 @@ fn get_encoding_inner(
             }
         },
         Format::Regex(regex) => {
-            //let regex = Regex::new(regex).map_err(|e| sql_err!("parsing regex: {e}"))?;
             DataEncodingInner::Regex(RegexEncoding {
-                //regex: mz_repr::adt::regex::Regex(regex),
                 regex: mz_repr::adt::regex::Regex::new(regex.clone(), false).map_err(|e| sql_err!("parsing regex: {e}"))?,
             })
         }

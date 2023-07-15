@@ -18,7 +18,6 @@ use proptest::prelude::{Arbitrary, Strategy};
 use regex::{Regex, RegexBuilder};
 use serde::{Deserialize, Serialize};
 
-//use crate::scalar::like_pattern::proto_matcher_impl::ProtoSubpatternVec;
 use crate::scalar::EvalError;
 
 include!(concat!(env!("OUT_DIR"), "/mz_expr.scalar.like_pattern.rs"));
@@ -143,39 +142,6 @@ enum MatcherImpl {
     String(Vec<Subpattern>),
     Regex(#[serde(with = "serde_regex")] Regex),
 }
-
-// impl RustType<ProtoMatcherImpl> for MatcherImpl {
-//     fn into_proto(&self) -> ProtoMatcherImpl {
-//         use proto_matcher_impl::Kind::*;
-//         ProtoMatcherImpl {
-//             kind: Some(match self {
-//                 MatcherImpl::String(subpatterns) => String(subpatterns.into_proto()),
-//                 MatcherImpl::Regex(regex) => Regex(regex.into_proto()),
-//             }),
-//         }
-//     }
-//
-//     fn from_proto(proto: ProtoMatcherImpl) -> Result<Self, TryFromProtoError> {
-//         use proto_matcher_impl::Kind::*;
-//         match proto.kind {
-//             Some(String(subpatterns)) => Ok(MatcherImpl::String(subpatterns.into_rust()?)),
-//             Some(Regex(regex)) => Ok(MatcherImpl::Regex(regex.into_rust()?)),
-//             None => Err(TryFromProtoError::missing_field("ProtoMatcherImpl::kind")),
-//         }
-//     }
-// }
-
-// impl RustType<ProtoSubpatternVec> for Vec<Subpattern> {
-//     fn into_proto(&self) -> ProtoSubpatternVec {
-//         ProtoSubpatternVec {
-//             vec: self.into_proto(),
-//         }
-//     }
-//
-//     fn from_proto(proto: ProtoSubpatternVec) -> Result<Self, TryFromProtoError> {
-//         proto.vec.into_rust()
-//     }
-// }
 
 /// Builds a Matcher that matches a SQL LIKE pattern.
 pub fn compile(pattern: &str, case_insensitive: bool) -> Result<Matcher, EvalError> {
