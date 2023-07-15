@@ -19,6 +19,7 @@ use proptest::prelude::any;
 use proptest::prop_compose;
 use regex::{Error, RegexBuilder};
 use serde::{Deserialize, Serialize};
+use serde_assert::{Deserializer, Serializer};
 
 include!(concat!(env!("OUT_DIR"), "/mz_repr.adt.regex.rs"));
 
@@ -155,5 +156,24 @@ mod tests {
             assert!(actual.is_ok());
             assert_eq!(actual.unwrap(), expect);
         }
+    }
+
+    #[mz_ore::test]
+    fn regex_serde_case_insensitive() {
+        let orig_regex = Regex::new("AAA".to_string(), true).unwrap();
+        let serializer = Serializer::builder().build();
+        let serialized = orig_regex.serialize(&serializer);
+        // Uncomment this to see that the serialized forms are identical for case sensitive and
+        // insensitive:
+        //println!("serialized: {:?}", serialized);
+        assert!(serialized.is_ok());
+        let mut deserializer = Deserializer::builder()
+            .tokens(serialized.unwrap())
+            .build();
+        let roundtrip_result = Regex::deserialize(&mut deserializer).unwrap();
+        // Equality test between orig and roundtrip_result wouldn't work, because Eq doesn't test
+        // the actual regex object. So test the actual regex functionality.
+        assert_eq!(orig_regex.regex.is_match("aaa"), true);
+        assert_eq!(roundtrip_result.regex.is_match("aaa"), true);
     }
 }
