@@ -819,7 +819,7 @@ impl fmt::Display for IsLikeMatch {
     }
 }
 
-#[derive(Ord, PartialOrd, Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash, MzReflect)]
+#[derive(Ord, PartialOrd, Clone, Debug, Eq, PartialEq, Hash, MzReflect)]
 pub struct IsRegexpMatch(pub Regex);
 
 impl<'a> EagerUnaryFunc<'a> for IsRegexpMatch {
@@ -841,7 +841,7 @@ impl fmt::Display for IsRegexpMatch {
     }
 }
 
-#[derive(Ord, PartialOrd, Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash, MzReflect)]
+#[derive(Ord, PartialOrd, Clone, Debug, Eq, PartialEq, Hash, MzReflect)]
 pub struct RegexpMatch(pub Regex);
 
 impl LazyUnaryFunc for RegexpMatch {

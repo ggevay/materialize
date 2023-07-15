@@ -43,7 +43,7 @@ include!(concat!(env!("OUT_DIR"), "/mz_repr.adt.regex.rs"));
 ///
 /// This type also implements [`Serialize`] and [`Deserialize`] via the
 /// [`serde_regex`] crate.
-#[derive(Debug, Clone, Deserialize, Serialize, MzReflect)]
+#[derive(Debug, Clone, MzReflect)]
 pub struct Regex {
     pub pattern: String,
     pub case_insensitive: bool,
@@ -55,7 +55,7 @@ pub struct Regex {
     // not capturing `case_insensitive`! I fixed this for the protobuf serialization, but not yet
     // for the Deserialize/Serialize implementations (which are derived by `serde_regex`).
     // These are only used by MzReflect, so it's not urgent to fix this.
-    #[serde(with = "serde_regex")] pub regex: regex::Regex,
+    pub regex: regex::Regex,
 }
 
 impl Regex {

@@ -76,7 +76,7 @@ pub trait CollectionPlan {
 ///
 /// The AST is meant to reflect the capabilities of the `differential_dataflow::Collection` type,
 /// written generically enough to avoid run-time compilation work.
-#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize, Hash, MzReflect)]
+#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, MzReflect)]
 pub enum MirRelationExpr {
     /// A constant relation containing specified rows.
     ///
@@ -204,7 +204,6 @@ pub enum MirRelationExpr {
         /// from multiple inputs, or just constant literals).
         equivalences: Vec<Vec<MirScalarExpr>>,
         /// Join implementation information.
-        #[serde(default)]
         implementation: JoinImplementation,
     },
     /// Group a dataflow by some columns and aggregate over each group
@@ -222,10 +221,8 @@ pub enum MirRelationExpr {
         /// Expressions which determine values to append to each row, after the group keys.
         aggregates: Vec<AggregateExpr>,
         /// True iff the input is known to monotonically increase (only addition of records).
-        #[serde(default)]
         monotonic: bool,
         /// User hint: expected number of values per group key. Used to optimize physical rendering.
-        #[serde(default)]
         expected_group_size: Option<u64>,
     },
     /// Groups and orders within each group, limiting output.
@@ -239,16 +236,12 @@ pub enum MirRelationExpr {
         /// Column indices used to order rows within groups.
         order_key: Vec<ColumnOrder>,
         /// Number of records to retain
-        #[serde(default)]
         limit: Option<usize>,
         /// Number of records to skip
-        #[serde(default)]
         offset: usize,
         /// True iff the input is known to monotonically increase (only addition of records).
-        #[serde(default)]
         monotonic: bool,
         /// User-supplied hint: how many rows will have the same group key.
-        #[serde(default)]
         expected_group_size: Option<u64>,
     },
     /// Return a dataflow where the row counts are negated

@@ -1873,7 +1873,7 @@ impl RustType<ProtoCaptureGroupDesc> for CaptureGroupDesc {
 }
 
 #[derive(
-    Arbitrary, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize, Hash, MzReflect,
+    Arbitrary, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, MzReflect,
 )]
 pub struct AnalyzedRegex(
     #[proptest(strategy = "mz_repr::adt::regex::any_regex()")] ReprRegex,
@@ -1959,7 +1959,7 @@ fn wrap<'a>(datums: &'a [Datum<'a>], width: usize) -> impl Iterator<Item = (Row,
 }
 
 #[derive(
-    Arbitrary, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize, Hash, MzReflect,
+    Arbitrary, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, MzReflect,
 )]
 pub enum TableFunc {
     JsonbEach {
