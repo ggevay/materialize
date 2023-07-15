@@ -134,13 +134,7 @@ impl RustType<ProtoMatcher> for Matcher {
     }
 
     fn from_proto(proto: ProtoMatcher) -> Result<Self, TryFromProtoError> {
-        Ok(compile(proto.pattern.as_str(), proto.case_insensitive)?)
-    }
-}
-
-impl From<EvalError> for TryFromProtoError {
-    fn from(error: EvalError) -> Self {
-        TryFromProtoError::LikePatternError(error.to_string()) // TODO: avoid to_string
+        Ok(compile(proto.pattern.as_str(), proto.case_insensitive).map_err(|eval_err| TryFromProtoError::LikePatternDeserializationError(eval_err.to_string()))?)
     }
 }
 

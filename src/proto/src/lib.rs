@@ -128,8 +128,8 @@ pub enum TryFromProtoError {
     InvalidUrl(url::ParseError),
     /// Failed to parse bitflags.
     InvalidBitFlags(String),
-    /// TODO: refactor like pattern errors?
-    LikePatternError(String),
+    /// Failed to deserialize a LIKE/ILIKE pattern.
+    LikePatternDeserializationError(String),
 }
 
 impl TryFromProtoError {
@@ -219,7 +219,7 @@ impl std::fmt::Display for TryFromProtoError {
             GlobError(error) => error.fmt(f),
             InvalidUrl(error) => error.fmt(f),
             InvalidBitFlags(error) => error.fmt(f),
-            LikePatternError(error) => error.fmt(f),
+            LikePatternDeserializationError(inner_error) => write!(f, "Protobuf deserialization failed for a LIKE/ILIKE pattern: `{}`", inner_error),
         }
     }
 }
@@ -252,7 +252,7 @@ impl std::error::Error for TryFromProtoError {
             GlobError(error) => Some(error),
             InvalidUrl(error) => Some(error),
             InvalidBitFlags(_) => None,
-            LikePatternError(error) => None, //TODO: we should forward it
+            LikePatternDeserializationError(_) => None,
         }
     }
 }

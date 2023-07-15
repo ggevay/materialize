@@ -15,6 +15,7 @@ use std::ops::Deref;
 
 use mz_lowertest::MzReflect;
 use mz_proto::{RustType, TryFromProtoError};
+use proptest::prelude::any;
 use proptest::prop_compose;
 use regex::{Error, RegexBuilder};
 use serde::{Deserialize, Serialize};
@@ -54,6 +55,9 @@ pub struct Regex {
     // TODO(ggevay): The serialization based on `as_str()` is actually incorrect, because it's
     // not capturing `case_insensitive`! I fixed this for the protobuf serialization, but not yet
     // for the Deserialize/Serialize implementations (which are derived by `serde_regex`).
+    // This is not so urgent to fix, because this is only used by non-essential things AFAIK:
+    // - `MzReflect`
+    // - `EXPLAIN AS JSON` (through `DisplayJson`)
     #[serde(with = "serde_regex")] pub regex: regex::Regex,
 }
 
@@ -129,10 +133,10 @@ const END_SYMBOLS: &str = r"(\$|(\\z))?";
 prop_compose! {
     pub fn any_regex()
                 (b in BEGINNING_SYMBOLS, c in CHARACTERS,
-                 r in REPETITIONS, e in END_SYMBOLS)
+                 r in REPETITIONS, e in END_SYMBOLS, case_insensitive in any::<bool>())
                 -> Regex {
         let string = format!("{}{}{}{}", b, c, r, e);
-        Regex::new(string, true).unwrap() // todo: generate also false
+        Regex::new(string, case_insensitive).unwrap()
     }
 }
 
