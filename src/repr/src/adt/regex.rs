@@ -54,6 +54,7 @@ pub struct Regex {
     // TODO(ggevay): The serialization based on `as_str()` is actually incorrect, because it's
     // not capturing `case_insensitive`! I fixed this for the protobuf serialization, but not yet
     // for the Deserialize/Serialize implementations (which are derived by `serde_regex`).
+    // These are only used by MzReflect, so it's not urgent to fix this.
     #[serde(with = "serde_regex")] pub regex: regex::Regex,
 }
 
