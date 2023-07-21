@@ -1,0 +1,123 @@
+# Copyright Materialize, Inc. and contributors. All rights reserved.
+#
+# Use of this software is governed by the Business Source License
+# included in the LICENSE file at the root of this repository.
+#
+# As of the Change Date specified in that file, in accordance with
+# the Business Source License, use of this software will be governed
+# by the Apache License, Version 2.0.
+
+# Regression test for #20557.
+
+statement ok
+CREATE TABLE t1 (f1 INTEGER);
+
+statement ok
+INSERT INTO t1 VALUES (1);
+
+# Without the #20557 fix in #20702 this will cause `environmend` to OOM because
+# of excessive memory allocations in the `RedundantJoin` transform.
+query I
+SELECT * FROM t1 AS a1 WHERE
+  f1 IN (SELECT * FROM t1 WHERE f1 = a1.f1 AND f1 <= 1) AND
+  f1 IN (SELECT * FROM t1 WHERE f1 = a1.f1 AND f1 <= 2) AND
+  f1 IN (SELECT * FROM t1 WHERE f1 = a1.f1 AND f1 <= 3) AND
+  f1 IN (SELECT * FROM t1 WHERE f1 = a1.f1 AND f1 <= 4) AND
+  f1 IN (SELECT * FROM t1 WHERE f1 = a1.f1 AND f1 <= 5) AND
+  f1 IN (SELECT * FROM t1 WHERE f1 = a1.f1 AND f1 <= 6) AND
+  f1 IN (SELECT * FROM t1 WHERE f1 = a1.f1 AND f1 <= 7) AND
+  f1 IN (SELECT * FROM t1 WHERE f1 = a1.f1 AND f1 <= 8) AND
+  f1 IN (SELECT * FROM t1 WHERE f1 = a1.f1 AND f1 <= 9) AND
+  f1 IN (SELECT * FROM t1 WHERE f1 = a1.f1 AND f1 <= 10) AND
+  f1 IN (SELECT * FROM t1 WHERE f1 = a1.f1 AND f1 <= 11) AND
+  f1 IN (SELECT * FROM t1 WHERE f1 = a1.f1 AND f1 <= 12) AND
+  f1 IN (SELECT * FROM t1 WHERE f1 = a1.f1 AND f1 <= 13) AND
+  f1 IN (SELECT * FROM t1 WHERE f1 = a1.f1 AND f1 <= 14) AND
+  f1 IN (SELECT * FROM t1 WHERE f1 = a1.f1 AND f1 <= 15) AND
+  f1 IN (SELECT * FROM t1 WHERE f1 = a1.f1 AND f1 <= 16) AND
+  f1 IN (SELECT * FROM t1 WHERE f1 = a1.f1 AND f1 <= 17) AND
+  f1 IN (SELECT * FROM t1 WHERE f1 = a1.f1 AND f1 <= 18) AND
+  f1 IN (SELECT * FROM t1 WHERE f1 = a1.f1 AND f1 <= 19) AND
+  f1 IN (SELECT * FROM t1 WHERE f1 = a1.f1 AND f1 <= 20) AND
+  f1 IN (SELECT * FROM t1 WHERE f1 = a1.f1 AND f1 <= 21) AND
+  f1 IN (SELECT * FROM t1 WHERE f1 = a1.f1 AND f1 <= 22) AND
+  f1 IN (SELECT * FROM t1 WHERE f1 = a1.f1 AND f1 <= 23) AND
+  f1 IN (SELECT * FROM t1 WHERE f1 = a1.f1 AND f1 <= 24) AND
+  f1 IN (SELECT * FROM t1 WHERE f1 = a1.f1 AND f1 <= 25) AND
+  f1 IN (SELECT * FROM t1 WHERE f1 = a1.f1 AND f1 <= 26) AND
+  f1 IN (SELECT * FROM t1 WHERE f1 = a1.f1 AND f1 <= 27) AND
+  f1 IN (SELECT * FROM t1 WHERE f1 = a1.f1 AND f1 <= 28) AND
+  f1 IN (SELECT * FROM t1 WHERE f1 = a1.f1 AND f1 <= 29) AND
+  f1 IN (SELECT * FROM t1 WHERE f1 = a1.f1 AND f1 <= 30) AND
+  f1 IN (SELECT * FROM t1 WHERE f1 = a1.f1 AND f1 <= 31) AND
+  f1 IN (SELECT * FROM t1 WHERE f1 = a1.f1 AND f1 <= 32) AND
+  f1 IN (SELECT * FROM t1 WHERE f1 = a1.f1 AND f1 <= 33) AND
+  f1 IN (SELECT * FROM t1 WHERE f1 = a1.f1 AND f1 <= 34) AND
+  f1 IN (SELECT * FROM t1 WHERE f1 = a1.f1 AND f1 <= 35) AND
+  f1 IN (SELECT * FROM t1 WHERE f1 = a1.f1 AND f1 <= 36) AND
+  f1 IN (SELECT * FROM t1 WHERE f1 = a1.f1 AND f1 <= 37) AND
+  f1 IN (SELECT * FROM t1 WHERE f1 = a1.f1 AND f1 <= 38) AND
+  f1 IN (SELECT * FROM t1 WHERE f1 = a1.f1 AND f1 <= 39) AND
+  f1 IN (SELECT * FROM t1 WHERE f1 = a1.f1 AND f1 <= 40) AND
+  f1 IN (SELECT * FROM t1 WHERE f1 = a1.f1 AND f1 <= 41) AND
+  f1 IN (SELECT * FROM t1 WHERE f1 = a1.f1 AND f1 <= 42) AND
+  f1 IN (SELECT * FROM t1 WHERE f1 = a1.f1 AND f1 <= 43) AND
+  f1 IN (SELECT * FROM t1 WHERE f1 = a1.f1 AND f1 <= 44) AND
+  f1 IN (SELECT * FROM t1 WHERE f1 = a1.f1 AND f1 <= 45) AND
+  f1 IN (SELECT * FROM t1 WHERE f1 = a1.f1 AND f1 <= 46) AND
+  f1 IN (SELECT * FROM t1 WHERE f1 = a1.f1 AND f1 <= 47) AND
+  f1 IN (SELECT * FROM t1 WHERE f1 = a1.f1 AND f1 <= 48) AND
+  f1 IN (SELECT * FROM t1 WHERE f1 = a1.f1 AND f1 <= 49) AND
+  f1 IN (SELECT * FROM t1 WHERE f1 = a1.f1 AND f1 <= 50) AND
+  f1 IN (SELECT * FROM t1 WHERE f1 = a1.f1 AND f1 <= 51) AND
+  f1 IN (SELECT * FROM t1 WHERE f1 = a1.f1 AND f1 <= 52) AND
+  f1 IN (SELECT * FROM t1 WHERE f1 = a1.f1 AND f1 <= 53) AND
+  f1 IN (SELECT * FROM t1 WHERE f1 = a1.f1 AND f1 <= 54) AND
+  f1 IN (SELECT * FROM t1 WHERE f1 = a1.f1 AND f1 <= 55) AND
+  f1 IN (SELECT * FROM t1 WHERE f1 = a1.f1 AND f1 <= 56) AND
+  f1 IN (SELECT * FROM t1 WHERE f1 = a1.f1 AND f1 <= 57) AND
+  f1 IN (SELECT * FROM t1 WHERE f1 = a1.f1 AND f1 <= 58) AND
+  f1 IN (SELECT * FROM t1 WHERE f1 = a1.f1 AND f1 <= 59) AND
+  f1 IN (SELECT * FROM t1 WHERE f1 = a1.f1 AND f1 <= 60) AND
+  f1 IN (SELECT * FROM t1 WHERE f1 = a1.f1 AND f1 <= 61) AND
+  f1 IN (SELECT * FROM t1 WHERE f1 = a1.f1 AND f1 <= 62) AND
+  f1 IN (SELECT * FROM t1 WHERE f1 = a1.f1 AND f1 <= 63) AND
+  f1 IN (SELECT * FROM t1 WHERE f1 = a1.f1 AND f1 <= 64) AND
+  f1 IN (SELECT * FROM t1 WHERE f1 = a1.f1 AND f1 <= 65) AND
+  f1 IN (SELECT * FROM t1 WHERE f1 = a1.f1 AND f1 <= 66) AND
+  f1 IN (SELECT * FROM t1 WHERE f1 = a1.f1 AND f1 <= 67) AND
+  f1 IN (SELECT * FROM t1 WHERE f1 = a1.f1 AND f1 <= 68) AND
+  f1 IN (SELECT * FROM t1 WHERE f1 = a1.f1 AND f1 <= 69) AND
+  f1 IN (SELECT * FROM t1 WHERE f1 = a1.f1 AND f1 <= 70) AND
+  f1 IN (SELECT * FROM t1 WHERE f1 = a1.f1 AND f1 <= 71) AND
+  f1 IN (SELECT * FROM t1 WHERE f1 = a1.f1 AND f1 <= 72) AND
+  f1 IN (SELECT * FROM t1 WHERE f1 = a1.f1 AND f1 <= 73) AND
+  f1 IN (SELECT * FROM t1 WHERE f1 = a1.f1 AND f1 <= 74) AND
+  f1 IN (SELECT * FROM t1 WHERE f1 = a1.f1 AND f1 <= 75) AND
+  f1 IN (SELECT * FROM t1 WHERE f1 = a1.f1 AND f1 <= 76) AND
+  f1 IN (SELECT * FROM t1 WHERE f1 = a1.f1 AND f1 <= 77) AND
+  f1 IN (SELECT * FROM t1 WHERE f1 = a1.f1 AND f1 <= 78) AND
+  f1 IN (SELECT * FROM t1 WHERE f1 = a1.f1 AND f1 <= 79) AND
+  f1 IN (SELECT * FROM t1 WHERE f1 = a1.f1 AND f1 <= 80) AND
+  f1 IN (SELECT * FROM t1 WHERE f1 = a1.f1 AND f1 <= 81) AND
+  f1 IN (SELECT * FROM t1 WHERE f1 = a1.f1 AND f1 <= 82) AND
+  f1 IN (SELECT * FROM t1 WHERE f1 = a1.f1 AND f1 <= 83) AND
+  f1 IN (SELECT * FROM t1 WHERE f1 = a1.f1 AND f1 <= 84) AND
+  f1 IN (SELECT * FROM t1 WHERE f1 = a1.f1 AND f1 <= 85) AND
+  f1 IN (SELECT * FROM t1 WHERE f1 = a1.f1 AND f1 <= 86) AND
+  f1 IN (SELECT * FROM t1 WHERE f1 = a1.f1 AND f1 <= 87) AND
+  f1 IN (SELECT * FROM t1 WHERE f1 = a1.f1 AND f1 <= 88) AND
+  f1 IN (SELECT * FROM t1 WHERE f1 = a1.f1 AND f1 <= 89) AND
+  f1 IN (SELECT * FROM t1 WHERE f1 = a1.f1 AND f1 <= 90) AND
+  f1 IN (SELECT * FROM t1 WHERE f1 = a1.f1 AND f1 <= 91) AND
+  f1 IN (SELECT * FROM t1 WHERE f1 = a1.f1 AND f1 <= 92) AND
+  f1 IN (SELECT * FROM t1 WHERE f1 = a1.f1 AND f1 <= 93) AND
+  f1 IN (SELECT * FROM t1 WHERE f1 = a1.f1 AND f1 <= 94) AND
+  f1 IN (SELECT * FROM t1 WHERE f1 = a1.f1 AND f1 <= 95) AND
+  f1 IN (SELECT * FROM t1 WHERE f1 = a1.f1 AND f1 <= 96) AND
+  f1 IN (SELECT * FROM t1 WHERE f1 = a1.f1 AND f1 <= 97) AND
+  f1 IN (SELECT * FROM t1 WHERE f1 = a1.f1 AND f1 <= 98) AND
+  f1 IN (SELECT * FROM t1 WHERE f1 = a1.f1 AND f1 <= 99) AND
+  f1 IN (SELECT * FROM t1 WHERE f1 = a1.f1 AND f1 <= 100);
+----
+1
