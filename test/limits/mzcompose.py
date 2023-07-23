@@ -1177,6 +1177,44 @@ class Concat(Generator):
         print(f"{cls.COUNT*1024}")
 
 
+class ArrayAgg(Generator):
+    COUNT = 50
+
+    @classmethod
+    def body(cls) -> None:
+        print(
+            f"""
+            > CREATE TABLE t ({
+                f", ".join(
+                    ", ".join([
+                        f"a{i} STRING",
+                        f"b{i} STRING",
+                        f"c{i} STRING",
+                        f"d{i} STRING[]",
+                    ])
+                    for i in cls.all()
+                )
+            });
+            """.strip()
+        )
+        print("> INSERT INTO t DEFAULT VALUES;")
+
+        print(
+            f"""
+            > CREATE MATERIALIZED VIEW v2 AS SELECT {
+                f", ".join(
+                    f"ARRAY_AGG(a{i} ORDER BY b1) FILTER (WHERE 's{i}' = ANY(d{i})) AS r{i}"
+                    for i in cls.all()
+                )
+            } FROM t GROUP BY a1;
+            """.strip()
+        )
+        print("> CREATE DEFAULT INDEX ON v2;")
+
+        print("> SELECT COUNT(*) FROM v2;")
+        print("1")
+
+
 #
 # Column width
 #
