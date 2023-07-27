@@ -1092,6 +1092,7 @@ impl<'a> RunnerInner<'a> {
         record: &'r Record<'r>,
         in_transaction: &mut bool,
     ) -> Result<Outcome<'r>, anyhow::Error> {
+        println!("############ run_record: {:#?}", record);
         match &record {
             Record::Statement {
                 expected_error,

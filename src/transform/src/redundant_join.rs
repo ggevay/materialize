@@ -812,8 +812,11 @@ impl ProvInfoCtx {
                         *count -= 1;
                     }
                     if *count == 0 {
-                        self.lets.remove(id);
+                        let removed = self.lets.remove(id);
+                        assert!(removed.is_some());
                     }
+                } else {
+                    unreachable!()
                 }
             }
             // When traversing the tree, don't descend into `value` defintiion
