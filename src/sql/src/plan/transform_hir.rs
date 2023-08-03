@@ -7,7 +7,7 @@
 // the Business Source License, use of this software will be governed
 // by the Apache License, Version 2.0.
 
-//! Transformations of SQL IR, before decorrelation.
+//! Transformations of HIR, before decorrelation.
 
 use std::collections::BTreeMap;
 use std::mem;
@@ -15,8 +15,12 @@ use std::mem;
 use mz_expr::VariadicFunc;
 use mz_repr::{ColumnType, RelationType, ScalarType};
 use once_cell::sync::Lazy;
+use mz_expr::visit::Visit;
+use mz_ore::soft_panic_or_log;
+use mz_ore::stack::RecursionLimitError;
 
-use crate::plan::expr::{AbstractExpr, AggregateFunc, HirRelationExpr, HirScalarExpr};
+use crate::plan::expr::{AbstractExpr, AggregateFunc, ColumnRef, HirRelationExpr, HirScalarExpr};
+use crate::plan::HirScalarExpr::Column;
 
 /// Rewrites predicates that contain subqueries so that the subqueries
 /// appear in their own later predicate when possible.
@@ -279,4 +283,77 @@ fn column_type(
 ) -> ColumnType {
     let inner_type = inner.typ(outers, &NO_PARAMS);
     expr.typ(outers, &inner_type, &NO_PARAMS)
+}
+
+/// Ensures that window function calls only occur at the top of an HirScalarExpr of a Map, except
+/// when a window function call is in a subquery. In case a window function call is inside a
+/// subquery, the call should still be at the top level of a Map that is _inside_ the subquery.
+/// However, if the whole subquery is inside a Map in the _outer_ query, then the window function
+/// call that is inside the subquery will obviously not be at the top of the Map in the _outer_
+/// query.
+///
+/// This function assumes that window function calls only occur inside HirScalarExprs of a Map.
+/// If it encounters a window function call that is not in the HirScalarExpr of a Map, then it
+/// calls `soft_panic_or_log`, and leaves the function call where it is.
+pub fn lift_window_funcs(rel_expr: &mut HirRelationExpr) -> Result<(), RecursionLimitError> {
+    fn verify_no_window_funcs(scalar_expr_root: &HirScalarExpr) -> Result<(), RecursionLimitError> {
+        scalar_expr_root.visit_post(&mut |scalar_expr| {
+            match scalar_expr {
+                HirScalarExpr::Windowing(..) => {
+                    soft_panic_or_log!("Window function call in an HirScalarExpr that is not a Map");
+                }
+                _ => ()
+            }
+        })
+    }
+
+    rel_expr.try_visit_mut_post(&mut |expr| Ok(match expr {
+        HirRelationExpr::Map { input, scalars } => {
+            // Window functions are ok here, so no `verify_no_window_funcs` call.
+            // Instead, we lift window functions to the top level.
+            for scalar_expr_root in scalars {
+                let orig_input_arity = input.arity();
+                let mut arity_increase = 0;
+                let mut window_funcs = Vec::new();
+                scalar_expr_root.visit_mut_post(&mut |scalar_expr| {
+                    match scalar_expr {
+                        HirScalarExpr::Windowing(..) => {
+                            // TODO: the window func might also refer to earlier scalars!!!!!!!!!
+                            window_funcs.push(mem::replace(scalar_expr, Column(ColumnRef{level: 0, column: orig_input_arity + arity_increase})));
+                            arity_increase += 1;
+                        }
+                        HirScalarExpr::Column(..) => {
+                            // TODO: update column references that reference other scalars from this same Map
+                            todo!()
+                        }
+                        _ => ()
+                    }
+                })?
+
+            }
+
+            *expr = input.take().map(Vec::new()).map(scalars.clone());
+
+
+
+        }
+        HirRelationExpr::CallTable { exprs, .. } => {
+            for expr in exprs {
+                verify_no_window_funcs(expr)?;
+            }
+        }
+        HirRelationExpr::Filter { predicates, .. } => {
+            // Note that window function calls will appear here later when we add support for
+            // QUALIFY: https://github.com/MaterializeInc/materialize/issues/20950
+            for predicate in predicates {
+                verify_no_window_funcs(predicate)?;
+            }
+        }
+        HirRelationExpr::Join { on, ..} => {
+            verify_no_window_funcs(on)?;
+        }
+        _ => (),
+    }))?;
+
+    Ok(())
 }

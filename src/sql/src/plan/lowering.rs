@@ -47,7 +47,7 @@ use mz_repr::*;
 use crate::plan::expr::{
     AggregateExpr, ColumnOrder, ColumnRef, HirRelationExpr, HirScalarExpr, JoinKind, WindowExprType,
 };
-use crate::plan::{transform_expr, PlanError};
+use crate::plan::{transform_hir, PlanError};
 
 /// Maps a leveled column reference to a specific column.
 ///
@@ -145,8 +145,9 @@ impl HirRelationExpr {
             }
             mut other => {
                 let mut id_gen = mz_ore::id_gen::IdGen::default();
-                transform_expr::split_subquery_predicates(&mut other);
-                transform_expr::try_simplify_quantified_comparisons(&mut other);
+                transform_hir::lift_window_funcs(&mut other)?;
+                transform_hir::split_subquery_predicates(&mut other);
+                transform_hir::try_simplify_quantified_comparisons(&mut other);
                 mz_expr::MirRelationExpr::constant(vec![vec![]], RelationType::new(vec![]))
                     .let_in_fallible(&mut id_gen, |id_gen, get_outer| {
                         other.applied_to(id_gen, get_outer, &ColumnMap::empty(), &mut CteMap::new())
