@@ -889,16 +889,21 @@ impl MapFilterProject {
     /// );
     /// ```
     pub fn optimize(&mut self) {
+        println!("### MFP::optimize on {}", self.to_string());
+
         // Optimization memoizes individual `ScalarExpr` expressions that
         // are sure to be evaluated, canonicalizes references to the first
         // occurrence of each, inlines expressions that have a reference
         // count of one, and then removes any expressions that are not
         // referenced.
         self.memoize_expressions();
+        println!("After memoize_expressions: {}", self.to_string());
         self.predicates.sort();
         self.predicates.dedup();
         self.inline_expressions();
+        println!("After inline_expressions: {}", self.to_string());
         self.remove_undemanded();
+        println!("After remove_undemanded: {}", self.to_string());
 
         // Re-build `self` from parts to restore evaluation order invariants.
         let (map, filter, project) = self.as_map_filter_project();
@@ -906,6 +911,9 @@ impl MapFilterProject {
             .map(map)
             .filter(filter)
             .project(project);
+
+        println!("At the end: {}", self.to_string());
+        println!("--- MFP::optimize done");
     }
 
     /// Place each certainly evaluated expression in its own column.
