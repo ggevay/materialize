@@ -173,14 +173,25 @@ impl<T> Instance<T> {
         self.collections.iter()
     }
 
-    fn add_collection(&mut self, id: GlobalId, state: CollectionState<T>) {
+    fn add_collection(&mut self, id: GlobalId, state: CollectionState<T>) -> Result<(), CollectionMissing> {
+        let compute_deps = state.compute_dependencies.clone();
         self.collections.insert(id, state);
+        for dep in compute_deps {
+            self.collection_mut(dep)?.compute_dependants.insert(id);
+        }
         self.report_dependency_updates(id, 1);
+        Ok(())
     }
 
-    fn remove_collection(&mut self, id: GlobalId) {
+    fn remove_collection(&mut self, id: GlobalId) -> Result<(), CollectionMissing> {
         self.report_dependency_updates(id, -1);
+        let compute_deps = self.collection(id)?.compute_dependencies.clone();
+        for dep in compute_deps {
+            ////////self.collection_mut(dep)?.compute_dependants.remove(&id);
+            self.collection_mut(dep).unwrap().compute_dependants.remove(&id);
+        }
         self.collections.remove(&id);
+        Ok(())
     }
 
     /// Acquire an [`ActiveInstance`] by providing a storage controller.
@@ -652,7 +663,7 @@ where
                     storage_dependencies.clone(),
                     compute_dependencies.clone(),
                 ),
-            );
+            )?;
             updates.push((export_id, replica_write_frontier.clone()));
         }
         // Initialize tracking of replica frontiers.
@@ -1110,7 +1121,7 @@ where
 
     /// Cleans up collection state, if necessary, in response to drop operations targeted
     /// at a replica and given collections (via reporting of an empty frontier).
-    fn update_dropped_collections(&mut self, dropped_collection_ids: Vec<GlobalId>) {
+    fn update_dropped_collections(&mut self, dropped_collection_ids: Vec<GlobalId>) -> Result<(), CollectionMissing> {
         for id in dropped_collection_ids {
             // clean up the given collection if read frontier is empty
             // and all replica frontiers are empty
@@ -1121,10 +1132,11 @@ where
                         .values()
                         .all(|frontier| frontier.is_empty())
                 {
-                    self.compute.remove_collection(id);
+                    self.compute.remove_collection(id)?;
                 }
             }
         }
+        Ok(())
     }
 
     fn handle_frontier_upper(

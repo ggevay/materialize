@@ -29,7 +29,7 @@
 //! from compacting beyond the allowed compaction of each of its outputs, ensuring that we can
 //! recover each dataflow to its current state in case of failure or other reconfiguration.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::num::NonZeroI64;
 use std::time::Duration;
 
@@ -620,6 +620,8 @@ pub struct CollectionState<T> {
     storage_dependencies: Vec<GlobalId>,
     /// Compute identifiers on which this collection depends.
     compute_dependencies: Vec<GlobalId>,
+    /// Compute identifiers which depend on this collection.
+    compute_dependants: BTreeSet<GlobalId>,
 
     /// The write frontier of this collection.
     write_frontier: Antichain<T>,
@@ -644,6 +646,7 @@ impl<T: Timestamp> CollectionState<T> {
             read_policy: ReadPolicy::ValidFrom(since),
             storage_dependencies,
             compute_dependencies,
+            compute_dependants: BTreeSet::new(),
             write_frontier: Antichain::from_elem(Timestamp::minimum()),
             replica_write_frontiers: BTreeMap::new(),
         }
