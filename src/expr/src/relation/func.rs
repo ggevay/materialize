@@ -778,6 +778,7 @@ fn window_aggr<'a, I, A>(
     input_datums: I,
     callers_temp_storage: &'a RowArena,
     wrapped_aggregate: &Box<AggregateFunc>,
+    distinct: bool,
     order_by: &[ColumnOrder],
     window_frame: &WindowFrame,
 ) -> Datum<'a>
@@ -1282,6 +1283,7 @@ pub enum AggregateFunc {
     },
     WindowAggregate {
         wrapped_aggregate: Box<AggregateFunc>,
+        distinct: bool, // count(DISTINCT ...)
         order_by: Vec<ColumnOrder>,
         window_frame: WindowFrame,
     },
@@ -1505,10 +1507,12 @@ impl RustType<ProtoAggregateFunc> for AggregateFunc {
                 }),
                 AggregateFunc::WindowAggregate {
                     wrapped_aggregate,
+                    distinct,
                     order_by,
                     window_frame,
                 } => Kind::WindowAggregate(Box::new(proto_aggregate_func::ProtoWindowAggregate {
                     wrapped_aggregate: Some(wrapped_aggregate.into_proto()),
+                    distinct: *distinct,
                     order_by: Some(order_by.into_proto()),
                     window_frame: Some(window_frame.into_proto()),
                 })),
@@ -1626,6 +1630,9 @@ impl RustType<ProtoAggregateFunc> for AggregateFunc {
                 wrapped_aggregate: paf
                     .wrapped_aggregate
                     .into_rust_if_some("ProtoWindowAggregate::wrapped_aggregate")?,
+                distinct: paf
+                    .distinct
+                    .into_rust()?,
                 order_by: paf
                     .order_by
                     .into_rust_if_some("ProtoWindowAggregate::order_by")?,
@@ -1723,12 +1730,14 @@ impl AggregateFunc {
             } => last_value(datums, temp_storage, order_by, window_frame),
             AggregateFunc::WindowAggregate {
                 wrapped_aggregate,
+                distinct,
                 order_by,
                 window_frame,
             } => window_aggr::<_, NaiveOneByOneAggr>(
                 datums,
                 temp_storage,
                 wrapped_aggregate,
+                *distinct,
                 order_by,
                 window_frame,
             ),

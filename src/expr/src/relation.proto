@@ -78,8 +78,9 @@ message ProtoAggregateFunc {
 
     message ProtoWindowAggregate {
         ProtoAggregateFunc wrapped_aggregate = 1;
-        ProtoColumnOrders order_by = 2;
-        mz_expr.relation.ProtoWindowFrame window_frame = 3;
+        bool distinct = 2;
+        ProtoColumnOrders order_by = 3;
+        mz_expr.relation.ProtoWindowFrame window_frame = 4;
     }
 
     oneof kind {

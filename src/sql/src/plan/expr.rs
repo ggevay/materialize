@@ -698,6 +698,7 @@ impl AggregateWindowExpr {
             self.aggregate_expr.expr,
             WindowAggregate {
                 wrapped_aggregate: Box::new(self.aggregate_expr.func.into_expr()),
+                distinct: self.aggregate_expr.distinct,
                 order_by: self.order_by,
                 window_frame: self.window_frame,
             },
