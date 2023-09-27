@@ -5669,7 +5669,7 @@ INSERT INTO t7 VALUES (1,2), (3,null), (5,6), (7,8), (9, null), (11, null), (13,
 
 # Lots of different aggregation functions
 # TODO: add avg
-query IIIIIITITI
+query IIIIIITITITI
 SELECT
   x-y,
   x,
@@ -5680,21 +5680,23 @@ SELECT
   array_agg(2*x) OVER (PARTITION BY x-y ORDER BY x ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING),
   list_agg(2*x) OVER (PARTITION BY x-y ORDER BY x ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)[1],
   jsonb_agg(2*x) OVER (PARTITION BY x-y ORDER BY x ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING),
-  count(2*x) OVER (PARTITION BY x-y ORDER BY x ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
+  count(2*x) OVER (PARTITION BY x-y ORDER BY x ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING),
+  array_agg(x/10) OVER (PARTITION BY x-y ORDER BY x ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING),
+  count(DISTINCT x/10) OVER (PARTITION BY x-y ORDER BY x ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
 FROM t7
 ORDER BY x-y, x;
 ----
--1  1  2  116  307  3  {2,10,14,26,30,34}  2  [2,10,14,26,30,34]  6
--1  5  6  114  307  31  {10,14,26,30,34}  10  [10,14,26,30,34]  5
--1  7  8  104  307  57  {14,26,30,34}  14  [14,26,30,34]  4
--1  13  14  90  307  183  {26,30,34}  26  [26,30,34]  3
--1  15  16  64  307  241  {30,34}  30  [30,34]  2
--1  17  18  34  307  307  {34}  34  [34]  1
-50  10  -40  20  -399  -399  {20}  20  [20]  1
-60  10  -50  20  -499  -499  {20}  20  [20]  1
-NULL  3  NULL  46  NULL  NULL  {6,18,22}  6  [6,18,22]  3
-NULL  9  NULL  40  NULL  NULL  {18,22}  18  [18,22]  2
-NULL  11  NULL  22  NULL  NULL  {22}  22  [22]  1
+-1  1  2  116  307  3  {2,10,14,26,30,34}  2  [2,10,14,26,30,34]  6  {0,0,0,1,1,1}  6
+-1  5  6  114  307  31  {10,14,26,30,34}  10  [10,14,26,30,34]  5  {0,0,1,1,1}  5
+-1  7  8  104  307  57  {14,26,30,34}  14  [14,26,30,34]  4  {0,1,1,1}  4
+-1  13  14  90  307  183  {26,30,34}  26  [26,30,34]  3  {1,1,1}  3
+-1  15  16  64  307  241  {30,34}  30  [30,34]  2  {1,1}  2
+-1  17  18  34  307  307  {34}  34  [34]  1  {1}  1
+50  10  -40  20  -399  -399  {20}  20  [20]  1  {1}  1
+60  10  -50  20  -499  -499  {20}  20  [20]  1  {1}  1
+NULL  3  NULL  46  NULL  NULL  {6,18,22}  6  [6,18,22]  3  {0,0,1}  3
+NULL  9  NULL  40  NULL  NULL  {18,22}  18  [18,22]  2  {0,1}  2
+NULL  11  NULL  22  NULL  NULL  {22}  22  [22]  1  {1}  1
 
 # No ORDER BY in OVER clause. (The order within the array_agg results can be different from Postgres, as well as between
 # Materialize versions.)
