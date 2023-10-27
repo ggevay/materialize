@@ -35,6 +35,7 @@ use mz_repr::explain::json::json_string;
 use mz_repr::explain::{
     ExplainFormat, ExprHumanizer, ExprHumanizerExt, TransientItem, UsedIndexes,
 };
+use mz_repr::refresh_schedule::RefreshSchedule;
 use mz_repr::role_id::RoleId;
 use mz_repr::{ColumnName, Datum, Diff, GlobalId, RelationDesc, Row, RowArena, Timestamp};
 use mz_sql::ast::{ExplainStage, IndexOptionName};
@@ -927,6 +928,7 @@ impl Coordinator {
                     column_names,
                     cluster_id,
                     non_null_assertions,
+                    refresh_schedule,
                 },
             replace: _,
             drop_ids,
@@ -976,6 +978,7 @@ impl Coordinator {
             internal_view_id,
             column_names.clone(),
             non_null_assertions.clone(),
+            refresh_schedule.clone(),
             debug_name,
             optimizer_config,
         );
@@ -1004,6 +1007,7 @@ impl Coordinator {
                 resolved_ids,
                 cluster_id,
                 non_null_assertions,
+                refresh_schedule,
             }),
             owner_id: *session.current_role_id(),
         });
@@ -3111,6 +3115,7 @@ impl Coordinator {
                 cluster_id,
                 broken,
                 non_null_assertions,
+                refresh_schedule,
             } => {
                 // Please see the docs on `explain_query_optimizer_pipeline` above.
                 self.explain_create_materialized_view_optimizer_pipeline(
@@ -3120,6 +3125,7 @@ impl Coordinator {
                     cluster_id,
                     broken,
                     non_null_assertions,
+                    refresh_schedule,
                     &config,
                     root_dispatch,
                 )
@@ -3445,6 +3451,7 @@ impl Coordinator {
         target_cluster_id: ClusterId,
         broken: bool,
         non_null_assertions: Vec<usize>,
+        refresh_schedule: Option<RefreshSchedule>,
         explain_config: &mz_repr::explain::ExplainConfig,
         _root_dispatch: tracing::Dispatch,
     ) -> Result<
@@ -3485,6 +3492,7 @@ impl Coordinator {
             internal_view_id,
             column_names.clone(),
             non_null_assertions,
+            refresh_schedule,
             debug_name,
             optimizer_config,
         );

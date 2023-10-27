@@ -29,6 +29,7 @@ use mz_controller_types::{ClusterId, ReplicaId};
 use mz_expr::{MirScalarExpr, OptimizedMirRelationExpr};
 use mz_ore::collections::CollectionExt;
 use mz_repr::adt::mz_acl_item::{AclMode, PrivilegeMap};
+use mz_repr::refresh_schedule::RefreshSchedule;
 use mz_repr::role_id::RoleId;
 use mz_repr::{GlobalId, RelationDesc};
 use mz_sql::ast::display::AstDisplay;
@@ -43,10 +44,7 @@ use mz_sql::names::{
     Aug, CommentObjectId, DatabaseId, FullItemName, QualifiedItemName, QualifiedSchemaName,
     ResolvedDatabaseSpecifier, ResolvedIds, SchemaId, SchemaSpecifier,
 };
-use mz_sql::plan::{
-    CreateSourcePlan, HirRelationExpr, Ingestion as PlanIngestion, WebhookHeaders,
-    WebhookValidation,
-};
+use mz_sql::plan::{CreateSourcePlan, HirRelationExpr, Ingestion as PlanIngestion, WebhookHeaders, WebhookValidation};
 use mz_sql::rbac;
 use mz_sql::session::vars::OwnedVarInput;
 use mz_storage_client::controller::IntrospectionType;
@@ -675,6 +673,7 @@ pub struct MaterializedView {
     pub resolved_ids: ResolvedIds,
     pub cluster_id: ClusterId,
     pub non_null_assertions: Vec<usize>,
+    pub refresh_schedule: Option<RefreshSchedule>,
 }
 
 #[derive(Debug, Clone, Serialize)]

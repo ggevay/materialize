@@ -10,12 +10,14 @@
 //! Types for describing dataflow sinks.
 
 use mz_proto::{IntoRustIfSome, ProtoType, RustType, TryFromProtoError};
-use mz_repr::{GlobalId, RelationDesc};
+use mz_repr::{GlobalId, RelationDesc, Timestamp};
 use mz_storage_types::controller::CollectionMetadata;
 use proptest::prelude::{any, Arbitrary, BoxedStrategy, Strategy};
 use proptest_derive::Arbitrary;
 use serde::{Deserialize, Serialize};
 use timely::progress::Antichain;
+use mz_repr::adt::interval::Interval;
+use mz_repr::refresh_schedule::{RefreshEvery, RefreshSchedule};
 
 include!(concat!(env!("OUT_DIR"), "/mz_compute_types.sinks.rs"));
 
@@ -28,6 +30,7 @@ pub struct ComputeSinkDesc<S: 'static = (), T = mz_repr::Timestamp> {
     pub with_snapshot: bool,
     pub up_to: Antichain<T>,
     pub non_null_assertions: Vec<usize>,
+    pub refresh_schedule: Option<RefreshSchedule>,
 }
 
 impl Arbitrary for ComputeSinkDesc<CollectionMetadata, mz_repr::Timestamp> {
@@ -35,6 +38,18 @@ impl Arbitrary for ComputeSinkDesc<CollectionMetadata, mz_repr::Timestamp> {
     type Parameters = ();
 
     fn arbitrary_with(_: Self::Parameters) -> Self::Strategy {
+        let interval_strategy: BoxedStrategy<RefreshSchedule> = (
+            any::<i32>(), ////// todo: is there an `any::<Interval>()` instead?
+            any::<i32>(),
+            any::<i64>(),
+            ////// any::<Timestamp>,
+        )
+            .prop_map(|(months, days, micros)| RefreshSchedule {everies: vec![RefreshEvery {
+                interval: Interval { months, days, micros },
+                starting_at: Timestamp::from(0), //////starting_at,
+            }]})
+            .boxed();
+
         (
             any::<GlobalId>(),
             any::<RelationDesc>(),
@@ -42,6 +57,7 @@ impl Arbitrary for ComputeSinkDesc<CollectionMetadata, mz_repr::Timestamp> {
             any::<bool>(),
             proptest::collection::vec(any::<mz_repr::Timestamp>(), 1..4),
             proptest::collection::vec(any::<usize>(), 0..4),
+            proptest::option::of(interval_strategy),
         )
             .prop_map(
                 |(
@@ -51,6 +67,7 @@ impl Arbitrary for ComputeSinkDesc<CollectionMetadata, mz_repr::Timestamp> {
                     with_snapshot,
                     up_to_frontier,
                     non_null_assertions,
+                    refresh_schedule,
                 )| {
                     ComputeSinkDesc {
                         from,
@@ -59,6 +76,7 @@ impl Arbitrary for ComputeSinkDesc<CollectionMetadata, mz_repr::Timestamp> {
                         with_snapshot,
                         up_to: Antichain::from(up_to_frontier),
                         non_null_assertions,
+                        refresh_schedule,
                     }
                 },
             )
@@ -75,6 +93,7 @@ impl RustType<ProtoComputeSinkDesc> for ComputeSinkDesc<CollectionMetadata, mz_r
             with_snapshot: self.with_snapshot,
             up_to: Some(self.up_to.into_proto()),
             non_null_assertions: self.non_null_assertions.into_proto(),
+            refresh_schedule: self.refresh_schedule.as_ref().map(|r| r.into_proto()),
         }
     }
 
@@ -92,6 +111,7 @@ impl RustType<ProtoComputeSinkDesc> for ComputeSinkDesc<CollectionMetadata, mz_r
                 .up_to
                 .into_rust_if_some("ProtoComputeSinkDesc::up_to")?,
             non_null_assertions: proto.non_null_assertions.into_rust()?,
+            refresh_schedule: proto.refresh_schedule.into_rust()?,
         })
     }
 }

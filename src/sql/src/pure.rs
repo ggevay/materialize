@@ -23,17 +23,9 @@ use mz_ore::error::ErrorExt;
 use mz_ore::iter::IteratorExt;
 use mz_ore::str::StrExt;
 use mz_proto::RustType;
-use mz_repr::{strconv, GlobalId};
+use mz_repr::{strconv, GlobalId, Timestamp};
 use mz_sql_parser::ast::display::AstDisplay;
-use mz_sql_parser::ast::{
-    AlterSourceAction, AlterSourceAddSubsourceOptionName, AlterSourceStatement, AvroDocOn,
-    CreateSinkConnection, CreateSinkStatement, CreateSubsourceOption, CreateSubsourceOptionName,
-    CsrConfigOption, CsrConfigOptionName, CsrConnection, CsrSeedAvro, CsrSeedProtobuf,
-    CsrSeedProtobufSchema, DbzMode, DeferredItemName, DocOnIdentifier, DocOnSchema, Envelope,
-    Ident, KafkaConfigOption, KafkaConfigOptionName, KafkaConnection, KafkaSourceConnection,
-    PgConfigOption, PgConfigOptionName, RawItemName, ReaderSchemaSelectionStrategy, Statement,
-    UnresolvedItemName,
-};
+use mz_sql_parser::ast::{AlterSourceAction, AlterSourceAddSubsourceOptionName, AlterSourceStatement, AvroDocOn, CreateSinkConnection, CreateSinkStatement, CreateSubsourceOption, CreateSubsourceOptionName, CsrConfigOption, CsrConfigOptionName, CsrConnection, CsrSeedAvro, CsrSeedProtobuf, CsrSeedProtobufSchema, DbzMode, DeferredItemName, DocOnIdentifier, DocOnSchema, Envelope, Expr, Function, FunctionArgs, Ident, KafkaConfigOption, KafkaConfigOptionName, KafkaConnection, KafkaSourceConnection, MaterializedViewOption, MaterializedViewOptionName, PgConfigOption, PgConfigOptionName, RawItemName, ReaderSchemaSelectionStrategy, RefreshAtOptionValue, RefreshEveryOptionValue, RefreshOptionValue, Statement, UnresolvedItemName};
 use mz_storage_types::connections::inline::IntoInlineConnection;
 use mz_storage_types::connections::{Connection, ConnectionContext};
 use mz_storage_types::errors::ContextCreationError;
@@ -46,6 +38,8 @@ use protobuf_native::MessageLite;
 use rdkafka::admin::AdminClient;
 use tracing::info;
 use uuid::Uuid;
+use mz_sql_parser::ast::visit::Visit;
+use mz_sql_parser::ast::visit_mut::VisitMut;
 
 use crate::ast::{
     AvroSchema, CreateSourceConnection, CreateSourceFormat, CreateSourceStatement,
@@ -54,7 +48,7 @@ use crate::ast::{
 };
 use crate::catalog::{CatalogItemType, ErsatzCatalog, SessionCatalog};
 use crate::kafka_util::KafkaConfigOptionExtracted;
-use crate::names::{Aug, ResolvedColumnName, ResolvedItemName};
+use crate::names::{Aug, FullItemName, PartialItemName, ResolvedColumnName, ResolvedItemName};
 use crate::plan::error::PlanError;
 use crate::plan::statement::ddl::load_generator_ast_to_generator;
 use crate::plan::StatementContext;
@@ -1387,4 +1381,140 @@ async fn compile_proto(
         schema,
         message_name,
     })
+}
+
+const MZ_NOW_NAME: &str = "mz_now";
+const MZ_NOW_SCHEMA: &str = "mz_catalog";
+
+pub fn purify_create_materialized_view_options(catalog: impl SessionCatalog, mz_now: Option<Timestamp>, mut options: Vec<MaterializedViewOption<Aug>>) -> Vec<MaterializedViewOption<Aug>> {
+    let mz_now_expr = || {
+        let item = catalog.resolve_function(&PartialItemName {
+            database: None,
+            schema: Some(MZ_NOW_SCHEMA.to_string()),
+            item: MZ_NOW_NAME.to_string(),
+        }).expect("we should be able to resolve mz_now");
+        Expr::Function(Function {
+            name: ResolvedItemName::Item {
+                id: item.id(),
+                qualifiers: item.name().qualifiers.clone(),
+                full_name: catalog.resolve_full_name(item.name()),
+                print_id: false,
+            },
+            args: FunctionArgs::Args {
+                args: Vec::new(),
+                order_by: Vec::new(),
+            },
+            filter: None,
+            over: None,
+            distinct: false,
+        })
+    };
+
+    for option in options.iter_mut() {
+        // 1. Purify `REFRESH AT CREATION` to `REFRESH AT mz_now()`.
+        if matches!(option.value, Some(WithOptionValue::Refresh(RefreshOptionValue::AtCreation))) {
+            option.value = Some(WithOptionValue::Refresh(RefreshOptionValue::At(
+                RefreshAtOptionValue {
+                    time: mz_now_expr()
+                }
+            )));
+        }
+
+        // 2. If `REFRESH EVERY` doesn't have a `STARTING AT`, then add `STARTING AT mz_now()`.
+        if let Some(WithOptionValue::Refresh(RefreshOptionValue::Every(RefreshEveryOptionValue {
+            starting_at,
+            ..
+        }))) = &mut option.value {
+            if starting_at.is_none() {
+                *starting_at = Some(mz_now_expr());
+            }
+        }
+
+        // 3. Substitute `mz_now()` with the timestamp chosen for the CREATE MATERIALIZED VIEW
+        // statement. (This has to happen after the above steps, which might introduce `mz_now()`.)
+        match &mut option.value {
+            Some(WithOptionValue::Refresh(RefreshOptionValue::At(RefreshAtOptionValue{time}))) => {
+                let mut visitor = MzNowPurifierVisitor::new(mz_now);
+                visitor.visit_expr_mut(time);
+            }
+            Some(WithOptionValue::Refresh(RefreshOptionValue::Every(RefreshEveryOptionValue{interval: _, starting_at: Some(starting_at)}))) => {
+                let mut visitor = MzNowPurifierVisitor::new(mz_now);
+                visitor.visit_expr_mut(starting_at);
+            }
+            _ => {},
+        }
+    }
+
+    // 4. If the user didn't give any REFRESH option, then default to ON COMMIT.
+    if !options.iter().any(|o| matches!(o, MaterializedViewOption {value: Some(WithOptionValue::Refresh(..)), ..})) {
+        options.push(MaterializedViewOption {
+            name: MaterializedViewOptionName::Refresh,
+            value: Some(WithOptionValue::Refresh(RefreshOptionValue::OnCommit)),
+        })
+    }
+
+    options
+}
+
+pub fn materialized_view_option_contains_temporal(mvo: &MaterializedViewOption<Aug>) -> bool {
+    match &mvo.value {
+        Some(WithOptionValue::Refresh(RefreshOptionValue::At(RefreshAtOptionValue{time}))) => {
+            let mut visitor = ExprContainsTemporalVisitor::new();
+            visitor.visit_expr(time);
+            visitor.contains_temporal
+        }
+        Some(WithOptionValue::Refresh(RefreshOptionValue::Every(RefreshEveryOptionValue{interval: _, starting_at: Some(starting_at)}))) => {
+            let mut visitor = ExprContainsTemporalVisitor::new();
+            visitor.visit_expr(starting_at);
+            visitor.contains_temporal
+        }
+        Some(WithOptionValue::Refresh(RefreshOptionValue::AtCreation)) => true,
+        _ => false,
+    }
+}
+
+struct ExprContainsTemporalVisitor {
+    pub contains_temporal: bool,
+}
+
+impl ExprContainsTemporalVisitor {
+    pub fn new() -> ExprContainsTemporalVisitor {
+        ExprContainsTemporalVisitor {contains_temporal: false}
+    }
+}
+
+impl<'a> Visit<'_, Aug> for ExprContainsTemporalVisitor {
+    fn visit_function(&mut self, func: &Function<Aug>) {
+        self.contains_temporal |= func.name.full_item_name().item == MZ_NOW_NAME;
+    }
+}
+
+struct MzNowPurifierVisitor {
+    pub mz_now: Option<Timestamp>,
+}
+
+impl MzNowPurifierVisitor {
+    pub fn new(mz_now: Option<Timestamp>) -> MzNowPurifierVisitor {
+        MzNowPurifierVisitor {mz_now}
+    }
+}
+
+impl<'a> VisitMut<'_, Aug> for MzNowPurifierVisitor {
+    fn visit_expr_mut(&mut self, expr: &'_ mut Expr<Aug>) {
+        match expr {
+            Expr::Function(Function {
+                name: ResolvedItemName::Item {
+                    full_name: FullItemName {
+                        item,
+                        ..
+                    },
+                    ..
+                },
+                ..
+            }) if *item == MZ_NOW_NAME.to_string() => {
+                *expr = Expr::Value(Value::Number(self.mz_now.expect("we should have chosen a timestamp if the expression contains mz_now()").to_string()));
+            }
+            _ => {}
+        }
+    }
 }

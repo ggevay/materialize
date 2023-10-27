@@ -92,6 +92,7 @@ Create
 Createcluster
 Createdb
 Createrole
+Creation
 Cross
 Csv
 Current
@@ -133,6 +134,7 @@ Enforced
 Envelope
 Error
 Escape
+Every
 Except
 Execute
 Exists
@@ -350,6 +352,7 @@ Sources
 Ssh
 Ssl
 Start
+Starting
 Stdin
 Stdout
 Storage
