@@ -370,14 +370,14 @@ query TT colnames
 SHOW CREATE MATERIALIZED VIEW mv
 ----
 name                  create_sql
-materialize.public.mv CREATE␠MATERIALIZED␠VIEW␠"materialize"."public"."mv"␠IN␠CLUSTER␠"default"␠AS␠SELECT␠1
+materialize.public.mv CREATE␠MATERIALIZED␠VIEW␠"materialize"."public"."mv"␠IN␠CLUSTER␠"default"␠WITH␠(REFRESH␠=␠ON␠COMMIT)␠AS␠SELECT␠1
 
 # Test: SHOW CREATE MATERIALIZED VIEW as mz_support
 
 simple conn=mz_introspection,user=mz_support
 SHOW CREATE MATERIALIZED VIEW mv
 ----
-materialize.public.mv,CREATE MATERIALIZED VIEW "materialize"."public"."mv" IN CLUSTER "default" AS SELECT 1
+materialize.public.mv,CREATE MATERIALIZED VIEW "materialize"."public"."mv" IN CLUSTER "default" WITH (REFRESH = ON COMMIT) AS SELECT 1
 COMPLETE 1
 
 # Test: SHOW MATERIALIZED VIEWS
@@ -645,7 +645,193 @@ SELECT * FROM mv_assertion_at_begin ORDER BY x;
 4 NULL 6
 7 8 NULL
 
-# More Cleanup
+# ------------------------------------------------------------------
+# REFRESH options (see also in materialized-view-refresh-options.td)
+# ------------------------------------------------------------------
+
+# Planning/parsing errors
+
+# Should be disabled by default.
+query error db error: ERROR: REFRESH EVERY materialized views is not supported
+CREATE MATERIALIZED VIEW mv_bad WITH (ASSERT NOT NULL x, REFRESH EVERY '8 seconds') AS SELECT * FROM t2;
+
+simple conn=mz_system,user=mz_system
+ALTER SYSTEM SET enable_refresh_every_mvs = true
+----
+COMPLETE 0
+
+query error db error: ERROR: REFRESH ON COMMIT can be given only once
+CREATE MATERIALIZED VIEW mv_bad WITH (REFRESH ON COMMIT, REFRESH ON COMMIT) AS SELECT 1;
+
+query error db error: ERROR: REFRESH ON COMMIT is not compatible with any of the other REFRESH options
+CREATE MATERIALIZED VIEW mv_bad WITH (REFRESH ON COMMIT, REFRESH EVERY '1 day') AS SELECT 1;
+
+query error db error: ERROR: REFRESH AT does not support implicitly casting from record\(f1: integer,f2: integer\) to mz_timestamp
+CREATE MATERIALIZED VIEW mv_bad WITH (REFRESH AT row(1,2)) AS SELECT 1;
+
+query error db error: ERROR: REFRESH AT argument must be an expression that can be simplified and/or cast to a constant whose type is mz_timestamp \(calling mz_now\(\) is allowed\)
+CREATE MATERIALIZED VIEW mv_bad WITH (REFRESH AT 'aaaa') AS SELECT 1;
+
+query error db error: ERROR: column "ccc" does not exist
+CREATE MATERIALIZED VIEW mv_bad WITH (REFRESH AT ccc) AS SELECT 1 as ccc;
+
+query error db error: ERROR: REFRESH AT argument must be an expression that can be simplified and/or cast to a constant whose type is mz_timestamp \(calling mz_now\(\) is allowed\)
+CREATE MATERIALIZED VIEW mv_bad WITH (REFRESH AT now()) AS SELECT 1;
+
+query error db error: ERROR: REFRESH AT argument must be an expression that can be simplified and/or cast to a constant whose type is mz_timestamp \(calling mz_now\(\) is allowed\)
+CREATE MATERIALIZED VIEW mv_bad WITH (REFRESH AT now()::mz_timestamp) AS SELECT 1;
+
+query error db error: ERROR: greatest types mz_timestamp and timestamp with time zone cannot be matched
+CREATE MATERIALIZED VIEW mv_bad WITH (REFRESH AT greatest(mz_now(), now())) AS SELECT 1;
+
+query error db error: ERROR: REFRESH AT argument must be an expression that can be simplified and/or cast to a constant whose type is mz_timestamp \(calling mz_now\(\) is allowed\)
+CREATE MATERIALIZED VIEW mv_bad WITH (REFRESH AT greatest(mz_now(), now()::mz_timestamp)) AS SELECT 1;
+
+query error db error: ERROR: aggregate functions are not allowed in REFRESH AT \(function pg_catalog\.sum\)
+CREATE MATERIALIZED VIEW mv_bad WITH (REFRESH AT sum(5)) AS SELECT 1;
+
+query error db error: ERROR: REFRESH AT does not allow subqueries
+CREATE MATERIALIZED VIEW mv_bad WITH (REFRESH AT (SELECT 1)) AS SELECT 1;
+
+query error db error: ERROR: window functions are not allowed in REFRESH AT \(function pg_catalog\.lag\)
+CREATE MATERIALIZED VIEW mv_bad WITH (REFRESH AT lag(7) OVER ()) AS SELECT 1;
+
+query error Invalid value for REFRESH EVERY: `42`\. The value should be a string parseable as an interval, e\.g\., '1 day'\.
+CREATE MATERIALIZED VIEW mv_bad WITH (REFRESH EVERY 42) AS SELECT 1;
+
+query error db error: ERROR: invalid input syntax for type interval: unknown units dayy: "1 dayy"
+CREATE MATERIALIZED VIEW mv_bad WITH (REFRESH EVERY '1 dayy') AS SELECT 1;
+
+query error Invalid value for REFRESH EVERY: `INTERVAL '1 day'`\. The value should be a string parseable as an interval, e\.g\., '1 day'\. The INTERVAL keyword should NOT be present!
+CREATE MATERIALIZED VIEW mv_bad WITH (REFRESH EVERY INTERVAL '1 day') AS SELECT 1;
+
+query error db error: ERROR: REFRESH interval must be positive; got: \-00:01:00
+CREATE MATERIALIZED VIEW mv_bad WITH (REFRESH EVERY '-1 minutes') AS SELECT 1;
+
+query error db error: ERROR: REFRESH interval too big: 28 days\. Currently, only intervals not larger than 27 days are supported\.
+CREATE MATERIALIZED VIEW mv_bad WITH (REFRESH EVERY '28 days') AS SELECT 1;
+
+query error db error: ERROR: REFRESH EVERY \.\.\. STARTING AT argument must be an expression that can be simplified and/or cast to a constant whose type is mz_timestamp \(calling mz_now\(\) is allowed\)
+CREATE MATERIALIZED VIEW mv_bad WITH (REFRESH EVERY '1 day' STARTING AT now()) AS SELECT 1;
+
+query error db error: ERROR: REFRESH EVERY \.\.\. STARTING AT argument must be an expression that can be simplified and/or cast to a constant whose type is mz_timestamp \(calling mz_now\(\) is allowed\)
+CREATE MATERIALIZED VIEW mv_bad WITH (REFRESH EVERY '1 day' STARTING AT now()::mz_timestamp) AS SELECT 1;
+
+query error db error: ERROR: greatest types mz_timestamp and timestamp with time zone cannot be matched
+CREATE MATERIALIZED VIEW mv_bad WITH (REFRESH EVERY '1 day' STARTING AT greatest(mz_now(), now())) AS SELECT 1;
+
+query error db error: ERROR: REFRESH EVERY \.\.\. STARTING AT argument must be an expression that can be simplified and/or cast to a constant whose type is mz_timestamp \(calling mz_now\(\) is allowed\)
+CREATE MATERIALIZED VIEW mv_bad WITH (REFRESH EVERY '1 day' STARTING AT greatest(mz_now(), now()::mz_timestamp)) AS SELECT 1;
+
+query error db error: ERROR: aggregate functions are not allowed in REFRESH EVERY \.\.\. STARTING AT \(function pg_catalog\.sum\)
+CREATE MATERIALIZED VIEW mv_bad WITH (REFRESH EVERY '1 day' STARTING AT sum(5)) AS SELECT 1;
+
+query error db error: ERROR: REFRESH EVERY \.\.\. STARTING AT does not allow subqueries
+CREATE MATERIALIZED VIEW mv_bad WITH (REFRESH EVERY '1 day' STARTING AT (SELECT 1)) AS SELECT 1;
+
+query error db error: ERROR: window functions are not allowed in REFRESH EVERY \.\.\. STARTING AT \(function pg_catalog\.lag\)
+CREATE MATERIALIZED VIEW mv_bad WITH (REFRESH EVERY '1 day' STARTING AT lag(7) OVER ()) AS SELECT 1;
+
+query error db error: ERROR: invalid REFRESH: cannot use value `every` for a refresh option
+CREATE MATERIALIZED VIEW mv_bad WITH (REFRESH EVERY) AS SELECT * FROM t2;
+
+query error db error: ERROR: invalid REFRESH: cannot use value `every` for a refresh option
+CREATE MATERIALIZED VIEW mv_bad WITH (REFRESH EVERY, ASSERT NOT NULL x) AS SELECT * FROM t2;
+
+query error Expected right parenthesis, found REFRESH
+CREATE MATERIALIZED VIEW mv_bad WITH (ASSERT NOT NULL x REFRESH EVERY '8 seconds') AS SELECT * FROM t2;
+
+query error Expected right parenthesis, found ASSERT
+CREATE MATERIALIZED VIEW mv_bad WITH (REFRESH EVERY ASSERT NOT NULL x) AS SELECT * FROM t2;
+
+## REFRESH options together with ASSERT NOT NULL options
 
 statement ok
-DROP TABLE t2 CASCADE
+INSERT INTO t2 VALUES (10, 11, 12);
+
+statement ok
+CREATE MATERIALIZED VIEW mv_assertion_plus_refresh_every WITH (ASSERT NOT NULL x, REFRESH EVERY '8 seconds') AS SELECT * FROM t2;
+
+# There should be a refresh immediately when creating the MV. THis refresh should already see what we just inserted.
+query III
+SELECT * FROM mv_assertion_plus_refresh_every ORDER BY x;
+----
+1  2  3
+4  NULL  6
+7  8  NULL
+10  11  12
+
+statement ok
+INSERT INTO t2 VALUES (NULL, -1, -2);
+
+# This insert shouldn't be visible yet.
+query III
+SELECT * FROM mv_assertion_plus_refresh_every ORDER BY x;
+----
+1  2  3
+4  NULL  6
+7  8  NULL
+10  11  12
+
+# Sleep for the refresh interval, so that we get a refresh.
+statement ok
+SELECT mz_unsafe.mz_sleep(8);
+
+# Now we should see the NULL that should error out the MV.
+query error db error: ERROR: Evaluation error: column 1 must not be null
+SELECT * FROM mv_assertion_plus_refresh_every ORDER BY x;
+
+## If there is no creation refresh, then a query should block until the first refresh.
+
+# Save the current time.
+statement ok
+CREATE TABLE start_time(t timestamp);
+
+statement ok
+INSERT INTO start_time VALUES (now());
+
+# Create an MV whose first refresh is 5 sec after its creation.
+statement ok
+CREATE MATERIALIZED VIEW mv_no_creation_refresh
+WITH (REFRESH EVERY '100000 sec' STARTING AT mz_now()::string::int8 + 5000)
+AS SELECT * FROM t2;
+
+# Insert something into the underlying table.
+statement ok
+INSERT INTO t2 VALUES (30, 30, 30);
+
+# Check `REFRESH AT greatest(<past time>, mz_now())`, because this is an idiom that we are recommending to users.
+statement ok
+CREATE MATERIALIZED VIEW mv_greatest
+WITH (REFRESH AT greatest('1990-01-04 11:00', mz_now()))
+AS SELECT * FROM t2;
+
+query III
+SELECT * FROM mv_greatest;
+----
+NULL  -1  -2
+4  NULL  6
+7  8  NULL
+1  2  3
+10  11  12
+30  30  30
+
+# Insert something into the underlying table.
+statement ok
+INSERT INTO t2 VALUES (100, 100, 100);
+
+########### FIXME
+# Query it.
+# - The query should block until the first refresh.
+# - The newly inserted stuff should be visible.
+query III
+SELECT * FROM mv_no_creation_refresh;
+----
+
+
+# Verify that at least 5 seconds have passed.
+######### FIXME
+query B
+SELECT now() - (SELECT * from start_time) >= INTERVAL '5 sec';
+----
+false

@@ -12,11 +12,15 @@ use std::num::TryFromIntError;
 use std::time::Duration;
 
 use dec::TryFromDecimalError;
+use mz_proto::{RustType, TryFromProtoError};
 use proptest_derive::Arbitrary;
 use serde::{Deserialize, Serialize, Serializer};
 
 use crate::adt::numeric::Numeric;
+use crate::refresh_schedule::RefreshEvery;
 use crate::strconv::parse_timestamp;
+
+include!(concat!(env!("OUT_DIR"), "/mz_repr.timestamp.rs"));
 
 /// System-wide timestamp type.
 #[derive(
@@ -34,6 +38,18 @@ use crate::strconv::parse_timestamp;
 pub struct Timestamp {
     /// note no `pub`.
     internal: u64,
+}
+
+impl RustType<ProtoTimestamp> for Timestamp {
+    fn into_proto(&self) -> ProtoTimestamp {
+        ProtoTimestamp {
+            internal: self.into(),
+        }
+    }
+
+    fn from_proto(proto: ProtoTimestamp) -> Result<Self, TryFromProtoError> {
+        Ok(Timestamp::new(proto.internal))
+    }
 }
 
 pub trait TimestampManipulation:
@@ -181,6 +197,33 @@ impl Timestamp {
     /// which must only happen if the timestamp is `Timestamp::minimum()`.
     pub fn step_back(&self) -> Option<Self> {
         self.checked_sub(1)
+    }
+
+    /// ///// todo: comment
+    pub fn round_up(
+        &self,
+        RefreshEvery {
+            interval,
+            starting_at,
+        }: &RefreshEvery,
+    ) -> Self {
+        if self <= starting_at {
+            // It's important to include the == case here, because below we want
+            // `self - starting_at - 1`
+            // to not underflow in the else branch.
+            starting_at.clone()
+        } else {
+            // Planning ensured that
+            // - interval.months == 0, so we don't need to deal with months being of variable size.
+            // - The interval can be max 27 days, so the cast to u64 won't overflow.
+            // - The interval is positive, so the cast to u64 won't underflow.
+            assert_eq!(interval.months, 0);
+            let interval: u64 = interval.as_milliseconds().try_into().unwrap();
+            Self {
+                internal: starting_at.internal
+                    + ((self.internal - starting_at.internal - 1) / interval + 1) * interval,
+            }
+        }
     }
 }
 

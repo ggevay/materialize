@@ -18,12 +18,14 @@ use differential_dataflow::lattice::Lattice;
 use differential_dataflow::{Collection, Hashable};
 use mz_compute_types::sinks::{ComputeSinkDesc, PersistSinkConnection};
 use mz_ore::cast::CastFrom;
-use mz_ore::collections::HashMap;
+use mz_ore::collections::{CollectionExt, HashMap};
+use mz_ore::vec::VecExt;
 use mz_persist_client::batch::{Batch, BatchBuilder, ProtoBatch};
 use mz_persist_client::cache::PersistClientCache;
 use mz_persist_client::operators::shard_source::SnapshotMode;
 use mz_persist_client::Diagnostics;
 use mz_persist_types::codec_impls::UnitSchema;
+use mz_repr::refresh_schedule::RefreshSchedule;
 use mz_repr::{Diff, GlobalId, Row, Timestamp};
 use mz_storage_types::controller::CollectionMetadata;
 use mz_storage_types::errors::DataflowError;
@@ -31,6 +33,7 @@ use mz_storage_types::sources::SourceData;
 use mz_timely_util::builder_async::{Event, OperatorBuilder as AsyncOperatorBuilder};
 use serde::{Deserialize, Serialize};
 use timely::dataflow::channels::pact::{Exchange, Pipeline};
+use timely::dataflow::operators::generic::builder_rc::OperatorBuilder;
 use timely::dataflow::operators::{
     Broadcast, Capability, CapabilitySet, ConnectLoop, Feedback, Inspect,
 };
@@ -46,6 +49,7 @@ impl<G> SinkRender<G> for PersistSinkConnection<CollectionMetadata>
 where
     G: Scope<Timestamp = Timestamp>,
 {
+    #[allow(clippy::as_conversions)]
     fn render_continuous_sink(
         &self,
         compute_state: &mut ComputeState,
@@ -58,7 +62,13 @@ where
     where
         G: Scope<Timestamp = Timestamp>,
     {
-        let desired_collection = sinked_collection.map(Ok).concat(&err_collection.map(Err));
+        let mut desired_collection = sinked_collection.map(Ok).concat(&err_collection.map(Err));
+
+        // If `REFRESH EVERY` was specified, round up timestamps.
+        if let Some(refresh_schedule) = &sink.refresh_schedule {
+            desired_collection = round_up(desired_collection, refresh_schedule.clone());
+        }
+
         if sink.up_to != Antichain::default() {
             unimplemented!(
                 "UP TO is not supported for persist sinks yet, and shouldn't have been accepted during parsing/planning"
@@ -1180,4 +1190,70 @@ where
 
     let token = Rc::new(shutdown_button.press_on_drop());
     (output_stream, token)
+}
+
+/// TODO: comment
+/// This currently only works with 1-dim timestamps. (Not an issue for WMR, because iteration
+/// numbers should disappear by the time the data gets to the Persist sink.)
+fn round_up<G>(
+    coll: Collection<G, Result<Row, DataflowError>, Diff>,
+    refresh_schedule: RefreshSchedule,
+) -> Collection<G, Result<Row, DataflowError>, Diff>
+where
+    G: Scope<Timestamp = Timestamp>,
+{
+    let mut builder = OperatorBuilder::new("round_up".to_string(), coll.scope().clone());
+    let (mut output_buf, output_stream) = builder.new_output();
+    let mut input = builder.new_input_connection(&coll.inner, Pipeline, vec![Antichain::new()]);
+    builder.build(move |capabilities| {
+        let mut capability = Some(capabilities.into_element());
+        let mut buffer = Vec::new();
+        move |frontiers| {
+            let ac = frontiers.into_element();
+            match ac.frontier().to_owned().into_option() {
+                Some(ts) => {
+                    match refresh_schedule.round_up_timestamp(ts) {
+                        Some(rounded_up_ts) => {
+                            capability.as_mut().unwrap().downgrade(&rounded_up_ts);
+                        }
+                        None => {
+                            // We are past the last refresh. Drop the capability to signal that we
+                            // are done.
+                            capability = None;
+                        }
+                    }
+                }
+                None => {
+                    capability = None;
+                }
+            }
+            if capability.is_some() {
+                input.for_each(|_cap, data| {
+                    data.swap(&mut buffer);
+                    buffer
+                        .drain_filter_swapping(|(_d, ts, _r)| {
+                            ///////// todo: cache it for 1 previously seen timestamp.
+                            match refresh_schedule.round_up_timestamp(*ts) {
+                                Some(rounded_up_ts) => {
+                                    *ts = rounded_up_ts;
+                                    false
+                                }
+                                None => {
+                                    // This record is after the last refresh, so drop it.
+                                    true
+                                }
+                            }
+                        })
+                        .for_each(drop); // consume the iterator to apply the filtering
+                    output_buf
+                        .activate()
+                        .session(capability.as_ref().unwrap())
+                        .give_container(&mut buffer);
+                });
+            }
+        }
+    });
+
+    use differential_dataflow::AsCollection;
+    output_stream.as_collection()
 }
