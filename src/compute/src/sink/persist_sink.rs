@@ -15,10 +15,10 @@ use std::sync::Arc;
 
 use differential_dataflow::consolidation::consolidate_updates;
 use differential_dataflow::lattice::Lattice;
-use differential_dataflow::{Collection, Hashable};
+use differential_dataflow::{AsCollection, Collection, Hashable};
 use mz_compute_types::sinks::{ComputeSinkDesc, PersistSinkConnection};
 use mz_ore::cast::CastFrom;
-use mz_ore::collections::HashMap;
+use mz_ore::collections::{CollectionExt, HashMap};
 use mz_persist_client::batch::{Batch, BatchBuilder, ProtoBatch};
 use mz_persist_client::cache::PersistClientCache;
 use mz_persist_client::Diagnostics;
@@ -34,12 +34,49 @@ use timely::dataflow::operators::{
     Broadcast, Capability, CapabilitySet, ConnectLoop, Feedback, Inspect,
 };
 use timely::dataflow::{Scope, Stream};
+use timely::dataflow::operators::generic::builder_rc::OperatorBuilder;
 use timely::progress::{Antichain, Timestamp as TimelyTimestamp};
 use timely::PartialOrder;
 use tracing::trace;
 
 use crate::compute_state::ComputeState;
 use crate::render::sinks::SinkRender;
+
+const REFRESH_INTERVAL: u64 = 60 * 1000;
+
+fn round_up<G>(coll: Collection<G, Result<Row, DataflowError>, Diff>) -> Collection<G, Result<Row, DataflowError>, Diff>
+where
+    G: Scope<Timestamp = Timestamp>,
+{
+    let mut builder = OperatorBuilder::new("round_up".to_string(), coll.scope().clone());
+    let mut output = builder.new_output(); // todo: destructure
+    let mut input = builder.new_input_connection(&coll.inner, Pipeline, vec![Antichain::new()]);
+    builder.build(move |capabilities| {
+        let mut capability = Some(capabilities.into_element());
+        let mut buffer = Vec::new();
+        move |frontiers| {
+            let ac = frontiers.into_element();
+            match ac.frontier().to_owned().into_option() {
+                Some(ts) => {
+                    capability.as_mut().unwrap().downgrade(&ts.round_up(REFRESH_INTERVAL));
+                }
+                None => {
+                    capability = None;
+                }
+            }
+
+            input.for_each(|_cap, data| {
+                data.swap(&mut buffer);
+                for (_d, t, _r) in buffer.iter_mut() {
+                    *t = t.round_up(REFRESH_INTERVAL);
+                }
+                output.0.activate().session(capability.as_ref().unwrap()).give_container(&mut buffer);
+            });
+        }
+    });
+
+    output.1.as_collection()
+}
 
 impl<G> SinkRender<G> for PersistSinkConnection<CollectionMetadata>
 where
@@ -58,6 +95,9 @@ where
         G: Scope<Timestamp = Timestamp>,
     {
         let desired_collection = sinked_collection.map(Ok).concat(&err_collection.map(Err));
+
+        let desired_collection = round_up(desired_collection);
+
         if sink.up_to != Antichain::default() {
             unimplemented!(
                 "UP TO is not supported for persist sinks yet, and shouldn't have been accepted during parsing/planning"
