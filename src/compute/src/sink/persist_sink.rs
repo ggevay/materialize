@@ -16,9 +16,9 @@ use std::sync::Arc;
 use differential_dataflow::consolidation::consolidate_updates;
 use differential_dataflow::lattice::Lattice;
 use differential_dataflow::{Collection, Hashable};
-use mz_compute_types::sinks::{ComputeSinkDesc, PersistSinkConnection};
+use mz_compute_types::sinks::{ComputeSinkDesc, PersistSinkConnection, RefreshSchedule};
 use mz_ore::cast::CastFrom;
-use mz_ore::collections::HashMap;
+use mz_ore::collections::{CollectionExt, HashMap};
 use mz_persist_client::batch::{Batch, BatchBuilder, ProtoBatch};
 use mz_persist_client::cache::PersistClientCache;
 use mz_persist_client::Diagnostics;
@@ -34,6 +34,7 @@ use timely::dataflow::operators::{
     Broadcast, Capability, CapabilitySet, ConnectLoop, Feedback, Inspect,
 };
 use timely::dataflow::{Scope, Stream};
+use timely::dataflow::operators::generic::builder_rc::OperatorBuilder;
 use timely::progress::{Antichain, Timestamp as TimelyTimestamp};
 use timely::PartialOrder;
 use tracing::trace;
@@ -45,6 +46,7 @@ impl<G> SinkRender<G> for PersistSinkConnection<CollectionMetadata>
 where
     G: Scope<Timestamp = Timestamp>,
 {
+    #[allow(clippy::as_conversions)]
     fn render_continuous_sink(
         &self,
         compute_state: &mut ComputeState,
@@ -57,7 +59,14 @@ where
     where
         G: Scope<Timestamp = Timestamp>,
     {
-        let desired_collection = sinked_collection.map(Ok).concat(&err_collection.map(Err));
+        let mut desired_collection = sinked_collection.map(Ok).concat(&err_collection.map(Err));
+
+        // If `REFRESH EVERY` was specified, round up timestamps.
+        if let Some(RefreshSchedule {interval}) = sink.refresh_schedule {
+            // `as` conversion ok, because we made sure in the planning that this is not too big.
+            desired_collection = round_up(desired_collection, interval.as_milliseconds() as u64);
+        }
+
         if sink.up_to != Antichain::default() {
             unimplemented!(
                 "UP TO is not supported for persist sinks yet, and shouldn't have been accepted during parsing/planning"
@@ -1178,4 +1187,38 @@ where
 
     let token = Rc::new(shutdown_button.press_on_drop());
     (output_stream, token)
+}
+
+fn round_up<G>(coll: Collection<G, Result<Row, DataflowError>, Diff>, refresh_interval: u64) -> Collection<G, Result<Row, DataflowError>, Diff>
+    where
+        G: Scope<Timestamp = Timestamp>,
+{
+    let mut builder = OperatorBuilder::new("round_up".to_string(), coll.scope().clone());
+    let (mut output_buf, output_stream) = builder.new_output();
+    let mut input = builder.new_input_connection(&coll.inner, Pipeline, vec![Antichain::new()]);
+    builder.build(move |capabilities| {
+        let mut capability = Some(capabilities.into_element());
+        let mut buffer = Vec::new();
+        move |frontiers| {
+            let ac = frontiers.into_element();
+            match ac.frontier().to_owned().into_option() {
+                Some(ts) => {
+                    capability.as_mut().unwrap().downgrade(&ts.round_up(refresh_interval));
+                }
+                None => {
+                    capability = None;
+                }
+            }
+            input.for_each(|_cap, data| {
+                data.swap(&mut buffer);
+                for (_d, t, _r) in buffer.iter_mut() {
+                    *t = t.round_up(refresh_interval);
+                }
+                output_buf.activate().session(capability.as_ref().unwrap()).give_container(&mut buffer);
+            });
+        }
+    });
+
+    use differential_dataflow::AsCollection;
+    output_stream.as_collection()
 }

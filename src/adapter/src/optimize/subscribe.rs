@@ -140,6 +140,8 @@ impl Optimize<SubscribeFrom> for OptimizeSubscribe {
                     up_to: self.up_to.map(Antichain::from_elem).unwrap_or_default(),
                     // No `FORCE NOT NULL` for subscribes
                     non_null_assertions: vec![],
+                    // No `REFRESH EVERY` for subscribes
+                    refresh_schedule: None,
                 };
 
                 let mut df_builder =
@@ -180,6 +182,8 @@ impl Optimize<SubscribeFrom> for OptimizeSubscribe {
                     up_to: self.up_to.map(Antichain::from_elem).unwrap_or_default(),
                     // No `FORCE NOT NULL` for subscribes
                     non_null_assertions: vec![],
+                    // No `REFRESH EVERY` for subscribes
+                    refresh_schedule: None,
                 };
 
                 let mut df_builder =
