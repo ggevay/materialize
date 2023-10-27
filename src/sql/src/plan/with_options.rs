@@ -11,7 +11,7 @@
 
 use mz_repr::adt::interval::Interval;
 use mz_repr::{strconv, GlobalId};
-use mz_sql_parser::ast::{Ident, KafkaBroker, ReplicaDefinition};
+use mz_sql_parser::ast::{Ident, KafkaBroker, RefreshOptionValue, ReplicaDefinition};
 use mz_storage_types::connections::StringOrSecret;
 use serde::{Deserialize, Serialize};
 
@@ -428,9 +428,12 @@ impl<V: TryFromValue<Value>, T: AstInfo + std::fmt::Debug> TryFromValue<WithOpti
             | WithOptionValue::Secret(_)
             | WithOptionValue::DataType(_)
             | WithOptionValue::ClusterReplicas(_)
-            | WithOptionValue::ConnectionKafkaBroker(_) => sql_bail!(
+            | WithOptionValue::ConnectionKafkaBroker(_)
+            | WithOptionValue::Refresh(_) => sql_bail!(
                 "incompatible value types: cannot convert {} to {}",
                 match v {
+                    WithOptionValue::Value(_) => unreachable!(),
+                    WithOptionValue::Ident(_) => unreachable!(),
                     WithOptionValue::Sequence(_) => "sequences",
                     WithOptionValue::Item(_) => "object references",
                     WithOptionValue::UnresolvedItemName(_) => "object names",
@@ -438,7 +441,7 @@ impl<V: TryFromValue<Value>, T: AstInfo + std::fmt::Debug> TryFromValue<WithOpti
                     WithOptionValue::DataType(_) => "data types",
                     WithOptionValue::ClusterReplicas(_) => "cluster replicas",
                     WithOptionValue::ConnectionKafkaBroker(_) => "connection kafka brokers",
-                    _ => unreachable!(),
+                    WithOptionValue::Refresh(_) => "refresh option values",
                 },
                 V::name()
             ),
@@ -503,5 +506,24 @@ impl TryFromValue<WithOptionValue<Aug>> for Vec<KafkaBroker<Aug>> {
 impl ImpliedValue for Vec<KafkaBroker<Aug>> {
     fn implied_value() -> Result<Self, PlanError> {
         sql_bail!("must provide a kafka broker")
+    }
+}
+
+impl TryFromValue<WithOptionValue<Aug>> for RefreshOptionValue<Aug> {
+    fn try_from_value(v: WithOptionValue<Aug>) -> Result<Self, PlanError> {
+        match v {
+            WithOptionValue::Refresh(r) => Ok(r),
+            _ => sql_bail!("cannot use value for a refresh option"),
+        }
+    }
+
+    fn name() -> String {
+        "refresh option value".to_string()
+    }
+}
+
+impl ImpliedValue for RefreshOptionValue<Aug> {
+    fn implied_value() -> Result<Self, PlanError> {
+        sql_bail!("must provide a refresh option value")
     }
 }

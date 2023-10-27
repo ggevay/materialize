@@ -39,6 +39,7 @@ use mz_ore::now::{self, NOW_ZERO};
 use mz_pgcopy::CopyFormatParams;
 use mz_repr::adt::mz_acl_item::{AclMode, MzAclItem};
 use mz_repr::explain::{ExplainConfig, ExplainFormat};
+use mz_repr::refresh_schedule::RefreshSchedule;
 use mz_repr::role_id::RoleId;
 use mz_repr::{ColumnName, Diff, GlobalId, RelationDesc, Row, ScalarType};
 use mz_sql_parser::ast::{
@@ -861,6 +862,7 @@ pub enum ExplaineeStatement {
         /// Broken flag (see [`ExplaineeStatement::broken()`]).
         broken: bool,
         non_null_assertions: Vec<usize>,
+        refresh_schedule: Option<RefreshSchedule>,
     },
     /// The object to be explained is a CREATE INDEX.
     CreateIndex {
@@ -1431,6 +1433,7 @@ pub struct MaterializedView {
     pub column_names: Vec<ColumnName>,
     pub cluster_id: ClusterId,
     pub non_null_assertions: Vec<usize>,
+    pub refresh_schedule: Option<RefreshSchedule>,
 }
 
 #[derive(Clone, Debug)]

@@ -3245,8 +3245,17 @@ impl<'a> Parser<'a> {
     fn parse_materialized_view_option_name(
         &mut self,
     ) -> Result<MaterializedViewOptionName, ParserError> {
-        self.expect_keywords(&[ASSERT, NOT, NULL])?;
-        Ok(MaterializedViewOptionName::AssertNotNull)
+        let name = match self.expect_one_of_keywords(&[ASSERT, REFRESH])? {
+            ASSERT => {
+                self.expect_keywords(&[NOT, NULL])?;
+                MaterializedViewOptionName::AssertNotNull
+            },
+            REFRESH => {
+                MaterializedViewOptionName::Refresh
+            },
+            _ => unreachable!(),
+        };
+        Ok(name)
     }
 
     fn parse_materialized_view_option(
@@ -4100,6 +4109,36 @@ impl<'a> Parser<'a> {
                 Ok(WithOptionValue::Secret(secret))
             } else {
                 Ok(WithOptionValue::Ident(ident!("secret")))
+            }
+        } else if self.parse_keyword(ON) {
+            if self.parse_keyword(COMMIT) {
+                Ok(WithOptionValue::Refresh(RefreshOptionValue::OnCommit))
+            } else {
+                Ok(WithOptionValue::Ident(ident!("on")))
+            }
+        } else if self.parse_keyword(AT) {
+            if self.parse_keyword(CREATION) {
+                Ok(WithOptionValue::Refresh(RefreshOptionValue::AtCreation))
+            } else if let Some(expr) = self.maybe_parse(Parser::parse_expr) {
+                Ok(WithOptionValue::Refresh(RefreshOptionValue::At(RefreshAtOptionValue {
+                    time: expr,
+                })))
+            } else {
+                Ok(WithOptionValue::Ident(ident!("at")))
+            }
+        } else if self.parse_keyword(EVERY) {
+            if let Some(Value::String(interval)) = self.maybe_parse(Parser::parse_value) {
+                let starting_at = if self.parse_keywords(&[STARTING, AT]) {
+                    Some(self.parse_expr()?)
+                } else {
+                    None
+                };
+                Ok(WithOptionValue::Refresh(RefreshOptionValue::Every(RefreshEveryOptionValue {
+                    interval,
+                    starting_at,
+                })))
+            } else {
+                Ok(WithOptionValue::Ident(ident!("every")))
             }
         } else if let Some(value) = self.maybe_parse(Parser::parse_value) {
             Ok(WithOptionValue::Value(value))

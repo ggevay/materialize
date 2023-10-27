@@ -26,7 +26,7 @@ use mz_sql::ast::{
     CopyRelation, CopyStatement, InsertSource, Query, Raw, SetExpr, Statement, SubscribeStatement,
 };
 use mz_sql::catalog::RoleAttributes;
-use mz_sql::names::{PartialItemName, ResolvedIds};
+use mz_sql::names::{Aug, PartialItemName, ResolvedIds};
 use mz_sql::plan::{
     AbortTransactionPlan, CommitTransactionPlan, CreateRolePlan, Params, Plan, TransactionType,
 };
@@ -40,6 +40,9 @@ use opentelemetry::trace::TraceContextExt;
 use tokio::sync::{mpsc, oneshot, watch};
 use tracing::Instrument;
 use tracing_opentelemetry::OpenTelemetrySpanExt;
+use mz_sql::pure::materialized_view_option_contains_temporal;
+use mz_sql_parser::ast::CreateMaterializedViewStatement;
+use mz_storage_types::sources::Timeline;
 
 use crate::catalog::{CatalogItem, DataSourceDesc, Source};
 use crate::command::{
@@ -53,7 +56,7 @@ use crate::notice::AdapterNotice;
 use crate::session::{Session, TransactionOps, TransactionStatus};
 use crate::util::{ClientTransmitter, ResultExt};
 use crate::webhook::{AppendWebhookResponse, AppendWebhookValidator};
-use crate::{catalog, metrics, ExecuteContext};
+use crate::{catalog, metrics, ExecuteContext, TimestampProvider, TimelineContext};
 
 use super::ExecuteContextExtra;
 
@@ -689,6 +692,83 @@ impl Coordinator {
             Statement::CreateSubsource(_) => ctx.retire(Err(AdapterError::Unsupported(
                 "CREATE SUBSOURCE statements",
             ))),
+
+            Statement::CreateMaterializedView(CreateMaterializedViewStatement::<Aug>{
+                if_exists,
+                name,
+                columns,
+                in_cluster,
+                query,
+                with_options,
+            }) => {
+                // (This won't be the same timestamp as the system table inserts, unfortunately.)
+                let mz_now = if with_options.iter().any(|wo| materialized_view_option_contains_temporal(wo)) {
+                    let timeline_context = match self.validate_timeline_context(resolved_ids.0.clone()) {
+                        Ok(tc) => tc,
+                        Err(e) => return ctx.retire(Err(e.into())) /////// todo: provoke this in a test. See testdrive/timelines.td
+                    };
+                    let timeline = match timeline_context {
+                        TimelineContext::TimelineDependent(timeline) => {
+                            //// todo: is await ok here? What if it gets invalid by the time we get back control?
+                            timeline
+                        }
+                        TimelineContext::TimestampDependent
+                        | TimelineContext::TimestampIndependent => {
+                            // We default to EpochMilliseconds, similarly to `determine_timestamp_for`.
+                            // Note that we didn't accurately decide whether we are TimestampDependent
+                            // or TimestampIndependent, because for this we'd need to also check whether
+                            // `query.contains_temporal()`, similarly to how `peek_stage_validate` does.
+                            // However, this doesn't matter here, as we are just going to default to
+                            // EpochMilliseconds in both cases.
+                            ///////// todo: look up what code assumes EpochMilliseconds for when a mat view has mz_now in the WHERE
+                            Timeline::EpochMilliseconds
+                        }
+                    };
+                    self.oracle_read_ts(&timeline).await
+                    // TODO: It might be good to take into account `least_valid_read` in addition to
+                    // the `oracle_read_ts`, but there are two problems:
+                    // 1. At this point, we don't know which indexes would be used. We could do an
+                    // overestimation here by grabbing the ids of all indexes that are on ids
+                    // involved in the query. (We'd have to recursively follow view definitions,
+                    // similarly to `validate_timeline_context`.)
+                    // 2. For a peak, when the `least_valid_read` is later than the `oracle_read_ts`,
+                    // then the peak doesn't return before it completes at the chosen timestamp.
+                    // However, for a CRATE MATERIALIZED VIEW statement, it's not clear whether we
+                    // want to make it block until the chosen time. If it doesn't block, then the
+                    // initial refresh wouldn't be linearized with the CREATE MATERIALIZED VIEW
+                    // statement.
+                    //
+                    // Note: The Adapter is usually keeping a read hold of all objects at the oracle
+                    // read timestamp, so `least_valid_read` usually won't actually be later than
+                    // the `oracle_read_ts`. (see `Coordinator::advance_timelines`)
+                    //
+                    // Note 2: If we choose a timestamp here that is earlier than
+                    // `least_valid_read`, that is somewhat bad, but not catastrophic: The only
+                    // bad thing that happens is that we won't perform that refresh that was
+                    // specified to be at `mz_now()` (which is usually the initial refresh)
+                    // (similarly to how we don't perform refreshes that were specified to be in the
+                    // past).
+                } else {
+                    None
+                };
+
+                let owned_catalog = self.owned_catalog();
+                let catalog = owned_catalog.for_session(ctx.session());
+
+                let purified_stmt = Statement::CreateMaterializedView(CreateMaterializedViewStatement::<Aug>{
+                    if_exists,
+                    name,
+                    columns,
+                    in_cluster,
+                    query,
+                    with_options: mz_sql::pure::purify_create_materialized_view_options(catalog, mz_now, with_options),
+                });
+
+                match self.plan_statement(ctx.session(), purified_stmt, &params, &resolved_ids) {
+                    Ok(plan) => self.sequence_plan(ctx, plan, resolved_ids).await,
+                    Err(e) => ctx.retire(Err(e)),
+                }
+            }
 
             // All other statements are handled immediately.
             _ => match self.plan_statement(ctx.session(), stmt, &params, &resolved_ids) {
