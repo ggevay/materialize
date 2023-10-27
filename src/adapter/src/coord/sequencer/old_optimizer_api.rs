@@ -176,6 +176,8 @@ impl Coordinator {
                     up_to,
                     // No `FORCE NOT NULL` for subscribes
                     non_null_assertions: vec![],
+                    // No `REFRESH EVERY` for subscribes
+                    refresh_schedule: None,
                 };
                 let sink_name = format!("subscribe-{}", sink_id);
                 self.dataflow_builder(cluster_id)
@@ -193,6 +195,8 @@ impl Coordinator {
                     up_to,
                     // No `FORCE NOT NULL` for subscribes
                     non_null_assertions: vec![],
+                    // No `REFRESH EVERY` for subscribes
+                    refresh_schedule: None,
                 };
                 let mut dataflow = DataflowDesc::new(format!("subscribe-{}", id));
                 let mut dataflow_builder = self.dataflow_builder(cluster_id);
