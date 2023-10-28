@@ -1293,6 +1293,12 @@ where
         &mut self,
         updates: &mut BTreeMap<GlobalId, ChangeBatch<Self::Timestamp>>,
     ) {
+        for (id, t) in &*updates {
+            if id.to_string() == "u2" || id.to_string() == "u1" {
+                println!("### id: {}, t: {:?}", id, t);
+            }
+        }
+
         // Location to record consequences that we need to act on.
         let mut collections_net = BTreeMap::new();
         let mut exports_net = BTreeMap::new();
