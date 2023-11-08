@@ -1804,13 +1804,14 @@ mod builtin_migration_tests {
     use std::collections::{BTreeMap, BTreeSet};
 
     use itertools::Itertools;
+    use timely::progress::Antichain;
     use mz_catalog::memory::objects::Table;
 
     use mz_controller_types::ClusterId;
     use mz_expr::MirRelationExpr;
     use mz_ore::now::NOW_ZERO;
 
-    use mz_repr::{GlobalId, RelationDesc, RelationType, ScalarType};
+    use mz_repr::{GlobalId, RelationDesc, RelationType, ScalarType, Timestamp};
     use mz_sql::catalog::CatalogDatabase;
     use mz_sql::names::{
         ItemQualifiers, QualifiedItemName, ResolvedDatabaseSpecifier, ResolvedIds,
@@ -1888,6 +1889,7 @@ mod builtin_migration_tests {
                         cluster_id: ClusterId::User(1),
                         non_null_assertions: vec![],
                         refresh_schedule: None,
+                        initial_since: Antichain::from_elem(Timestamp::MIN), ///// todo: is this ok?
                     })
                 }
                 SimplifiedItem::Index { on } => {

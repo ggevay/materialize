@@ -1056,7 +1056,7 @@ impl Coordinator {
                 cluster_id,
                 non_null_assertions,
                 refresh_schedule,
-                ////////// todo: save since here
+                initial_since: since.clone(),
             }),
             owner_id: *session.current_role_id(),
         });

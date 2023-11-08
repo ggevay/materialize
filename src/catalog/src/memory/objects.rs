@@ -20,6 +20,7 @@ use mz_adapter_types::connection::ConnectionId;
 use once_cell::sync::Lazy;
 use serde::ser::SerializeSeq;
 use serde::{Deserialize, Serialize};
+use timely::progress::Antichain;
 
 use mz_compute_client::logging::LogVariant;
 use mz_controller::clusters::{
@@ -30,7 +31,7 @@ use mz_expr::{MirScalarExpr, OptimizedMirRelationExpr};
 use mz_ore::collections::CollectionExt;
 use mz_repr::adt::mz_acl_item::{AclMode, PrivilegeMap};
 use mz_repr::role_id::RoleId;
-use mz_repr::{GlobalId, RelationDesc};
+use mz_repr::{GlobalId, RelationDesc, Timestamp};
 use mz_sql::ast::display::AstDisplay;
 use mz_sql::ast::Expr;
 use mz_sql::catalog::{
@@ -673,6 +674,7 @@ pub struct MaterializedView {
     pub cluster_id: ClusterId,
     pub non_null_assertions: Vec<usize>,
     pub refresh_schedule: Option<RefreshSchedule>,
+    pub initial_since: Antichain<Timestamp>,
 }
 
 #[derive(Debug, Clone, Serialize)]
