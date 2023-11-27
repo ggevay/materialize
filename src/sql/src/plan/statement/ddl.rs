@@ -15,6 +15,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write;
 use std::iter;
+use std::str::FromStr;
 
 use itertools::{Either, Itertools};
 use mz_controller_types::{ClusterId, ReplicaId, DEFAULT_REPLICA_LOGGING_INTERVAL_MICROS};
@@ -27,22 +28,11 @@ use mz_proto::RustType;
 use mz_repr::adt::interval::Interval;
 use mz_repr::adt::mz_acl_item::{MzAclItem, PrivilegeMap};
 use mz_repr::adt::system::Oid;
-use mz_repr::refresh_schedule::RefreshSchedule;
+use mz_repr::refresh_schedule::{RefreshEvery, RefreshSchedule};
 use mz_repr::role_id::RoleId;
 use mz_repr::{strconv, ColumnName, ColumnType, GlobalId, RelationDesc, RelationType, ScalarType};
 use mz_sql_parser::ast::display::comma_separated;
-use mz_sql_parser::ast::{
-    AlterClusterAction, AlterClusterStatement, AlterConnectionAction, AlterConnectionOption,
-    AlterConnectionOptionName, AlterRoleOption, AlterRoleStatement, AlterSetClusterStatement,
-    AlterSinkAction, AlterSinkStatement, AlterSourceAction, AlterSourceAddSubsourceOption,
-    AlterSourceAddSubsourceOptionName, AlterSourceStatement, AlterSystemResetAllStatement,
-    AlterSystemResetStatement, AlterSystemSetStatement, CommentObjectType, CommentStatement,
-    CreateConnectionOption, CreateConnectionOptionName, CreateConnectionType, CreateTypeListOption,
-    CreateTypeListOptionName, CreateTypeMapOption, CreateTypeMapOptionName, DeferredItemName,
-    DocOnIdentifier, DocOnSchema, DropOwnedStatement, MaterializedViewOption,
-    MaterializedViewOptionName, SetRoleVar, UnresolvedItemName, UnresolvedObjectName,
-    UnresolvedSchemaName, Value, RefreshOptionValue
-};
+use mz_sql_parser::ast::{AlterClusterAction, AlterClusterStatement, AlterConnectionAction, AlterConnectionOption, AlterConnectionOptionName, AlterRoleOption, AlterRoleStatement, AlterSetClusterStatement, AlterSinkAction, AlterSinkStatement, AlterSourceAction, AlterSourceAddSubsourceOption, AlterSourceAddSubsourceOptionName, AlterSourceStatement, AlterSystemResetAllStatement, AlterSystemResetStatement, AlterSystemSetStatement, CommentObjectType, CommentStatement, CreateConnectionOption, CreateConnectionOptionName, CreateConnectionType, CreateTypeListOption, CreateTypeListOptionName, CreateTypeMapOption, CreateTypeMapOptionName, DeferredItemName, DocOnIdentifier, DocOnSchema, DropOwnedStatement, MaterializedViewOption, MaterializedViewOptionName, SetRoleVar, UnresolvedItemName, UnresolvedObjectName, UnresolvedSchemaName, Value, RefreshOptionValue, RefreshAtOptionValue, RefreshEveryOptionValue};
 use mz_sql_parser::ident;
 use mz_storage_types::connections::inline::{ConnectionAccess, ReferencedConnection};
 use mz_storage_types::connections::Connection;
@@ -61,7 +51,6 @@ use mz_storage_types::sources::{
     TestScriptSourceConnection, Timeline, UnplannedSourceEnvelope, UpsertStyle,
 };
 use prost::Message;
-use mz_ore::option::FallibleMapExt;
 
 use crate::ast::display::AstDisplay;
 use crate::ast::{
@@ -96,7 +85,7 @@ use crate::names::{
 use crate::normalize::{self, ident};
 use crate::plan::error::PlanError;
 use crate::plan::expr::ColumnRef;
-use crate::plan::query::{scalar_type_from_catalog, ExprContext, QueryLifetime};
+use crate::plan::query::{scalar_type_from_catalog, ExprContext, QueryLifetime, plan_expr};
 use crate::plan::scope::Scope;
 use crate::plan::statement::ddl::connection::{INALTERABLE_OPTIONS, MUTUALLY_EXCLUSIVE_SETS};
 use crate::plan::statement::{scl, StatementContext, StatementDesc};
@@ -2086,30 +2075,90 @@ pub fn plan_create_materialized_view(
         seen: _,
     }: MaterializedViewOptionExtracted = stmt.with_options.try_into()?;
 
-    let xx: Vec<RefreshOptionValue<Aug>> = refresh;
+    let refresh_schedule = {
+        let mut refresh_schedule = RefreshSchedule::empty();
+        let mut on_commits_seen = 0;
+        for refresh_option_value in refresh {
+            match refresh_option_value {
+                RefreshOptionValue::OnCommit => {
+                    on_commits_seen += 1;
+                }
+                RefreshOptionValue::AtCreation => {
+                    unreachable!("REFRESH AT CREATION should have been purified away")
+                }
+                RefreshOptionValue::At(RefreshAtOptionValue{time}) => {
+                    let ecx = &ExprContext {
+                        qcx: &QueryContext::root(scx, QueryLifetime::OneShot),
+                        name: "REFRESH AT",
+                        scope: &Scope::empty(),
+                        relation_type: &RelationType::empty(),
+                        allow_aggregates: false,
+                        allow_subqueries: false,
+                        allow_parameters: false,
+                        allow_windows: false,
+                    };
+                    let hir = plan_expr(ecx, &time)?.type_as(ecx, &ScalarType::MzTimestamp)?;
+                    let timestamp = hir.into_literal_mz_timestamp().ok_or_else(|| sql_err!("REFRESH AT argument must not refer to any column (i.e., must be a constant expression)"))?;
+                    refresh_schedule.ats.push(timestamp);
+                }
+                RefreshOptionValue::Every(RefreshEveryOptionValue {interval, starting_at}) => {
+                    let interval = Interval::from_str(interval.as_str())?;
+                    if interval.as_microseconds() <= 0 {
+                        sql_bail!(
+                            "REFRESH INTERVAL must be positive; got: {}",
+                            interval
+                        );
+                    }
+                    if interval.as_microseconds() > Interval::new(0, 27, 0).as_microseconds() {
+                        // This limitation is because we want Intervals to be cleanly convertable
+                        // to a unix epoch timestamp difference. When it's at least 1 month, then
+                        // this is not true anymore, because months have variable lengths.
+                        sql_bail!(
+                            "REFRESH INTERVAL too big: {}. Currently, only intervals not larger than 27 days are supported.",
+                            interval
+                        );
+                    }
 
-    // let refresh_schedule = match refresh {
-    //
-    // };
+                    let starting_at = starting_at.expect("STARTING AT should have been filled in by purification");
+                    let ecx = &ExprContext {
+                        qcx: &QueryContext::root(scx, QueryLifetime::OneShot),
+                        name: "REFRESH EVERY ... STARTING AT",
+                        scope: &Scope::empty(),
+                        relation_type: &RelationType::empty(),
+                        allow_aggregates: false,
+                        allow_subqueries: false,
+                        allow_parameters: false,
+                        allow_windows: false,
+                    };
+                    let starting_at_hir = plan_expr(ecx, &starting_at)?.type_as(ecx, &ScalarType::MzTimestamp)?;
+                    let starting_at_const = starting_at_hir.into_literal_mz_timestamp().ok_or_else(|| sql_err!("REFRESH EVERY ... STARTING AT argument must not refer to any column (i.e., must be a constant expression)"))?;
 
-    let refresh_schedule = None;
+                    refresh_schedule.everies.push(RefreshEvery {
+                        interval,
+                        starting_at: starting_at_const,
+                    });
+                }
+            }
+        }
 
-    // let refresh_schedule = refresh.try_map(|interval| {
-    //     scx.require_feature_flag(&ENABLE_REFRESH_EVERY_MVS)?;
-    //     if interval.as_microseconds() <= 0 {
-    //         sql_bail!(
-    //             "REFRESH INTERVAL must be positive; got: {}",
-    //             interval
-    //         );
-    //     }
-    //     if interval.as_microseconds() > Interval::new(12, 0, 0).as_microseconds() {
-    //         sql_bail!(
-    //             "REFRESH INTERVAL too big: {}",
-    //             interval
-    //         );
-    //     }
-    //     Ok(RefreshSchedule {interval: interval.clone()})
-    // })?;
+        if on_commits_seen > 1 {
+            sql_bail!("REFRESH ON COMMIT can be given only once");
+        }
+        if on_commits_seen > 0 && refresh_schedule != RefreshSchedule::empty() {
+            sql_bail!("REFRESH ON COMMIT is not compatible with any of the other REFRESH options");
+        }
+        // Note: Seeing no REFRESH options at all (not even REFRESH ON COMMIT) should be acceptable:
+        // even though purification inserts REFRESH ON COMMIT if no other REFRESH option was given,
+        // we can't rely on this behavior in planning, because this won't happen for old
+        // materialized view, which were created before this feature was introduced.
+
+        if refresh_schedule == RefreshSchedule::empty() {
+            None
+        } else {
+            scx.require_feature_flag(&ENABLE_REFRESH_EVERY_MVS)?;
+            Some(refresh_schedule)
+        }
+    };
 
     if !assert_not_null.is_empty() {
         scx.require_feature_flag(&crate::session::vars::ENABLE_ASSERT_NOT_NULL)?;

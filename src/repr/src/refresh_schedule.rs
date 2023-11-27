@@ -17,8 +17,19 @@ include!(concat!(env!("OUT_DIR"), "/mz_repr.refresh_schedule.rs"));
 
 #[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
 pub struct RefreshSchedule {
+    // `REFRESH EVERY`s
     pub everies: Vec<RefreshEvery>,
+    // `REFRESH AT`s
     pub ats: Vec<Timestamp>,
+}
+
+impl RefreshSchedule {
+    pub fn empty() -> RefreshSchedule {
+        RefreshSchedule {
+            everies: Vec::new(),
+            ats: Vec::new(),
+        }
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
