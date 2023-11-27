@@ -12,7 +12,7 @@
 include!(concat!(env!("OUT_DIR"), "/mz_storage_types.collections.rs"));
 
 use mz_proto::{IntoRustIfSome, ProtoType, RustType, TryFromProtoError};
-use mz_repr::{GlobalId as RustGlobalId, Timestamp as RustTimestamp};
+use mz_repr::{GlobalId as RustGlobalId, ProtoTimestamp, Timestamp as RustTimestamp};
 use timely::progress::Antichain;
 
 use crate::controller::DurableCollectionMetadata as RustDurableCollectionMetadata;
@@ -41,21 +41,10 @@ impl RustType<GlobalId> for RustGlobalId {
     }
 }
 
-impl RustType<Timestamp> for RustTimestamp {
-    fn into_proto(&self) -> Timestamp {
-        Timestamp {
-            internal: self.into(),
-        }
-    }
-
-    fn from_proto(proto: Timestamp) -> Result<Self, TryFromProtoError> {
-        Ok(RustTimestamp::new(proto.internal))
-    }
-}
-
 impl<T> RustType<TimestampAntichain> for Antichain<T>
 where
-    T: RustType<Timestamp> + Clone + timely::PartialOrder,
+    //T: RustType<ProtoTimestamp> + Clone + timely::PartialOrder,
+    T: Clone + timely::PartialOrder,
 {
     fn into_proto(&self) -> TimestampAntichain {
         TimestampAntichain {

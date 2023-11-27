@@ -10,6 +10,7 @@
 syntax = "proto3";
 
 import "google/protobuf/empty.proto";
+import "repr/src/timestamp.proto";
 
 package mz_storage_types.collections;
 
@@ -22,13 +23,8 @@ message GlobalId {
     }
 }
 
-// Opaque timestamp type that is specific to Materialize.
-message Timestamp {
-    uint64 internal = 1;
-}
-
 message TimestampAntichain {
-    repeated Timestamp elements = 1;
+    repeated mz_repr.timestamp.ProtoTimestamp elements = 1;
 }
 
 message SinkAsOf {

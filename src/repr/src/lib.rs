@@ -130,4 +130,4 @@ pub use crate::scalar::{
     arb_datum, arb_range_type, ArrayRustType, AsColumnType, Datum, DatumType, PropArray, PropDatum,
     PropDict, PropList, ProtoScalarType, ScalarBaseType, ScalarType,
 };
-pub use crate::timestamp::{Timestamp, TimestampManipulation};
+pub use crate::timestamp::{ProtoTimestamp, Timestamp, TimestampManipulation};

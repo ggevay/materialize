@@ -14,8 +14,11 @@ use std::time::Duration;
 use dec::TryFromDecimalError;
 use proptest_derive::Arbitrary;
 use serde::{Deserialize, Serialize, Serializer};
+use mz_proto::{RustType, TryFromProtoError};
 
 use crate::adt::numeric::Numeric;
+
+include!(concat!(env!("OUT_DIR"), "/mz_repr.timestamp.rs"));
 
 /// System-wide timestamp type.
 #[derive(
@@ -33,6 +36,18 @@ use crate::adt::numeric::Numeric;
 pub struct Timestamp {
     /// note no `pub`.
     internal: u64,
+}
+
+impl RustType<ProtoTimestamp> for Timestamp {
+    fn into_proto(&self) -> ProtoTimestamp {
+        ProtoTimestamp {
+            internal: self.into(),
+        }
+    }
+
+    fn from_proto(proto: ProtoTimestamp) -> Result<Self, TryFromProtoError> {
+        Ok(Timestamp::new(proto.internal))
+    }
 }
 
 pub trait TimestampManipulation:
