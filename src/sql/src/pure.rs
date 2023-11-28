@@ -1468,7 +1468,15 @@ pub fn materialized_view_option_contains_temporal(mvo: &MaterializedViewOption<A
             visitor.visit_expr(starting_at);
             visitor.contains_temporal
         }
-        Some(WithOptionValue::Refresh(RefreshOptionValue::AtCreation)) => true,
+        Some(WithOptionValue::Refresh(RefreshOptionValue::Every(RefreshEveryOptionValue{interval: _, starting_at: None}))) => {
+            // For a `REFRESH EVERY` without a `STARTING AT`, purification will default the
+            // `STARTING AT` to `mz_now()`.
+            true
+        },
+        Some(WithOptionValue::Refresh(RefreshOptionValue::AtCreation)) => {
+            // `REFRESH AT CREATION` will be purified to `REFRESH AT mz_now()`.
+            true
+        },
         _ => false,
     }
 }
