@@ -2131,7 +2131,7 @@ pub fn plan_create_materialized_view(
                         allow_parameters: false,
                         allow_windows: false,
                     };
-                    let starting_at_hir = plan_expr(ecx, &starting_at)?.type_as(ecx, &ScalarType::MzTimestamp)?;
+                    let starting_at_hir = plan_expr(ecx, &starting_at)?.cast_to(ecx, CastContext::Implicit, &ScalarType::MzTimestamp)?;
                     let starting_at_const = starting_at_hir.into_literal_mz_timestamp().ok_or_else(|| sql_err!("REFRESH EVERY ... STARTING AT argument must not refer to any column (i.e., must be a constant expression)"))?;
 
                     refresh_schedule.everies.push(RefreshEvery {
