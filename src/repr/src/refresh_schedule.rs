@@ -7,7 +7,6 @@
 // the Business Source License, use of this software will be governed
 // by the Apache License, Version 2.0.
 
-use std::cmp::min;
 use serde::{Deserialize, Serialize};
 use mz_proto::{ProtoType, RustType, TryFromProtoError};
 use mz_proto::IntoRustIfSome;
@@ -39,7 +38,15 @@ impl RefreshSchedule {
             timestamp.round_up(refresh_every)
         }).min();
         let next_at = self.ats.iter().filter(|at| **at >= timestamp).min().cloned();
-        min(next_every, next_at)
+
+        //////////
+        // let xx = min(next_every, next_at);
+        // println!("###### round_up_timestamp(self: {:?}, timestamp: {}) -> {:?}", self, timestamp, xx);
+        // xx
+
+        // Note: `min(next_every, next_at)` wouldn't do what we want, because None is smaller than
+        // any Some, but we'd need None to be bigger than any Some.
+        next_every.into_iter().chain(next_at).min()
     }
 }
 
