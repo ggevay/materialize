@@ -40,9 +40,8 @@ impl RefreshSchedule {
         let next_at = self.ats.iter().filter(|at| **at >= timestamp).min().cloned();
 
         //////////
-        // let xx = min(next_every, next_at);
-        // println!("###### round_up_timestamp(self: {:?}, timestamp: {}) -> {:?}", self, timestamp, xx);
-        // xx
+        let xx = next_every.into_iter().chain(next_at).min();
+        println!("###### round_up_timestamp(self: {:?}, timestamp: {}) -> {:?}", self, timestamp, xx);
 
         // Note: `min(next_every, next_at)` wouldn't do what we want, because None is smaller than
         // any Some, but we'd need None to be bigger than any Some.

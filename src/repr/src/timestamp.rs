@@ -212,7 +212,7 @@ impl Timestamp {
             // - The interval is positive, so the cast to u64 won't underflow.
             assert_eq!(interval.months, 0);
             let interval: u64 = interval.as_milliseconds().try_into().unwrap();
-            Self {internal: ((self.internal - starting_at.internal - 1) / interval + 1) * interval}
+            Self {internal: starting_at.internal + ((self.internal - starting_at.internal - 1) / interval + 1) * interval}
         }
     }
 }
