@@ -17,6 +17,7 @@ use serde::{Deserialize, Serialize, Serializer};
 use mz_proto::{RustType, TryFromProtoError};
 
 use crate::adt::numeric::Numeric;
+use crate::refresh_schedule::RefreshEvery;
 
 include!(concat!(env!("OUT_DIR"), "/mz_repr.timestamp.rs"));
 
@@ -197,10 +198,22 @@ impl Timestamp {
         self.checked_sub(1)
     }
 
-    pub fn round_up(&self, interval: u64) -> Self {
-        ////////////self.saturating_add(Self::new(interval - self.internal % interval))
-
-        Timestamp::new(((self.internal + interval - 1) / interval) * interval)
+    /// ///// todo: comment
+    pub fn round_up(&self, RefreshEvery {interval, starting_at}: &RefreshEvery) -> Self {
+        if self <= starting_at {
+            // It's important to include the == case here, because below we'll want
+            // `self - starting_at - 1`
+            // to not underflow.
+            starting_at.clone()
+        } else {
+            // Planning ensured that
+            // - interval.months == 0, so we don't need to deal with months being of variable size.
+            // - The interval can be max 27 days, so the cast to u64 won't overflow.
+            // - The interval is positive, so the cast to u64 won't underflow.
+            assert_eq!(interval.months, 0);
+            let interval: u64 = interval.as_milliseconds().try_into().unwrap();
+            Self {internal: ((self.internal - starting_at.internal - 1) / interval + 1) * interval}
+        }
     }
 }
 

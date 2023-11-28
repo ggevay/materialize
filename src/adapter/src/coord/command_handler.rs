@@ -709,7 +709,6 @@ impl Coordinator {
                     };
                     let timeline = match timeline_context {
                         TimelineContext::TimelineDependent(timeline) => {
-                            //// todo: is await ok here? What if it gets invalid by the time we get back control?
                             timeline
                         }
                         TimelineContext::TimestampDependent

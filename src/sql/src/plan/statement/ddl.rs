@@ -2113,6 +2113,7 @@ pub fn plan_create_materialized_view(
                         // This limitation is because we want Intervals to be cleanly convertable
                         // to a unix epoch timestamp difference. When it's at least 1 month, then
                         // this is not true anymore, because months have variable lengths.
+                        // See `Timestamp::round_up`.
                         sql_bail!(
                             "REFRESH INTERVAL too big: {}. Currently, only intervals not larger than 27 days are supported.",
                             interval

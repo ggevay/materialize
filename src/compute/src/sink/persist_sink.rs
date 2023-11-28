@@ -38,8 +38,8 @@ use timely::dataflow::{Scope, Stream};
 use timely::dataflow::operators::generic::builder_rc::OperatorBuilder;
 use timely::progress::{Antichain, Timestamp as TimelyTimestamp};
 use timely::PartialOrder;
-use tracing::log::{debug, info};
 use tracing::trace;
+use mz_ore::vec::VecExt;
 
 use crate::compute_state::ComputeState;
 use crate::render::sinks::SinkRender;
@@ -64,25 +64,8 @@ where
         let mut desired_collection = sinked_collection.map(Ok).concat(&err_collection.map(Err));
 
         // If `REFRESH EVERY` was specified, round up timestamps.
-        if let Some(RefreshSchedule {everies: interval, ..}) = &sink.refresh_schedule {
-            let is_initial_hydration = is_initial_hydration(
-                compute_state,
-                &self.storage_metadata,
-                sink_id,
-            );
-            let initial_since = if !is_initial_hydration {
-                None
-            } else {
-                Some(as_of.clone())
-            };
-            info!(
-                "REFRESH EVERY MV's persist_sink ({}/{}) initial_since: {:?}",
-                sink_id,
-                self.storage_metadata.data_shard,
-                initial_since,
-            );
-            // `as` conversion ok, because we made sure in the planning that this is not too big.
-            desired_collection = round_up(desired_collection, interval[0].interval.as_milliseconds() as u64, initial_since); /////// [0]
+        if let Some(refresh_schedule) = &sink.refresh_schedule {
+            desired_collection = round_up(desired_collection, refresh_schedule.clone());
         }
 
         if sink.up_to != Antichain::default() {
@@ -1210,7 +1193,7 @@ where
 /// TODO: comment
 /// This currently only works with 1-dim timestamps. (Not an issue for WMR, because iteration
 /// numbers should disappear by the time the data gets to the Persist sink.)
-fn round_up<G>(coll: Collection<G, Result<Row, DataflowError>, Diff>, refresh_interval: u64, initial_since: Option<Antichain<Timestamp>>) -> Collection<G, Result<Row, DataflowError>, Diff>
+fn round_up<G>(coll: Collection<G, Result<Row, DataflowError>, Diff>, refresh_schedule: RefreshSchedule) -> Collection<G, Result<Row, DataflowError>, Diff>
     where
         G: Scope<Timestamp = Timestamp>,
 {
@@ -1224,7 +1207,16 @@ fn round_up<G>(coll: Collection<G, Result<Row, DataflowError>, Diff>, refresh_in
             let ac = frontiers.into_element();
             match ac.frontier().to_owned().into_option() {
                 Some(ts) => {
-                    capability.as_mut().unwrap().downgrade(&ts.round_up(refresh_interval));
+                    match refresh_schedule.round_up_timestamp(ts) {
+                        Some(rounded_up_ts) => {
+                            capability.as_mut().unwrap().downgrade(&rounded_up_ts);
+                        }
+                        None => {
+                            // We are past the last refresh. Drop the capability to signal that we
+                            // are done.
+                            capability = None;
+                        }
+                    }
                 }
                 None => {
                     capability = None;
@@ -1232,22 +1224,19 @@ fn round_up<G>(coll: Collection<G, Result<Row, DataflowError>, Diff>, refresh_in
             }
             input.for_each(|_cap, data| {
                 data.swap(&mut buffer);
-                for (_d, t, _r) in buffer.iter_mut() {
-                    // We do the rounding up, unless it's the initial_since.
-                    let do_it = match &initial_since {
-                        None => true,
-                        Some(initial_since) => match initial_since.as_option() {
-                            None => true,
-                            Some(initial_since) => t != initial_since, /////// todo: or `t > initial_since` would be more future-proof
+                buffer.drain_filter_swapping(|(_d, ts, _r)| {
+                    ///////// todo: cache it for 1 previously seen timestamp.
+                    match refresh_schedule.round_up_timestamp(*ts) {
+                        Some(rounded_up_ts) => {
+                            *ts = rounded_up_ts;
+                            false
                         }
-                    };
-
-                    println!("############### initial_since: {:?}, t: {:?}, do_it: {}", initial_since, t, do_it);
-
-                    if do_it {
-                        *t = t.round_up(refresh_interval);
+                        None => {
+                            // This record is after the last refresh, so drop it.
+                            true
+                        },
                     }
-                }
+                });
                 output_buf.activate().session(capability.as_ref().unwrap()).give_container(&mut buffer);
             });
         }
@@ -1255,39 +1244,4 @@ fn round_up<G>(coll: Collection<G, Result<Row, DataflowError>, Diff>, refresh_in
 
     use differential_dataflow::AsCollection;
     output_stream.as_collection()
-}
-
-/// If the [since, upper) of the target shard is empty, we haven't yet completed the
-/// initial hydration.
-fn is_initial_hydration(
-    compute_state: &mut ComputeState,
-    target: &CollectionMetadata,
-    sink_id: GlobalId,
-) -> bool {
-    // Open the shard for a moment to check its frontiers.
-    let persist_location = target.persist_location.clone();
-    let persist_client = futures::executor::block_on(
-        compute_state.persist_clients.open(persist_location)
-    ).expect("could not open persist client");
-    let shard_id = target.data_shard;
-    let target_relation_desc = target.relation_desc.clone();
-    let (writer, reader) = futures::executor::block_on(persist_client
-        .open::<SourceData, (), Timestamp, Diff>(
-            shard_id,
-            Arc::new(target_relation_desc),
-            Arc::new(UnitSchema),
-            Diagnostics {
-                shard_name: sink_id.to_string(),
-                handle_purpose: format!(
-                    "compute::persist_sink::mint_batch_descriptions {}",
-                    sink_id
-                ),
-            },
-        )).expect("could not open persist shard");
-
-    let since = reader.since();
-    let upper = writer.upper();
-    debug!("is_initial_hydration ({}/{}) since: {:?}, upper: {:?})", sink_id, shard_id, since, upper);
-
-    PartialOrder::less_equal(upper, since)
 }

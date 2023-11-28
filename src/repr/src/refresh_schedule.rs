@@ -7,6 +7,7 @@
 // the Business Source License, use of this software will be governed
 // by the Apache License, Version 2.0.
 
+use std::cmp::min;
 use serde::{Deserialize, Serialize};
 use mz_proto::{ProtoType, RustType, TryFromProtoError};
 use mz_proto::IntoRustIfSome;
@@ -29,6 +30,16 @@ impl RefreshSchedule {
             everies: Vec::new(),
             ats: Vec::new(),
         }
+    }
+
+    /// Rounds up the timestamp to the time of the next refresh.
+    /// Returns None if there is no next refresh.
+    pub fn round_up_timestamp(&self, timestamp: Timestamp) -> Option<Timestamp> {
+        let next_every = self.everies.iter().map(|refresh_every| {
+            timestamp.round_up(refresh_every)
+        }).min();
+        let next_at = self.ats.iter().filter(|at| **at >= timestamp).min().cloned();
+        min(next_every, next_at)
     }
 }
 
