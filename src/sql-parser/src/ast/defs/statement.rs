@@ -3171,10 +3171,11 @@ impl<T: AstInfo> AstDisplay for WithOptionValue<T> {
                 interval,
                 starting_at,
             })) => {
-                f.write_str("EVERY ");
+                f.write_str("EVERY '");
                 f.write_str(interval);
+                f.write_str("'");
                 if let Some(starting_at) = starting_at {
-                    f.write_str(" ");
+                    f.write_str(" STARTING AT ");
                     f.write_node(starting_at)
                 }
             }
