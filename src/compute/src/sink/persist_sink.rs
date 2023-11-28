@@ -1222,23 +1222,25 @@ fn round_up<G>(coll: Collection<G, Result<Row, DataflowError>, Diff>, refresh_sc
                     capability = None;
                 }
             }
-            input.for_each(|_cap, data| {
-                data.swap(&mut buffer);
-                buffer.drain_filter_swapping(|(_d, ts, _r)| {
-                    ///////// todo: cache it for 1 previously seen timestamp.
-                    match refresh_schedule.round_up_timestamp(*ts) {
-                        Some(rounded_up_ts) => {
-                            *ts = rounded_up_ts;
-                            false
+            if capability.is_some() {
+                input.for_each(|_cap, data| {
+                    data.swap(&mut buffer);
+                    buffer.drain_filter_swapping(|(_d, ts, _r)| {
+                        ///////// todo: cache it for 1 previously seen timestamp.
+                        match refresh_schedule.round_up_timestamp(*ts) {
+                            Some(rounded_up_ts) => {
+                                *ts = rounded_up_ts;
+                                false
+                            }
+                            None => {
+                                // This record is after the last refresh, so drop it.
+                                true
+                            },
                         }
-                        None => {
-                            // This record is after the last refresh, so drop it.
-                            true
-                        },
-                    }
+                    });
+                    output_buf.activate().session(capability.as_ref().unwrap()).give_container(&mut buffer);
                 });
-                output_buf.activate().session(capability.as_ref().unwrap()).give_container(&mut buffer);
-            });
+            }
         }
     });
 
