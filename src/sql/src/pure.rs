@@ -1501,7 +1501,7 @@ pub fn purify_create_materialized_view_options(
         let item = catalog
             .resolve_item(&PartialItemName {
                 database: None,
-                schema: None,
+                schema: Some("pg_catalog".to_string()),
                 item: "mz_timestamp".to_string(),
             })
             .expect("mz_timestamp should exist");
