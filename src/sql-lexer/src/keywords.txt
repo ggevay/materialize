@@ -27,6 +27,7 @@ Access
 Add
 Addresses
 Aggregate
+Aligned
 All
 Alter
 And
@@ -92,6 +93,7 @@ Create
 Createcluster
 Createdb
 Createrole
+Creation
 Cross
 Csv
 Current
@@ -132,6 +134,7 @@ Enforced
 Envelope
 Error
 Escape
+Every
 Except
 Execute
 Exists

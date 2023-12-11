@@ -104,6 +104,7 @@ pub mod explain;
 pub mod fixed_length;
 pub mod global_id;
 pub mod namespaces;
+pub mod refresh_schedule;
 pub mod role_id;
 pub mod stats;
 pub mod strconv;

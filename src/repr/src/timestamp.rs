@@ -12,11 +12,15 @@ use std::num::TryFromIntError;
 use std::time::Duration;
 
 use dec::TryFromDecimalError;
+use mz_proto::{RustType, TryFromProtoError};
 use proptest_derive::Arbitrary;
 use serde::{Deserialize, Serialize, Serializer};
 
 use crate::adt::numeric::Numeric;
+use crate::refresh_schedule::RefreshEvery;
 use crate::strconv::parse_timestamp;
+
+include!(concat!(env!("OUT_DIR"), "/mz_repr.timestamp.rs"));
 
 /// System-wide timestamp type.
 #[derive(
@@ -34,6 +38,18 @@ use crate::strconv::parse_timestamp;
 pub struct Timestamp {
     /// note no `pub`.
     internal: u64,
+}
+
+impl RustType<ProtoTimestamp> for Timestamp {
+    fn into_proto(&self) -> ProtoTimestamp {
+        ProtoTimestamp {
+            internal: self.into(),
+        }
+    }
+
+    fn from_proto(proto: ProtoTimestamp) -> Result<Self, TryFromProtoError> {
+        Ok(Timestamp::new(proto.internal))
+    }
 }
 
 pub trait TimestampManipulation:
@@ -181,6 +197,54 @@ impl Timestamp {
     /// which must only happen if the timestamp is `Timestamp::minimum()`.
     pub fn step_back(&self) -> Option<Self> {
         self.checked_sub(1)
+    }
+
+    /// Rounds up the timestamp to the time of the next refresh, according to the given periodic
+    /// refresh schedule.
+    ///
+    /// Returns None if an overflow happens.
+    pub fn round_up(
+        &self,
+        RefreshEvery {
+            interval,
+            aligned_to,
+        }: &RefreshEvery,
+    ) -> Option<Self> {
+        // Planning ensured that
+        // - interval.months == 0, so we don't need to deal with months being of variable size.
+        // - The interval can be max 27 days, so the cast to u64 won't overflow.
+        // - The interval is positive, so the cast to u64 won't underflow.
+        assert_eq!(interval.months, 0);
+        let interval: u64 = interval.as_milliseconds().try_into().unwrap();
+        // Rounds up `x` to the nearest multiple of `interval`.
+        let round_up_to_multiple_of_interval = |x: u64| -> Option<u64> {
+            assert_ne!(x, 0);
+            (((x - 1) / interval).checked_add(1)?).checked_mul(interval)
+        };
+        // Rounds down `x` to the nearest multiple of `interval`.
+        let round_down_to_multiple_of_interval = |x: u64| -> u64 { x / interval * interval };
+        let result = if self > aligned_to {
+            Self {
+                internal: aligned_to
+                    .internal
+                    .checked_add(round_up_to_multiple_of_interval(
+                        self.internal - aligned_to.internal,
+                    )?)?,
+            }
+        } else {
+            // Note: `self == aligned_to` has to be handled here, because in the other branch
+            // `x - 1` would underflow.
+            //
+            // Also, no need to check for overflows here, since all the numbers are either between
+            // `self` and `aligned_to`, or not greater than `aligned_to.internal - self.internal`.
+            Self {
+                internal: aligned_to.internal
+                    - round_down_to_multiple_of_interval(aligned_to.internal - self.internal),
+            }
+        };
+        assert!(result.internal >= self.internal);
+        assert!(result.internal - self.internal <= interval);
+        Some(result)
     }
 }
 
