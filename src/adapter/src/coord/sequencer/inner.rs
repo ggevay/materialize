@@ -35,6 +35,7 @@ use mz_repr::explain::json::json_string;
 use mz_repr::explain::{
     ExplainFormat, ExprHumanizer, ExprHumanizerExt, TransientItem, UsedIndexes,
 };
+use mz_repr::refresh_schedule::RefreshSchedule;
 use mz_repr::role_id::RoleId;
 use mz_repr::{ColumnName, Datum, Diff, GlobalId, RelationDesc, Row, RowArena, Timestamp};
 use mz_sql::ast::{ExplainStage, IndexOptionName};
@@ -964,6 +965,7 @@ impl Coordinator {
                     column_names,
                     cluster_id,
                     non_null_assertions,
+                    refresh_schedule,
                 },
             replace: _,
             drop_ids,
@@ -1013,6 +1015,7 @@ impl Coordinator {
             internal_view_id,
             column_names.clone(),
             non_null_assertions.clone(),
+            refresh_schedule.clone(),
             debug_name,
             optimizer_config,
         );
@@ -1041,6 +1044,7 @@ impl Coordinator {
                 resolved_ids,
                 cluster_id,
                 non_null_assertions,
+                refresh_schedule: refresh_schedule.clone(),
             }),
             owner_id: *session.current_role_id(),
         });
@@ -1065,9 +1069,28 @@ impl Coordinator {
                 let mut df_desc = global_lir_plan.unapply().0;
 
                 // Timestamp selection
-                let id_bundle = dataflow_import_id_bundle(&df_desc, cluster_id);
-                let since = coord.least_valid_read(&id_bundle);
-                df_desc.set_as_of(since.clone());
+                let as_of = {
+                    // Normally, `since` should be the least_valid_read.
+                    let id_bundle = dataflow_import_id_bundle(&df_desc, cluster_id);
+                    let mut as_of = coord.least_valid_read(&id_bundle);
+                    // But for MVs with non-trivial REFRESH schedules, it's important to set the
+                    // `since` to the first refresh. This is because we'd like queries on the MV to
+                    // block until the first refresh (rather than to show an empty MV).
+                    if let Some(refresh_schedule) = refresh_schedule {
+                        if let Some(ts) = as_of.as_option() {
+                            let mut rounded_up_as_of = Antichain::new();
+                            if let Some(rounded_up_ts) = refresh_schedule.round_up_timestamp(*ts) {
+                                rounded_up_as_of.insert(rounded_up_ts);
+                            } else {
+                                // No next refresh. `as_of` will be the empty antichain, so the
+                                // dataflow can terminate quickly.
+                            }
+                            as_of = rounded_up_as_of;
+                        }
+                    }
+                    as_of
+                };
+                df_desc.set_as_of(as_of.clone());
 
                 // Announce the creation of the materialized view source.
                 coord
@@ -1080,7 +1103,7 @@ impl Coordinator {
                             CollectionDescription {
                                 desc: output_desc,
                                 data_source: DataSource::Other(DataSourceOther::Compute),
-                                since: Some(since),
+                                since: Some(as_of),
                                 status_collection_id: None,
                             },
                         )],
@@ -3309,6 +3332,7 @@ impl Coordinator {
                 cluster_id,
                 broken,
                 non_null_assertions,
+                refresh_schedule,
             } => {
                 // Please see the docs on `explain_query_optimizer_pipeline` above.
                 self.explain_create_materialized_view_optimizer_pipeline(
@@ -3318,6 +3342,7 @@ impl Coordinator {
                     cluster_id,
                     broken,
                     non_null_assertions,
+                    refresh_schedule,
                     &config,
                     root_dispatch,
                 )
@@ -3649,6 +3674,7 @@ impl Coordinator {
         target_cluster_id: ClusterId,
         broken: bool,
         non_null_assertions: Vec<usize>,
+        refresh_schedule: Option<RefreshSchedule>,
         explain_config: &mz_repr::explain::ExplainConfig,
         _root_dispatch: tracing::Dispatch,
     ) -> Result<
@@ -3689,6 +3715,7 @@ impl Coordinator {
             internal_view_id,
             column_names.clone(),
             non_null_assertions,
+            refresh_schedule,
             debug_name,
             optimizer_config,
         );
