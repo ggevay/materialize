@@ -1783,6 +1783,7 @@ impl<'a> Fold<Raw, Aug> for NameResolver<'a> {
                     .collect(),
             ),
             ConnectionKafkaBroker(broker) => ConnectionKafkaBroker(self.fold_kafka_broker(broker)),
+            Refresh(refresh) => Refresh(self.fold_refresh_option_value(refresh)),
         }
     }
 

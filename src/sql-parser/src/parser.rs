@@ -3218,16 +3218,100 @@ impl<'a> Parser<'a> {
     fn parse_materialized_view_option_name(
         &mut self,
     ) -> Result<MaterializedViewOptionName, ParserError> {
-        self.expect_keywords(&[ASSERT, NOT, NULL])?;
-        Ok(MaterializedViewOptionName::AssertNotNull)
+        let name = match self.expect_one_of_keywords(&[ASSERT, REFRESH])? {
+            ASSERT => {
+                self.expect_keywords(&[NOT, NULL])?;
+                MaterializedViewOptionName::AssertNotNull
+            }
+            REFRESH => MaterializedViewOptionName::Refresh,
+            _ => unreachable!(),
+        };
+        Ok(name)
     }
 
     fn parse_materialized_view_option(
         &mut self,
     ) -> Result<MaterializedViewOption<Raw>, ParserError> {
         let name = self.parse_materialized_view_option_name()?;
-        let value = self.parse_optional_option_value()?;
+        let value = match name {
+            MaterializedViewOptionName::Refresh => {
+                Some(self.parse_materialized_view_refresh_option_value()?)
+            }
+            _ => self.parse_optional_option_value()?,
+        };
         Ok(MaterializedViewOption { name, value })
+    }
+
+    fn parse_materialized_view_refresh_option_value(
+        &mut self,
+    ) -> Result<WithOptionValue<Raw>, ParserError> {
+        let _ = self.consume_token(&Token::Eq);
+
+        if self.parse_keyword(ON) {
+            self.expect_keyword(COMMIT)?;
+            Ok(WithOptionValue::Refresh(RefreshOptionValue::OnCommit))
+        } else if self.parse_keyword(AT) {
+            if self.parse_keyword(CREATION) {
+                Ok(WithOptionValue::Refresh(RefreshOptionValue::AtCreation))
+            } else {
+                Ok(WithOptionValue::Refresh(RefreshOptionValue::At(
+                    RefreshAtOptionValue {
+                        time: self.parse_expr()?,
+                    },
+                )))
+            }
+        } else if self.parse_keyword(EVERY) {
+            match self
+                .parse_value()
+                .map_err(|ParserError { message, pos }| ParserError {
+                    message: "Error parsing interval of REFRESH EVERY: ".to_string() + &message,
+                    pos,
+                })? {
+                Value::String(interval) => {
+                    let aligned_to = if self.parse_keywords(&[ALIGNED, TO]) {
+                        Some(self.parse_expr()?)
+                    } else {
+                        None
+                    };
+                    Ok(WithOptionValue::Refresh(RefreshOptionValue::Every(
+                        RefreshEveryOptionValue {
+                            interval,
+                            aligned_to,
+                        },
+                    )))
+                }
+                v @ Value::Interval(_) => {
+                    parser_err!(
+                        self,
+                        self.peek_prev_pos(),
+                        format!(
+                            "Invalid value for REFRESH EVERY: `{v}`. The value should be a \
+                            string parseable as an interval, e.g., '1 day'. The INTERVAL keyword \
+                            should NOT be present!"
+                        )
+                    )
+                }
+                v => {
+                    parser_err!(
+                        self,
+                        self.peek_prev_pos(),
+                        format!(
+                            "Invalid value for REFRESH EVERY: `{v}`. The value should be a \
+                            string parseable as an interval, e.g., '1 day'."
+                        )
+                    )
+                }
+            }
+        } else {
+            parser_err!(
+                self,
+                self.peek_prev_pos(),
+                format!(
+                    "Invalid REFRESH option value. Expected ON COMMIT, AT, or EVERY. Instead got {}.",
+                    self.peek_token().map(|token| token.to_string()).unwrap_or("".to_string()),
+                )
+            )
+        }
     }
 
     fn parse_create_index(&mut self) -> Result<Statement<Raw>, ParserError> {

@@ -230,6 +230,10 @@ pub enum AdapterError {
     /// When performing an `ALTER` of some variety, re-planning the statement
     /// errored.
     InvalidAlter(&'static str, PlanError),
+    /// We refuse to create the materialized view, because it would never be refreshed, so it would
+    /// never be queryable. This can happen when the only specified refreshes are further back in
+    /// the past than the initial compaction window of the materialized view.
+    MaterializedViewWouldNeverRefresh(String),
 }
 
 impl AdapterError {
@@ -481,6 +485,8 @@ impl AdapterError {
                 VarError::RequiresFeatureFlag { .. } => SqlState::CANT_CHANGE_RUNTIME_PARAM,
             },
             AdapterError::InvalidAlter(_, _) => SqlState::FEATURE_NOT_SUPPORTED,
+            // `DATA_EXCEPTION`, similarly to `AbsurdSubscribeBounds`.
+            AdapterError::MaterializedViewWouldNeverRefresh(_) => SqlState::DATA_EXCEPTION,
         }
     }
 
@@ -705,6 +711,14 @@ impl fmt::Display for AdapterError {
             }
             AdapterError::InvalidAlter(t, e) => {
                 write!(f, "invalid ALTER {t}: {e}")
+            }
+            AdapterError::MaterializedViewWouldNeverRefresh(name) => {
+                write!(
+                    f,
+                    "Error when creating materialized view {}: All the specified refreshes \
+                    would be too far in the past, and thus they would never happen",
+                    name
+                )
             }
         }
     }
