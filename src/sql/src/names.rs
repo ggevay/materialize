@@ -34,7 +34,8 @@ use crate::ast::visit_mut::VisitMut;
 use crate::ast::{
     self, AstInfo, Cte, CteBlock, CteMutRec, DocOnIdentifier, GrantTargetSpecification,
     GrantTargetSpecificationInner, Ident, MutRecBlock, ObjectType, Query, Raw, RawClusterName,
-    RawDataType, RawItemName, Statement, UnresolvedItemName, UnresolvedObjectName,
+    RawDataType, RawItemName, RefreshAtOptionValue, RefreshEveryOptionValue, RefreshOptionValue,
+    Statement, UnresolvedItemName, UnresolvedObjectName,
 };
 use crate::catalog::{
     CatalogError, CatalogItem, CatalogItemType, CatalogTypeDetails, SessionCatalog,
@@ -1773,6 +1774,22 @@ impl<'a> Fold<Raw, Aug> for NameResolver<'a> {
                     .collect(),
             ),
             ConnectionKafkaBroker(broker) => ConnectionKafkaBroker(self.fold_kafka_broker(broker)),
+            Refresh(refresh) => match refresh {
+                RefreshOptionValue::OnCommit => Refresh(RefreshOptionValue::OnCommit),
+                RefreshOptionValue::AtCreation => Refresh(RefreshOptionValue::AtCreation),
+                RefreshOptionValue::At(RefreshAtOptionValue { time }) => {
+                    Refresh(RefreshOptionValue::At(RefreshAtOptionValue {
+                        time: self.fold_expr(time),
+                    }))
+                }
+                RefreshOptionValue::Every(RefreshEveryOptionValue {
+                    interval,
+                    aligned_to,
+                }) => Refresh(RefreshOptionValue::Every(RefreshEveryOptionValue {
+                    interval,
+                    aligned_to: aligned_to.map(|e| self.fold_expr(e)),
+                })),
+            },
         }
     }
 

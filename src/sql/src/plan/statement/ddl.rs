@@ -15,6 +15,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write;
 use std::iter;
+use std::str::FromStr;
 use std::time::Duration;
 
 use itertools::{Either, Itertools};
@@ -25,8 +26,10 @@ use mz_ore::cast::{CastFrom, TryCastFrom};
 use mz_ore::collections::HashSet;
 use mz_ore::str::StrExt;
 use mz_proto::RustType;
+use mz_repr::adt::interval::Interval;
 use mz_repr::adt::mz_acl_item::{MzAclItem, PrivilegeMap};
 use mz_repr::adt::system::Oid;
+use mz_repr::refresh_schedule::{RefreshEvery, RefreshSchedule};
 use mz_repr::role_id::RoleId;
 use mz_repr::{strconv, ColumnName, ColumnType, GlobalId, RelationDesc, RelationType, ScalarType};
 use mz_sql_parser::ast::display::comma_separated;
@@ -39,8 +42,8 @@ use mz_sql_parser::ast::{
     CreateConnectionOption, CreateConnectionOptionName, CreateConnectionType, CreateTypeListOption,
     CreateTypeListOptionName, CreateTypeMapOption, CreateTypeMapOptionName, DeferredItemName,
     DocOnIdentifier, DocOnSchema, DropOwnedStatement, MaterializedViewOption,
-    MaterializedViewOptionName, SetRoleVar, UnresolvedItemName, UnresolvedObjectName,
-    UnresolvedSchemaName, Value,
+    MaterializedViewOptionName, RefreshAtOptionValue, RefreshEveryOptionValue, RefreshOptionValue,
+    SetRoleVar, UnresolvedItemName, UnresolvedObjectName, UnresolvedSchemaName, Value,
 };
 use mz_sql_parser::ident;
 use mz_storage_types::connections::inline::{ConnectionAccess, ReferencedConnection};
@@ -94,7 +97,7 @@ use crate::names::{
 use crate::normalize::{self, ident};
 use crate::plan::error::PlanError;
 use crate::plan::expr::ColumnRef;
-use crate::plan::query::{scalar_type_from_catalog, ExprContext, QueryLifetime};
+use crate::plan::query::{plan_expr, scalar_type_from_catalog, ExprContext, QueryLifetime};
 use crate::plan::scope::Scope;
 use crate::plan::statement::ddl::connection::{INALTERABLE_OPTIONS, MUTUALLY_EXCLUSIVE_SETS};
 use crate::plan::statement::{scl, StatementContext, StatementDesc};
@@ -118,6 +121,7 @@ use crate::plan::{
     WebhookHeaders, WebhookValidation,
 };
 use crate::session::vars;
+use crate::session::vars::ENABLE_REFRESH_EVERY_MVS;
 
 mod connection;
 
@@ -2086,8 +2090,124 @@ pub fn plan_create_materialized_view(
 
     let MaterializedViewOptionExtracted {
         assert_not_null,
+        refresh,
         seen: _,
     }: MaterializedViewOptionExtracted = stmt.with_options.try_into()?;
+
+    let refresh_schedule = {
+        let mut refresh_schedule = RefreshSchedule::empty();
+        let mut on_commits_seen = 0;
+        for refresh_option_value in refresh {
+            if !matches!(refresh_option_value, RefreshOptionValue::OnCommit) {
+                scx.require_feature_flag(&ENABLE_REFRESH_EVERY_MVS)?;
+            }
+            match refresh_option_value {
+                RefreshOptionValue::OnCommit => {
+                    on_commits_seen += 1;
+                }
+                RefreshOptionValue::AtCreation => {
+                    unreachable!("REFRESH AT CREATION should have been purified away")
+                }
+                RefreshOptionValue::At(RefreshAtOptionValue { mut time }) => {
+                    transform_ast::transform(scx, &mut time)?; // Desugar the expression
+                    let ecx = &ExprContext {
+                        qcx: &QueryContext::root(scx, QueryLifetime::OneShot),
+                        name: "REFRESH AT",
+                        scope: &Scope::empty(),
+                        relation_type: &RelationType::empty(),
+                        allow_aggregates: false,
+                        allow_subqueries: false,
+                        allow_parameters: false,
+                        allow_windows: false,
+                    };
+                    let hir = plan_expr(ecx, &time)?.cast_to(
+                        ecx,
+                        CastContext::Implicit,
+                        &ScalarType::MzTimestamp,
+                    )?;
+                    // (mz_now was purified away to a literal earlier)
+                    let timestamp = hir
+                        .into_literal_mz_timestamp().
+                        ok_or_else(|| sql_err!(
+                            "REFRESH AT argument must be an expression that can be simplified and/or cast \
+                            to a constant whose type is mz_timestamp (calling mz_now() is allowed)"
+                        ))?;
+                    refresh_schedule.ats.push(timestamp);
+                }
+                RefreshOptionValue::Every(RefreshEveryOptionValue {
+                    interval,
+                    aligned_to,
+                }) => {
+                    let interval = Interval::from_str(interval.as_str())?;
+                    if interval.as_microseconds() <= 0 {
+                        sql_bail!("REFRESH interval must be positive; got: {}", interval);
+                    }
+                    if interval.as_microseconds() > Interval::new(0, 27, 0).as_microseconds() {
+                        // This limitation is because we want Intervals to be cleanly convertable
+                        // to a unix epoch timestamp difference. When it's at least 1 month, then
+                        // this is not true anymore, because months have variable lengths.
+                        // See `Timestamp::round_up`.
+                        sql_bail!(
+                            "REFRESH interval too big: {}. Currently, only intervals not larger than 27 days are supported.",
+                            interval
+                        );
+                    }
+
+                    let mut aligned_to =
+                        aligned_to.expect("ALIGNED TO should have been filled in by purification");
+
+                    // Desugar the `aligned_to` expression
+                    transform_ast::transform(scx, &mut aligned_to)?;
+
+                    let ecx = &ExprContext {
+                        qcx: &QueryContext::root(scx, QueryLifetime::OneShot),
+                        name: "REFRESH EVERY ... ALIGNED TO",
+                        scope: &Scope::empty(),
+                        relation_type: &RelationType::empty(),
+                        allow_aggregates: false,
+                        allow_subqueries: false,
+                        allow_parameters: false,
+                        allow_windows: false,
+                    };
+                    let aligned_to_hir = plan_expr(ecx, &aligned_to)?.cast_to(
+                        ecx,
+                        CastContext::Implicit,
+                        &ScalarType::MzTimestamp,
+                    )?;
+                    // (mz_now was purified away to a literal earlier)
+                    let aligned_to_const = aligned_to_hir
+                        .into_literal_mz_timestamp()
+                        .ok_or_else(||
+                            sql_err!(
+                                "REFRESH EVERY ... ALIGNED TO argument must be an expression that can be simplified and/or cast \
+                                to a constant whose type is mz_timestamp (calling mz_now() is allowed)"
+                            ))?;
+
+                    refresh_schedule.everies.push(RefreshEvery {
+                        interval,
+                        aligned_to: aligned_to_const,
+                    });
+                }
+            }
+        }
+
+        if on_commits_seen > 1 {
+            sql_bail!("REFRESH ON COMMIT can be given only once");
+        }
+        if on_commits_seen > 0 && refresh_schedule != RefreshSchedule::empty() {
+            sql_bail!("REFRESH ON COMMIT is not compatible with any of the other REFRESH options");
+        }
+        // Note: Seeing no REFRESH options at all (not even REFRESH ON COMMIT) should be acceptable:
+        // even though purification inserts REFRESH ON COMMIT if no other REFRESH option was given,
+        // we can't rely on this behavior in planning, because this won't happen for old
+        // materialized views that were created before this feature was introduced.
+
+        if refresh_schedule == RefreshSchedule::empty() {
+            None
+        } else {
+            Some(refresh_schedule)
+        }
+    };
 
     if !assert_not_null.is_empty() {
         scx.require_feature_flag(&crate::session::vars::ENABLE_ASSERT_NOT_NULL)?;
@@ -2180,6 +2300,7 @@ pub fn plan_create_materialized_view(
             column_names,
             cluster_id,
             non_null_assertions,
+            refresh_schedule,
         },
         replace,
         drop_ids,
@@ -2190,7 +2311,8 @@ pub fn plan_create_materialized_view(
 
 generate_extracted_config!(
     MaterializedViewOption,
-    (AssertNotNull, Ident, AllowMultiple)
+    (AssertNotNull, Ident, AllowMultiple),
+    (Refresh, RefreshOptionValue<Aug>, AllowMultiple)
 );
 
 pub fn describe_create_sink(
