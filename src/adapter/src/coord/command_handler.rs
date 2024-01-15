@@ -15,6 +15,7 @@ use std::sync::Arc;
 
 use futures::future::LocalBoxFuture;
 use futures::FutureExt;
+use itertools::Itertools;
 use mz_adapter_types::connection::{ConnectionId, ConnectionIdType};
 use mz_catalog::memory::objects::{CatalogItem, DataSourceDesc, Source};
 use mz_catalog::SYSTEM_CONN_ID;
@@ -22,11 +23,11 @@ use mz_compute_client::protocol::response::PeekResponse;
 use mz_ore::task;
 use mz_ore::tracing::OpenTelemetryContext;
 use mz_repr::role_id::RoleId;
-use mz_repr::Timestamp;
+use mz_repr::{GlobalId, Timestamp};
 use mz_sql::ast::{
     CopyRelation, CopyStatement, InsertSource, Query, Raw, SetExpr, Statement, SubscribeStatement,
 };
-use mz_sql::catalog::RoleAttributes;
+use mz_sql::catalog::{CatalogCluster, RoleAttributes};
 use mz_sql::names::{Aug, PartialItemName, ResolvedIds};
 use mz_sql::plan::{
     AbortTransactionPlan, CommitTransactionPlan, CreateRolePlan, Params, Plan, TransactionType,
@@ -60,7 +61,7 @@ use crate::util::{ClientTransmitter, ResultExt};
 use crate::webhook::{
     AppendWebhookResponse, AppendWebhookValidator, WebhookAppender, WebhookAppenderInvalidator,
 };
-use crate::{catalog, metrics, ExecuteContext};
+use crate::{catalog, metrics, CollectionIdBundle, ExecuteContext};
 
 use super::ExecuteContextExtra;
 
@@ -693,7 +694,12 @@ impl Coordinator {
 
             Statement::CreateMaterializedView(mut cmvs) => {
                 let mz_now = match self
-                    .resolve_mz_now_for_create_materialized_view(&cmvs, &resolved_ids)
+                    .resolve_mz_now_for_create_materialized_view(
+                        &cmvs,
+                        &resolved_ids,
+                        true,
+                        ctx.session_mut(),
+                    )
                     .await
                 {
                     Ok(mz_now) => mz_now,
@@ -736,7 +742,12 @@ impl Coordinator {
             }) => {
                 let mut cmvs = *box_cmvs;
                 let mz_now = match self
-                    .resolve_mz_now_for_create_materialized_view(&cmvs, &resolved_ids)
+                    .resolve_mz_now_for_create_materialized_view(
+                        &cmvs,
+                        &resolved_ids,
+                        false,
+                        ctx.session_mut(),
+                    )
                     .await
                 {
                     Ok(mz_now) => mz_now,
@@ -774,10 +785,17 @@ impl Coordinator {
         }
     }
 
+    /// Chooses a timestamp for `mz_now()`, if `mz_now()` occurs in the `with_options` of the materialized view.
+    /// If `acquire_read_holds` is true, it also grabs read holds on input collections that might possibly be involved
+    /// in the MV.
+    ///
+    /// Note that this is NOT what handles `mz_now()` in the query part of the MV. (handles it only in `with_options`).
     async fn resolve_mz_now_for_create_materialized_view(
-        &self,
+        &mut self,
         cmvs: &CreateMaterializedViewStatement<Aug>,
         resolved_ids: &ResolvedIds,
+        acquire_read_holds: bool,
+        session: &mut Session,
     ) -> Result<Option<Timestamp>, AdapterError> {
         // (This won't be the same timestamp as the system table inserts, unfortunately.)
         if cmvs
@@ -797,19 +815,20 @@ impl Coordinator {
             let timeline = timeline_context
                 .timeline()
                 .unwrap_or(&Timeline::EpochMilliseconds);
-            Ok(Some(self.get_timestamp_oracle(timeline).read_ts().await))
+            let timestamp = self.get_timestamp_oracle(timeline).read_ts().await;
             // TODO: It might be good to take into account `least_valid_read` in addition to
             // the oracle's `read_ts`, but there are two problems:
             // 1. At this point, we don't know which indexes would be used. We could do an
             // overestimation here by grabbing the ids of all indexes that are on ids
-            // involved in the query. (We'd have to recursively follow view definitions,
-            // similarly to `validate_timeline_context`.)
+            // involved in the query (`sufficient_collections_all_clusters`).
             // 2. For a peek, when the `least_valid_read` is later than the oracle's
             // `read_ts`, then the peek doesn't return before it completes at the chosen
             // timestamp. However, for a CRATE MATERIALIZED VIEW statement, it's not clear
             // whether we want to make it block until the chosen time. If it doesn't block,
-            // then the initial refresh wouldn't be linearized with the CREATE MATERIALIZED
-            // VIEW statement.
+            // then a REFRESH AT CREATION wouldn't be linearized with the CREATE MATERIALIZED
+            // VIEW statement, in the sense that a query from the MV after its creation might
+            // see input changes that happened after the CRATE MATERIALIZED VIEW statement
+            // returned.
             //
             // Note: The Adapter is usually keeping a read hold of all objects at the oracle
             // read timestamp, so `least_valid_read` usually won't actually be later than
@@ -821,9 +840,40 @@ impl Coordinator {
             // specified to be at `mz_now()` (which is usually the initial refresh)
             // (similarly to how we don't perform refreshes that were specified to be in the
             // past).
+
+            if acquire_read_holds {
+                self.acquire_read_holds_auto_cleanup(
+                    session,
+                    timestamp,
+                    &self.sufficient_collections_all_clusters(resolved_ids.0.iter()),
+                );
+            }
+
+            Ok(Some(timestamp))
         } else {
             Ok(None)
         }
+    }
+
+    /// Given ids syntactically appearing in a query ([ResolvedIds]), this function identifies a bundle of storage and
+    /// compute collection ids sufficient for building a dataflow for the query.
+    ///
+    /// As opposed to [crate::coord::indexes::DataflowBuilder::sufficient_collections], this function doesn't need to
+    /// know which cluster the dataflow would be executed on. It simply collects the relevant ids from all clusters.
+    fn sufficient_collections_all_clusters<'a, I>(&self, ids: I) -> CollectionIdBundle
+    where
+        I: IntoIterator<Item = &'a GlobalId>,
+    {
+        let ids = ids.into_iter().collect_vec();
+        let mut id_bundle = CollectionIdBundle::empty();
+        for cluster in self.catalog().clusters() {
+            id_bundle.extend(
+                &self
+                    .index_oracle(cluster.id())
+                    .sufficient_collections(ids.clone()),
+            );
+        }
+        id_bundle
     }
 
     /// Instruct the dataflow layer to cancel any ongoing, interactive work for

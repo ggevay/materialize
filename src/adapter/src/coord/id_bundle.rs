@@ -26,6 +26,13 @@ pub struct CollectionIdBundle {
 }
 
 impl CollectionIdBundle {
+    pub fn empty() -> Self {
+        CollectionIdBundle {
+            storage_ids: BTreeSet::new(),
+            compute_ids: BTreeMap::new(),
+        }
+    }
+
     /// Reports whether the bundle contains any identifiers of any type.
     pub fn is_empty(&self) -> bool {
         self.storage_ids.is_empty() && self.compute_ids.values().all(|ids| ids.is_empty())
