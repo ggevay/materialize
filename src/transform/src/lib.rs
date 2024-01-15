@@ -334,6 +334,7 @@ impl Default for FuseAndCollapse {
                 // `MirRelationExpr::Constant` if that is the case, so that subsequent use can
                 // clearly see this.
                 Box::new(crate::fold_constants::FoldConstants { limit: Some(10000) }),
+                //crate::fold_constants_and_normalize_lets(),
             ],
         }
     }
@@ -657,4 +658,15 @@ impl Optimizer {
 
         Ok(())
     }
+}
+
+fn fold_constants_and_normalize_lets() -> Box<Fixpoint> {
+    Box::new(crate::Fixpoint {
+        name: "FoldConstants+NormalizeLets",
+        limit: 100,
+        transforms: vec![
+            Box::new(crate::fold_constants::FoldConstants { limit: Some(10000) }),
+            Box::new(crate::normalize_lets::NormalizeLets::new(false)),
+        ],
+    })
 }

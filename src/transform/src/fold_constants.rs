@@ -483,6 +483,7 @@ impl FoldConstants {
             // arrive at a reduce.
 
             if *diff <= 0 {
+                println!("rows: {:?}", rows);
                 return Some(Err(EvalError::InvalidParameterValue(String::from(
                     "constant folding encountered reduce on collection \
                                                with non-positive multiplicities",
