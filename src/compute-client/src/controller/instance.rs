@@ -725,6 +725,8 @@ where
             replica_write_frontier.join_assign(&since.to_owned());
         }
 
+        //replica_write_frontier.join_assign(as_of); //////////////////////////////////////////////////////////////////////////////
+
         // Canonicalize dependencies.
         // Probably redundant based on key structure, but doing for sanity.
         storage_dependencies.sort();
@@ -735,6 +737,7 @@ where
         // We will bump the internals of each input by the number of dependents (outputs).
         let outputs = dataflow.sink_exports.len() + dataflow.index_exports.len();
         let mut changes = ChangeBatch::new();
+        println!("===================== as_of: {:?}", as_of);
         for time in as_of.iter() {
             // TODO(benesch): fix this dangerous use of `as`.
             #[allow(clippy::as_conversions)]
@@ -746,7 +749,7 @@ where
             .map(|id| (*id, changes.clone()))
             .collect();
         self.storage_controller
-            .update_read_capabilities(&mut storage_read_updates);
+            .update_read_capabilities(&mut storage_read_updates); /////////////////////////////// first
         // Update compute read capabilities for inputs.
         let mut compute_read_updates = compute_dependencies
             .iter()
@@ -754,6 +757,7 @@ where
             .collect();
         self.update_read_capabilities(&mut compute_read_updates);
 
+        println!("============================== replica_write_frontier: {:?}", replica_write_frontier);
         // Install collection state for each of the exports.
         let mut updates = Vec::new();
         for export_id in dataflow.export_ids() {
@@ -770,7 +774,7 @@ where
         // Initialize tracking of replica frontiers.
         let replica_ids: Vec<_> = self.compute.replica_ids().collect();
         for replica_id in replica_ids {
-            self.update_write_frontiers(replica_id, &updates);
+            self.update_write_frontiers(replica_id, &updates); ////////////////////////////// second
         }
 
         // Initialize tracking of subscribes.

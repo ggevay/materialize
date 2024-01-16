@@ -10,6 +10,7 @@
 //! Implementation of the storage controller trait.
 
 use std::any::Any;
+use std::backtrace::Backtrace;
 use std::cmp::Reverse;
 use std::collections::{BTreeMap, BTreeSet, BinaryHeap};
 use std::fmt::Debug;
@@ -1340,7 +1341,9 @@ where
     ) {
         let f = updates.iter().filter(|(id, _)| matches!(id, GlobalId::User(_))).collect::<Vec<_>>();
         if !f.is_empty() {
+            println!("------------------------------------------------------------------------------");
             println!("--- StorageController::update_read_capabilities: updates filtered: {:?}", f);
+            println!("{}", Backtrace::capture());
         }
 
         // Location to record consequences that we need to act on.
