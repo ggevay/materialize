@@ -1017,3 +1017,6 @@ NULL  -1  -2
 10  11  12
 30  30  30
 100  100  100
+
+statement ok
+select mz_unsafe.mz_sleep(3);

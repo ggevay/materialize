@@ -115,6 +115,7 @@ where
                             // We can only get here if we see the frontier advancing to a time after
                             // the last refresh, but not empty, which would be a bug somewhere in
                             // the `until` handling.
+                            println!("frontier: {:?}", ts);
                             soft_panic_or_log!("frontier advancements after the `until` should be suppressed");
                         }
                     }

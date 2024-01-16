@@ -474,6 +474,7 @@ impl Coordinator {
         let until = refresh_schedule
             .and_then(|s| s.last_refresh())
             .and_then(|r| r.try_step_forward());
+        println!("### until: {:?}", until);
 
         let transact_result = self
             .catalog_transact_with_side_effects(Some(ctx.session()), ops, |coord| async {
@@ -489,6 +490,7 @@ impl Coordinator {
                 let (mut df_desc, df_meta) = global_lir_plan.unapply();
 
                 df_desc.set_as_of(as_of.clone());
+                println!("### as_of: {:?}", as_of);
 
                 if let Some(until) = until {
                     df_desc.until.meet_assign(&Antichain::from_elem(until));
