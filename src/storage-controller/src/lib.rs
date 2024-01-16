@@ -1338,12 +1338,18 @@ where
         &mut self,
         updates: &mut BTreeMap<GlobalId, ChangeBatch<Self::Timestamp>>,
     ) {
+        let f = updates.iter().filter(|(id, _)| matches!(id, GlobalId::User(_))).collect::<Vec<_>>();
+        if !f.is_empty() {
+            println!("--- StorageController::update_read_capabilities: updates filtered: {:?}", f);
+        }
+
         // Location to record consequences that we need to act on.
         let mut collections_net = BTreeMap::new();
         let mut exports_net = BTreeMap::new();
 
         // Repeatedly extract the maximum id, and updates for it.
         while let Some(key) = updates.keys().rev().next().cloned() {
+            let print = matches!(key, GlobalId::User(_));
             let mut update = updates.remove(&key).unwrap();
             if let Ok(collection) = self.collection_mut(key) {
                 let current_read_capabilities = collection.read_capabilities.frontier().to_owned();
@@ -1368,8 +1374,35 @@ where
                     }
                 }
 
+                if print {
+                    println!("  current_read_capabilities: {:?}", current_read_capabilities);
+                }
+
+                if print {
+                    println!("  collection.read_capabilities:\n    {:?}", collection.read_capabilities);
+                }
+
+                if print {
+                    println!("  update:  {:?}", update.iter().collect_vec());
+                }
+
                 let changes = collection.read_capabilities.update_iter(update.drain());
-                update.extend(changes);
+
+                let changes_vec = changes.collect_vec();
+                if print {
+                    println!("  changes: {:?}", changes_vec);
+                }
+
+                if print {
+                    println!("  collection.read_capabilities after update_iter:\n    {:?}", collection.read_capabilities);
+                }
+
+                //////update.extend(changes);
+                update.extend(changes_vec.into_iter());
+
+                if print {
+                    println!("  u after: {:?}", update.iter().collect_vec());
+                }
 
                 for id in collection.storage_dependencies.iter() {
                     updates

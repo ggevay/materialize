@@ -841,13 +841,13 @@ impl Coordinator {
             // (similarly to how we don't perform refreshes that were specified to be in the
             // past).
 
-            if acquire_read_holds {
-                self.acquire_read_holds_auto_cleanup(
-                    session,
-                    timestamp,
-                    &self.sufficient_collections_all_clusters(resolved_ids.0.iter()),
-                );
-            }
+            // if acquire_read_holds {
+            //     self.acquire_read_holds_auto_cleanup(
+            //         session,
+            //         timestamp,
+            //         &self.sufficient_collections_all_clusters(resolved_ids.0.iter()),
+            //     );
+            // }
 
             Ok(Some(timestamp))
         } else {

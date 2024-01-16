@@ -1030,6 +1030,14 @@ where
         replica_id: ReplicaId,
         updates: &[(GlobalId, Antichain<T>)],
     ) {
+
+        let f = updates.iter().filter(|(id, _)| matches!(id, GlobalId::User(_))).collect::<Vec<_>>();
+        let mut print = false;
+        if !f.is_empty() {
+            print = true;
+            println!("### update_write_frontiers: updates filtered: {:?}", f);
+        }
+
         let mut advanced_collections = Vec::new();
         let mut compute_read_capability_changes = BTreeMap::default();
         let mut storage_read_capability_changes = BTreeMap::default();
@@ -1084,7 +1092,13 @@ where
                     .entry(*storage_id)
                     .or_insert_with(|| ChangeBatch::new());
                 if let Some(old) = &old_upper {
+                    if print {
+                        println!("  -1: {:?}", old.iter().map(|time| (time.clone(), -1)).collect::<Vec<_>>());
+                    }
                     update.extend(old.iter().map(|time| (time.clone(), -1)));
+                }
+                if print {
+                    println!("   1: {:?}", new_upper.iter().map(|time| (time.clone(), 1)).collect::<Vec<_>>());
                 }
                 update.extend(new_upper.iter().map(|time| (time.clone(), 1)));
             }
@@ -1093,6 +1107,9 @@ where
             self.update_read_capabilities(&mut compute_read_capability_changes);
         }
         if !storage_read_capability_changes.is_empty() {
+            if print {
+                println!("  storage_controller.update_read_capabilities: {:?}", storage_read_capability_changes);
+            }
             self.storage_controller
                 .update_read_capabilities(&mut storage_read_capability_changes);
         }
@@ -1115,6 +1132,10 @@ where
 
         if !dropped_collection_ids.is_empty() {
             self.update_dropped_collections(dropped_collection_ids);
+        }
+
+        if print {
+            println!("  END");
         }
     }
 
