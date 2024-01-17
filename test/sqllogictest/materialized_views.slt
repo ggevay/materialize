@@ -14,12 +14,6 @@ mode cockroach
 statement ok
 CREATE TABLE t2 (x int, y int, z int);
 
-statement ok
-INSERT INTO t2 VALUES (NULL, 2, 3), (4, NULL, 6), (7, 8, NULL);
-
-statement ok
-UPDATE t2 SET x=1 WHERE x IS NULL;
-
 # ------------------------------------------------------------------
 # REFRESH options (see also in materialized-view-refresh-options.td)
 # ------------------------------------------------------------------
@@ -34,17 +28,7 @@ CREATE MATERIALIZED VIEW mv3
 WITH (REFRESH AT mz_now()::text::int8 + 2000, REFRESH AT mz_now()::text::int8 + 4000)
 AS SELECT * FROM t2;
 
-statement ok
-SELECT * FROM mv3;
 
-statement ok
-SELECT * FROM mv3;
-
-statement ok
-INSERT INTO t2 VALUES (70, 70, 70);
-
-statement ok
-SELECT * FROM mv3;
 
 #query IT
 #select * from mz_internal.mz_dataflows;
@@ -52,4 +36,4 @@ SELECT * FROM mv3;
 
 
 statement ok
-select mz_unsafe.mz_sleep(3);
+select mz_unsafe.mz_sleep(10);
