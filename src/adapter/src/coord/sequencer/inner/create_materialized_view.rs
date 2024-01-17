@@ -471,10 +471,10 @@ impl Coordinator {
         // If we have a refresh schedule that has a last refresh, then set the `until` to the last refresh.
         // (If the `try_step_forward` fails, then no need to set an `until`, because it's not possible to get any data
         // beyond that last refresh time, because there are no times beyond that time.)
-        let until = refresh_schedule
+        let until = refresh_schedule.clone()
             .and_then(|s| s.last_refresh())
             .and_then(|r| r.try_step_forward());
-        println!("### until: {:?}", until);
+        println!("### until: {:?} from schedule: {:?}", until, refresh_schedule);
 
         let transact_result = self
             .catalog_transact_with_side_effects(Some(ctx.session()), ops, |coord| async {

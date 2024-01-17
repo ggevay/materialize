@@ -1018,5 +1018,26 @@ NULL  -1  -2
 30  30  30
 100  100  100
 
+#query IT
+#select * from mz_internal.mz_dataflows;
+#----
+#85  Dataflow:␠oneshot-select-t157
+#84  Dataflow:␠materialize.public.mv3
+#61  Dataflow:␠materialize.public.mv_desugar1
+#62  Dataflow:␠materialize.public.mv_desugar2
+#67  Dataflow:␠materialize.public.mv_greatest
+#59  Dataflow:␠materialize.public.mv_on_commit
+#45  Dataflow:␠materialize.public.mv_no_assertions
+#51  Dataflow:␠materialize.public.mv_two_assertions
+#73  Dataflow:␠materialize.public.mv_aligned_to_past
+#49  Dataflow:␠materialize.public.mv_assertion_at_end
+#77  Dataflow:␠materialize.public.mv_aligned_to_future
+#47  Dataflow:␠materialize.public.mv_assertion_at_begin
+#69  Dataflow:␠materialize.public.mv_no_creation_refresh
+#53  Dataflow:␠materialize.public.mv_misordered_assertions
+#63  Dataflow:␠materialize.public.mv_assertion_plus_refresh_every
+#55  Dataflow:␠materialize.public.mv_good_assertion_on_renamed_column
+
+
 statement ok
 select mz_unsafe.mz_sleep(3);

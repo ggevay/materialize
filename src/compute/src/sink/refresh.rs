@@ -31,6 +31,9 @@ where
     G: Scope<Timestamp = Timestamp>,
     D: Data,
 {
+
+    let dataflow_id = coll.scope().addr()[0];
+
     // We need to disconnect the reachability graph and manage capabilities manually, because we'd
     // like to round up frontiers as well as data: as soon as our input frontier passes a refresh
     // time, we'll round it up to the next refresh time.
@@ -45,6 +48,7 @@ where
         let mut capability = capabilities.into_iter().next(); // (We have 1 one input.)
         let mut buffer = Vec::new();
         move |frontiers| {
+            println!("operator logic for dataflow {:?}", dataflow_id);
             let mut output_handle_core = output_buf.activate();
             let mut output_buf = ConsolidateBuffer::new(&mut output_handle_core, 0);
             input.for_each(|input_cap, data| {
@@ -67,6 +71,7 @@ where
                 let mut cached_ts: Option<Timestamp> = None;
                 let mut cached_rounded_up_data_ts = None;
                 for (d, ts, r) in buffer.drain(..) {
+                    println!("[{:?}] d: {:?}, ts: {:?}, diff: {:?}", dataflow_id, d, ts, r);
                     let rounded_up_data_ts = {
                         // We cache the rounded up timestamp for the last seen timestamp,
                         // because the rounding up has a non-negligible cost. Caching for
@@ -115,7 +120,7 @@ where
                             // We can only get here if we see the frontier advancing to a time after
                             // the last refresh, but not empty, which would be a bug somewhere in
                             // the `until` handling.
-                            println!("frontier: {:?}", ts);
+                            println!("--------------------- frontier: {:?}, dataflow_id: {}", ts, dataflow_id);
                             soft_panic_or_log!("frontier advancements after the `until` should be suppressed");
                         }
                     }
