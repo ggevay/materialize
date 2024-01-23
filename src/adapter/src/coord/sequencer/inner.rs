@@ -1641,6 +1641,7 @@ impl Coordinator {
             .sequence_end_transaction_inner(ctx.session_mut(), action)
             .await;
 
+        println!("sequence_end_transaction: {:?}", result);
         let (response, action) = match result {
             Ok((Some(TransactionOps::Writes(writes)), _)) if writes.is_empty() => {
                 (response, action)

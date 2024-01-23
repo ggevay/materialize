@@ -2438,9 +2438,15 @@ impl Coordinator {
                     // https://docs.rs/tokio/1.8.0/tokio/sync/mpsc/struct.UnboundedReceiver.html#cancel-safety
                     Some(pending_read_txn) = strict_serializable_reads_rx.recv() => {
                         let mut pending_read_txns = vec![pending_read_txn];
+
+                        println!("Before strict_serializable_reads_rx.try_recv()");
+
                         while let Ok(pending_read_txn) = strict_serializable_reads_rx.try_recv() {
                             pending_read_txns.push(pending_read_txn);
                         }
+
+                        println!("After  strict_serializable_reads_rx.try_recv()");
+
                         Message::LinearizeReads(pending_read_txns)
                     }
                     // `tick()` on `Interval` is cancel-safe:
