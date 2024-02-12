@@ -65,6 +65,20 @@ impl CollectionIdBundle {
         }
     }
 
+    /// Extends a `CollectionIdBundle` with the contents of another `CollectionIdBundle`.
+    /// Asserts that the newly added collections don't coincide with any of the existing collections in self.
+    pub fn extend_with_new(&mut self, other: &CollectionIdBundle) {
+        assert!(other.storage_ids.iter().all(|new_id| !self.storage_ids.contains(new_id)));
+        self.storage_ids.extend(&other.storage_ids);
+        for (compute_instance, ids) in &other.compute_ids {
+            let existing_ids = self.compute_ids
+                .entry(*compute_instance)
+                .or_default();
+            assert!(ids.iter().all(|new_id| !existing_ids.contains(new_id)));
+            existing_ids.extend(ids);
+        }
+    }
+
     /// Returns an iterator over all IDs in the bundle.
     ///
     /// The IDs are iterated in an unspecified order.

@@ -116,6 +116,14 @@ impl<T: Eq + Hash + Ord> ReadHolds<T> {
         }
     }
 
+    /// Extends a `ReadHolds` with the contents of another `ReadHolds`.
+    /// Asserts that the newly added read holds don't coincide with any of the existing read hold in self.
+    pub fn extend_with_new(&mut self, other: ReadHolds<T>) {
+        for (time, id_bundle) in other.holds {
+            self.holds.entry(time).or_default().extend_with_new(&id_bundle);
+        }
+    }
+
     /// If the read hold contains a storage ID equal to `id`, removes it from the read hold and
     /// drops it.
     pub fn remove_storage_id(&mut self, id: &GlobalId) {
@@ -214,7 +222,7 @@ impl crate::coord::Coordinator {
                             .or_default()
                             .extend(id_bundle);
                     }
-                    read_holds.extend(new_read_holds);
+                    read_holds.extend_with_new(new_read_holds);
                 }
                 TimelineContext::TimestampIndependent | TimelineContext::TimestampDependent => {
                     id_bundles.entry(None).or_default().extend(&id_bundle);
