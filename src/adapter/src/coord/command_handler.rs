@@ -838,12 +838,7 @@ impl Coordinator {
                     .index_oracle(cluster)
                     .sufficient_collections(resolved_ids.0.iter());
 
-                match self.acquire_precise_read_holds_auto_cleanup(session, timestamp, &ids) {
-                    Ok(()) => {},
-                    Err(earliest_possible) => {
-                        return Err(AdapterError::NoReadHoldAtOracleTs(timestamp, earliest_possible));
-                    }
-                };
+                self.acquire_read_holds_auto_cleanup(session, timestamp, &ids);
             }
 
             Ok(Some(timestamp))
