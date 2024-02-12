@@ -269,7 +269,7 @@ impl Coordinator {
                 match self.acquire_precise_read_holds_auto_cleanup(session, *refresh_at_ts, &ids) {
                     Ok(()) => {},
                     Err(earliest_possible) => {
-                        return Err(AdapterError::NoReadHoldAtOracleTs(*refresh_at_ts, earliest_possible)); /////////// todo: modify the error enum variant name and error msg
+                        return Err(AdapterError::InputNotReadableAtRefreshAtTime(*refresh_at_ts, earliest_possible)); /////////// todo: modify the error enum variant name and error msg
                     }
                 };
             }
