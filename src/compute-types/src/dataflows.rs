@@ -333,6 +333,14 @@ where
         build
     }
 
+    /// Whether this dataflow is a materialized view.
+    pub fn is_materialized_view(&self) -> bool {
+        self.index_exports.is_empty()
+            && self.sink_exports.iter().all(|(_, sink_desc)| {
+                matches!(sink_desc.connection, ComputeSinkConnection::Persist(_))
+            })
+    }
+
     /// Computes the set of identifiers upon which the specified collection
     /// identifier depends.
     ///

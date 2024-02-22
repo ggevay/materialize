@@ -889,6 +889,12 @@ where
             replica_write_frontier.join_assign(&since.to_owned());
         }
 
+        // If the `as_of` is empty, we are not going to create a dataflow, so don't install any read
+        // holds.
+        if as_of.is_empty() {
+            replica_write_frontier.join_assign(&Antichain::new())
+        }
+
         // Canonicalize dependencies.
         // Probably redundant based on key structure, but doing for sanity.
         storage_dependencies.sort();
@@ -944,7 +950,7 @@ where
                 .insert(subscribe_id, ActiveSubscribe::new());
         }
 
-        // Here we augment all imported sources and all exported sinks with with the appropriate
+        // Here we augment all imported sources and all exported sinks with the appropriate
         // storage metadata needed by the compute instance.
         let mut source_imports = BTreeMap::new();
         for (id, (si, monotonic)) in dataflow.source_imports {
@@ -997,7 +1003,7 @@ where
             index_imports: dataflow.index_imports,
             objects_to_build: dataflow.objects_to_build,
             index_exports: dataflow.index_exports,
-            as_of: dataflow.as_of,
+            as_of: dataflow.as_of.clone(),
             until: dataflow.until,
             debug_name: dataflow.debug_name,
         };
@@ -1022,8 +1028,18 @@ where
             );
         }
 
-        self.compute
-            .send(ComputeCommand::CreateDataflow(augmented_dataflow));
+        // Skip the actual dataflow creation for a materialized view with an empty `as_of`.
+        // (Happens e.g. for the bootstrapping of a REFRESH AT mat view that is past its last
+        // refresh.)
+        if as_of.is_empty() && augmented_dataflow.is_materialized_view() {
+            tracing::info!(
+                name = %augmented_dataflow.debug_name,
+                "not sending `CreateDataflow`, because of empty `as_of`",
+            );
+        } else {
+            self.compute
+                .send(ComputeCommand::CreateDataflow(augmented_dataflow));
+        }
 
         Ok(())
     }
