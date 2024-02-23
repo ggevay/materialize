@@ -889,6 +889,34 @@ impl MapFilterProject {
     /// );
     /// ```
     pub fn optimize(&mut self) {
+        println!("START OF optimize: {}", self);
+
+        // Optimization memoizes individual `ScalarExpr` expressions that
+        // are sure to be evaluated, canonicalizes references to the first
+        // occurrence of each, inlines expressions that have a reference
+        // count of one, and then removes any expressions that are not
+        // referenced.
+        self.memoize_expressions();
+        self.predicates.sort();
+        self.predicates.dedup();
+        self.inline_expressions();
+        self.remove_undemanded();
+
+        // Re-build `self` from parts to restore evaluation order invariants.
+        let (map, filter, project) = self.as_map_filter_project();
+        *self = Self::new(self.input_arity)
+            .map(map)
+            .filter(filter)
+            .project(project);
+
+        println!("Before second run: {}", self);
+        let tmp = self.clone();
+        self.optimize_no_rec();
+        println!("Before assert: {}", self);
+        assert_eq!(tmp, *self);
+    }
+
+    pub fn optimize_no_rec(&mut self) {
         // Optimization memoizes individual `ScalarExpr` expressions that
         // are sure to be evaluated, canonicalizes references to the first
         // occurrence of each, inlines expressions that have a reference
