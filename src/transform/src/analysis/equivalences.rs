@@ -304,6 +304,163 @@ impl EquivalenceClasses {
                     });
                 }
             }
+            if !to_add.is_empty() {
+                complete = false;
+            }
+            self.classes.extend(to_add);
+
+            // Tidy up classes, restore representative.
+            for class in self.classes.iter_mut() {
+                // TODO: Ideally we put literals as representatives, to reduce dependencies on rows.
+                // It is important that this order be "by complexity", so that
+                class.sort_by(|e1, e2| match (e1, e2) {
+                    (MirScalarExpr::Literal(_, _), MirScalarExpr::Literal(_, _)) => e1.cmp(e2),
+                    (MirScalarExpr::Literal(_, _), _) => std::cmp::Ordering::Less,
+                    (_, MirScalarExpr::Literal(_, _)) => std::cmp::Ordering::Greater,
+                    (MirScalarExpr::Column(_), MirScalarExpr::Column(_)) => e1.cmp(e2),
+                    (MirScalarExpr::Column(_), _) => std::cmp::Ordering::Less,
+                    (_, MirScalarExpr::Column(_)) => std::cmp::Ordering::Greater,
+                    (x, y) => {
+                        // General expressions should be ordered by their size,
+                        // to ensure we only simplify expressions by substititution.
+                        let x_size = x.size();
+                        let y_size = y.size();
+                        if x_size == y_size {
+                            x.cmp(y)
+                        } else {
+                            x_size.cmp(&y_size)
+                        }
+                    }
+                });
+                class.dedup();
+            }
+
+            // Discard trivial equivalence classes.
+            self.classes.retain(|class| class.len() > 1);
+            self.classes.sort();
+        }
+
+
+        let tmp = self.clone();
+        self.minimize_no_rec(columns);
+        if *self != tmp {
+            println!();
+            println!("self: {:?}", self);
+            println!("tmp: {:?}", tmp);
+            println!();
+        }
+        assert_eq!(*self, tmp);
+
+    }
+
+    /// a
+    pub fn minimize_no_rec(&mut self, columns: &Option<Vec<ColumnType>>) {
+        // Repeatedly, we reduce each of the classes themselves, then unify the classes.
+        // This should strictly reduce complexity, and reach a fixed point.
+        // Ideally it is *confluent*, arriving at the same fixed point no matter the order of operations.
+
+        for class in self.classes.iter_mut() {
+            class.sort_by(|e1, e2| match (e1, e2) {
+                (MirScalarExpr::Literal(_, _), MirScalarExpr::Literal(_, _)) => e1.cmp(e2),
+                (MirScalarExpr::Literal(_, _), _) => std::cmp::Ordering::Less,
+                (_, MirScalarExpr::Literal(_, _)) => std::cmp::Ordering::Greater,
+                (x, y) => x.cmp(y),
+            });
+            class.dedup();
+        }
+        self.classes.retain(|c| c.len() > 1);
+        self.classes.sort();
+
+        // We continue as long as any simplification has occurred.
+        // An expression can be simplified, a duplication found, or two classes unified.
+        let mut complete = false;
+        while !complete {
+            // We are complete unless we experience an expression simplification, or an equivalence class unification.
+            complete = true;
+
+            // 0. Reduce each expression
+            if let Some(columns) = columns {
+                for class in self.classes.iter_mut() {
+                    for expr in class.iter_mut() {
+                        let prev_expr = expr.clone();
+                        expr.reduce(columns);
+                        if &prev_expr != expr {
+                            complete = false;
+                        }
+                    }
+                }
+            }
+
+            // 1. Reduce each class.
+            //    Each class can be reduced in the context of *other* classes, which are available for substitution.
+            for class_index in 0..self.classes.len() {
+                for index in 0..self.classes[class_index].len() {
+                    let mut cloned = self.classes[class_index][index].clone();
+                    // Use `reduce_child` rather than `reduce_expr` to avoid entire expression replacement.
+                    let reduced = self.reduce_child(&mut cloned);
+                    if reduced {
+                        self.classes[class_index][index] = cloned;
+                        complete = false;
+                    }
+                }
+            }
+
+            // 2. Unify classes.
+            //    If the same expression is in two classes, we can unify the classes.
+            //    This element may not be the representative.
+            //    TODO: If all lists are sorted, this could be a linear merge among all.
+            //          They stop being sorted as soon as we make any modification, though.
+            //          But, it would be a fast rejection when faced with lots of data.
+            for index1 in 0..self.classes.len() {
+                for index2 in 0..index1 {
+                    if self.classes[index1]
+                        .iter()
+                        .any(|x| self.classes[index2].iter().any(|y| x == y))
+                    {
+                        let prior = std::mem::take(&mut self.classes[index2]);
+                        self.classes[index1].extend(prior);
+                        complete = false;
+                    }
+                }
+            }
+
+            // 3. Identify idioms
+            //    E.g. If Eq(x, y) must be true, we can introduce classes `[x, y]` and `[true, Not(IsNull(x), Not(IsNull(y))]`.
+            let mut to_add = Vec::new();
+            for class in self.classes.iter_mut() {
+                if class.iter().any(|c| c.is_literal_true()) {
+                    for expr in class.iter() {
+                        if let MirScalarExpr::CallBinary {
+                            func: mz_expr::BinaryFunc::Eq,
+                            expr1,
+                            expr2,
+                        } = expr
+                        {
+                            to_add.push(vec![*expr1.clone(), *expr2.clone()]);
+                            to_add.push(vec![
+                                MirScalarExpr::literal_true(),
+                                expr1.clone().call_is_null().not(),
+                                expr2.clone().call_is_null().not(),
+                            ]);
+                        }
+                    }
+                    class.retain(|expr| {
+                        if let MirScalarExpr::CallBinary {
+                            func: mz_expr::BinaryFunc::Eq,
+                            expr1: _,
+                            expr2: _,
+                        } = expr
+                        {
+                            false
+                        } else {
+                            true
+                        }
+                    });
+                }
+            }
+            if !to_add.is_empty() {
+                complete = false;
+            }
             self.classes.extend(to_add);
 
             // Tidy up classes, restore representative.
