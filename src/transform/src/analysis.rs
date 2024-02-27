@@ -282,6 +282,7 @@ pub mod common {
                     type_id,
                     Box::new(Bundle::<A> {
                         results: Vec::new(),
+                        fuel: 100,
                     }),
                 );
                 A::announce_dependencies(self);
@@ -367,6 +368,9 @@ pub mod common {
     /// A wrapper for analysis state.
     struct Bundle<A: Analysis> {
         results: Vec<A::Value>,
+        /// Counts down with each `LetRec` re-iteration, to avoid unbounded effort.
+        /// Should it reach zero, the analysis should discard its results and restart as if pessimistic.
+        fuel: usize,
     }
 
     impl<A: Analysis> AnalysisBundle for Bundle<A> {
@@ -377,10 +381,31 @@ pub mod common {
             upper: usize,
             depends: &Derived,
         ) -> bool {
-            // There are three behaviors: with a lattice and either a `LetRec` or not, and without a lattice.
-            match (A::lattice(), &exprs[upper - 1]) {
-                // In the first case, we want to iteratively develop `results[lower .. upper]` until fixed point.
-                (Some(_), MirRelationExpr::LetRec { .. }) => {
+            if let Ok(update) = self.analyse_optimistic(exprs, lower, upper, depends) {
+                update
+            } else {
+                self.results.clear();
+                self.analyse_pessimistic(exprs, lower, upper, depends)
+            }
+        }
+        fn as_any(&self) -> &dyn std::any::Any {
+            self
+        }
+    }
+
+    impl<A: Analysis> Bundle<A> {
+        /// Analysis that starts optimistically but is only correct at a fixed point.
+        ///
+        /// Will fail out to `analyse_pessimistic` if the lattice is missing, or `self.fuel` is exhausted.
+        fn analyse_optimistic(
+            &mut self,
+            exprs: &[&MirRelationExpr],
+            lower: usize,
+            upper: usize,
+            depends: &Derived,
+        ) -> Result<bool, ()> {
+            if let Some(lattice) = A::lattice() {
+                if let MirRelationExpr::LetRec { .. } = &exprs[upper - 1] {
                     let sizes = depends
                         .results::<SubtreeSize>()
                         .expect("SubtreeSize required");
@@ -392,64 +417,64 @@ pub mod common {
 
                     // Visit each child, and track whether any new information emerges.
                     // Repeat, as long as new information continues to emerge.
-                    // TODO: Break out after some bounded number of iterations, fail over to a non-Lattice implementation.
-                    //       Should be easy-ish to zero out `self.results` and restart with a forced non-lattice behavior.
                     let mut new_information = true;
                     while new_information {
+                        // Bail out if we have done too many `LetRec` passes in this analysis.
+                        self.fuel -= 1;
+                        if self.fuel == 0 {
+                            return Err(());
+                        }
+
                         new_information = false;
-                        // Visit non-body children.
+                        // Visit non-body children (values).
                         for child in values.iter() {
-                            new_information = self.analyse(
+                            new_information = self.analyse_optimistic(
                                 exprs,
                                 *child + 1 - sizes[*child],
                                 *child + 1,
                                 depends,
-                            ) || new_information;
+                            )? || new_information;
                         }
                     }
                     // Visit `body` and return whether it evolved.
                     let body = upper - 2;
-                    self.analyse(exprs, body + 1 - sizes[body], body + 1, depends)
-                }
-                // If not a `LetRec`, we still want to revisit results and update them with meet.
-                (Some(lattice), _) => {
+                    self.analyse_optimistic(exprs, body + 1 - sizes[body], body + 1, depends)
+                } else {
+                    // If not a `LetRec`, we still want to revisit results and update them with meet.
                     while self.results.len() < upper {
                         self.results.push(lattice.top());
                     }
                     let mut changed = false;
                     for index in lower..upper {
-                        let value = A::derive(&exprs[index], index, &self.results[..], depends);
+                        let value = A::derive(exprs[index], index, &self.results[..], depends);
                         changed = lattice.meet_assign(&mut self.results[index], value);
                     }
-                    changed
+                    Ok(changed)
                 }
-                // If no lattice, values are written once and not updated.
-                _ => {
-                    // TODO: Allow iterative development from `lattice.bottom()` using `lattice.join()`.
-                    //       Involves inventing `Lattice::bottom()` and `Lattice::join()`.
-                    // Ideally either `results.len() == lower` or `results.len() >= upper`.
-                    // In the former case, push derivations and report true;
-                    // In the latter case, leave derivations and report false.
-                    if self.results.len() == lower {
-                        for index in lower..upper {
-                            self.results.push(A::derive(
-                                &exprs[index],
-                                index,
-                                &self.results[..],
-                                depends,
-                            ));
-                        }
-                        true
-                    } else if self.results.len() >= upper {
-                        false
-                    } else {
-                        unreachable!("Uncertain configuration reached");
-                    }
-                }
+            } else {
+                Ok(self.analyse_pessimistic(exprs, lower, upper, depends))
             }
         }
-        fn as_any(&self) -> &dyn std::any::Any {
-            self
+
+        /// Analysis that starts conservatively and can be stopped at any point.
+        fn analyse_pessimistic(
+            &mut self,
+            exprs: &[&MirRelationExpr],
+            lower: usize,
+            upper: usize,
+            depends: &Derived,
+        ) -> bool {
+            if self.results.len() == lower {
+                for index in lower..upper {
+                    self.results
+                        .push(A::derive(exprs[index], index, &self.results[..], depends));
+                }
+                true
+            } else if self.results.len() >= upper {
+                false
+            } else {
+                unreachable!("Uncertain configuration reached");
+            }
         }
     }
 }
