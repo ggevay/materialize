@@ -337,7 +337,7 @@ pub mod common {
             // Apply each analysis to `expr` in order.
             for id in self.result.order.iter() {
                 if let Some(mut bundle) = self.result.analyses.remove(id) {
-                    bundle.analyse(&rev_post_order[..], 0, rev_post_order.len(), &self.result);
+                    bundle.analyse(&rev_post_order[..], &self.result);
                     self.result.analyses.insert(*id, bundle);
                 }
             }
@@ -348,14 +348,10 @@ pub mod common {
 
     /// An abstraction for an analysis and associated state.
     trait AnalysisBundle: Any {
-        /// Result indicates whether new information was produced for the expression at `upper-1`.
-        fn analyse(
-            &mut self,
-            exprs: &[&MirRelationExpr],
-            lower: usize,
-            upper: usize,
-            depends: &Derived,
-        ) -> bool;
+        /// Populates internal state for all of `exprs`.
+        ///
+        /// Result indicates whether new information was produced for `exprs.last()`.
+        fn analyse(&mut self, exprs: &[&MirRelationExpr], depends: &Derived) -> bool;
         /// Upcasts `self` to a `&dyn Any`.
         ///
         /// NOTE: This is required until <https://github.com/rust-lang/rfcs/issues/2765> is fixed
@@ -371,22 +367,23 @@ pub mod common {
     }
 
     impl<A: Analysis> AnalysisBundle for Bundle<A> {
-        fn analyse(
-            &mut self,
-            exprs: &[&MirRelationExpr],
-            lower: usize,
-            upper: usize,
-            depends: &Derived,
-        ) -> bool {
-            if let Ok(update) = self.analyse_optimistic(exprs, lower, upper, depends) {
-                assert_eq!(self.results.len(), upper - lower);
-                update
-            } else {
-                self.results.clear();
-                let update = self.analyse_pessimistic(exprs, lower, upper, depends);
-                assert_eq!(self.results.len(), upper - lower);
-                update
-            }
+        fn analyse(&mut self, exprs: &[&MirRelationExpr], depends: &Derived) -> bool {
+            self.results.clear();
+            // Attempt optimistic analysis, and if that fails go pessimistic.
+            let update = A::lattice()
+                .and_then(|lattice| {
+                    for _ in exprs.iter() {
+                        self.results.push(lattice.top());
+                    }
+                    self.analyse_optimistic(exprs, 0, exprs.len(), depends, &*lattice)
+                        .ok()
+                })
+                .unwrap_or_else(|| {
+                    self.results.clear();
+                    self.analyse_pessimistic(exprs, depends)
+                });
+            assert_eq!(self.results.len(), exprs.len());
+            update
         }
         fn as_any(&self) -> &dyn std::any::Any {
             self
@@ -403,78 +400,65 @@ pub mod common {
             lower: usize,
             upper: usize,
             depends: &Derived,
+            lattice: &dyn crate::analysis::Lattice<A::Value>,
         ) -> Result<bool, ()> {
-            if let Some(lattice) = A::lattice() {
-                if let MirRelationExpr::LetRec { .. } = &exprs[upper - 1] {
-                    let sizes = depends
-                        .results::<SubtreeSize>()
-                        .expect("SubtreeSize required");
-                    let mut values = depends
-                        .children_of_rev(upper - 1, exprs[upper - 1].children().count())
-                        .skip(1)
-                        .collect::<Vec<_>>();
-                    values.reverse();
+            if let MirRelationExpr::LetRec { .. } = &exprs[upper - 1] {
+                let sizes = depends
+                    .results::<SubtreeSize>()
+                    .expect("SubtreeSize required");
+                let mut values = depends
+                    .children_of_rev(upper - 1, exprs[upper - 1].children().count())
+                    .skip(1)
+                    .collect::<Vec<_>>();
+                values.reverse();
 
-                    // Visit each child, and track whether any new information emerges.
-                    // Repeat, as long as new information continues to emerge.
-                    let mut new_information = true;
-                    while new_information {
-                        // Bail out if we have done too many `LetRec` passes in this analysis.
-                        self.fuel -= 1;
-                        if self.fuel == 0 {
-                            return Err(());
-                        }
+                // Visit each child, and track whether any new information emerges.
+                // Repeat, as long as new information continues to emerge.
+                let mut new_information = true;
+                while new_information {
+                    // Bail out if we have done too many `LetRec` passes in this analysis.
+                    self.fuel -= 1;
+                    if self.fuel == 0 {
+                        return Err(());
+                    }
 
-                        new_information = false;
-                        // Visit non-body children (values).
-                        for child in values.iter() {
-                            new_information = self.analyse_optimistic(
-                                exprs,
-                                *child + 1 - sizes[*child],
-                                *child + 1,
-                                depends,
-                            )? || new_information;
-                        }
+                    new_information = false;
+                    // Visit non-body children (values).
+                    for child in values.iter() {
+                        new_information = self.analyse_optimistic(
+                            exprs,
+                            *child + 1 - sizes[*child],
+                            *child + 1,
+                            depends,
+                            lattice,
+                        )? || new_information;
                     }
-                    // Visit `body` and return whether it evolved.
-                    let body = upper - 2;
-                    self.analyse_optimistic(exprs, body + 1 - sizes[body], upper, depends)
-                } else {
-                    // If not a `LetRec`, we still want to revisit results and update them with meet.
-                    while self.results.len() < upper {
-                        self.results.push(lattice.top());
-                    }
-                    let mut changed = false;
-                    for index in lower..upper {
-                        let value = A::derive(exprs[index], index, &self.results[..], depends);
-                        changed = lattice.meet_assign(&mut self.results[index], value);
-                    }
-                    Ok(changed)
                 }
+                // Visit `body` and then the `LetRec` and return whether it evolved.
+                let body = upper - 2;
+                self.analyse_optimistic(exprs, body + 1 - sizes[body], body + 1, depends, lattice)?;
+                let value = A::derive(exprs[upper - 1], upper - 1, &self.results[..], depends);
+                Ok(lattice.meet_assign(&mut self.results[upper - 1], value))
             } else {
-                Ok(self.analyse_pessimistic(exprs, lower, upper, depends))
+                // If not a `LetRec`, we still want to revisit results and update them with meet.
+                let mut changed = false;
+                for index in lower..upper {
+                    let value = A::derive(exprs[index], index, &self.results[..], depends);
+                    changed = lattice.meet_assign(&mut self.results[index], value);
+                }
+                Ok(changed)
             }
         }
 
         /// Analysis that starts conservatively and can be stopped at any point.
-        fn analyse_pessimistic(
-            &mut self,
-            exprs: &[&MirRelationExpr],
-            lower: usize,
-            upper: usize,
-            depends: &Derived,
-        ) -> bool {
-            if self.results.len() == lower {
-                for index in lower..upper {
-                    self.results
-                        .push(A::derive(exprs[index], index, &self.results[..], depends));
-                }
-                true
-            } else if self.results.len() >= upper {
-                false
-            } else {
-                unreachable!("Uncertain configuration reached");
+        fn analyse_pessimistic(&mut self, exprs: &[&MirRelationExpr], depends: &Derived) -> bool {
+            // TODO: consider making iterative, from some `bottom()` up using `join_assign()`.
+            self.results.clear();
+            for (index, expr) in exprs.iter().enumerate() {
+                self.results
+                    .push(A::derive(expr, index, &self.results[..], depends));
             }
+            true
         }
     }
 }
