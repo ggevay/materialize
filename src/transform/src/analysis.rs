@@ -379,10 +379,13 @@ pub mod common {
             depends: &Derived,
         ) -> bool {
             if let Ok(update) = self.analyse_optimistic(exprs, lower, upper, depends) {
+                assert_eq!(self.results.len(), upper - lower);
                 update
             } else {
                 self.results.clear();
-                self.analyse_pessimistic(exprs, lower, upper, depends)
+                let update = self.analyse_pessimistic(exprs, lower, upper, depends);
+                assert_eq!(self.results.len(), upper - lower);
+                update
             }
         }
         fn as_any(&self) -> &dyn std::any::Any {
@@ -435,7 +438,7 @@ pub mod common {
                     }
                     // Visit `body` and return whether it evolved.
                     let body = upper - 2;
-                    self.analyse_optimistic(exprs, body + 1 - sizes[body], body + 1, depends)
+                    self.analyse_optimistic(exprs, body + 1 - sizes[body], upper, depends)
                 } else {
                     // If not a `LetRec`, we still want to revisit results and update them with meet.
                     while self.results.len() < upper {
