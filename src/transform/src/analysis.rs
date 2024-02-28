@@ -405,6 +405,7 @@ pub mod common {
             depends: &Derived,
             lattice: &dyn crate::analysis::Lattice<A::Value>,
         ) -> Result<bool, ()> {
+            assert!(lower <= upper);
             if let MirRelationExpr::LetRec { .. } = &exprs[upper - 1] {
                 let sizes = depends
                     .results::<SubtreeSize>()
