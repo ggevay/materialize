@@ -194,6 +194,19 @@ where
     v.append(&mut xx);
 }
 
+pub fn canonicalize_predicates(predicates: &mut Vec<MirScalarExpr>, column_types: &[ColumnType]) {
+    // let mut old_predicates: Option<Vec<MirScalarExpr>> = None;
+    // let mut c = 0;
+    // while old_predicates.map_or(true, |op| op != *predicates)  {
+    //     old_predicates = Some(predicates.clone());
+        canonicalize_predicates_no_fixpoint(predicates, column_types);
+    //     c += 1;
+    // }
+    // if c > 2 {
+    //     println!("### canonicalize_predicates needed more than one step to reach fixpoint");
+    // }
+}
+
 /// Canonicalize predicates of a filter.
 ///
 /// This function reduces and canonicalizes the structure of each individual
@@ -203,7 +216,7 @@ where
 ///
 /// Additionally, it also removes IS NOT NULL predicates if there is another
 /// null rejecting predicate for the same sub-expression.
-pub fn canonicalize_predicates(predicates: &mut Vec<MirScalarExpr>, column_types: &[ColumnType]) {
+pub fn canonicalize_predicates_no_fixpoint(predicates: &mut Vec<MirScalarExpr>, column_types: &[ColumnType]) {
     soft_assert_or_log!(
         predicates
             .iter()
