@@ -42,12 +42,8 @@ impl crate::Transform for ReduceElision {
         let derived = builder.visit(relation);
         let derived_view = derived.as_view();
 
-        // /////println!("derived_view: {:?}", derived_view);
-        // let xxx = derived_view.results::<RelationType>();
-        // let xxx = derived_view.results::<UniqueKeys>();
-        //
-        // assert_eq!(derived_view.results::<RelationType>().unwrap().len(), relation.debug_size_and_depth().0);
-        // assert_eq!(derived_view.results::<UniqueKeys>().unwrap().len(), relation.debug_size_and_depth().0);
+        assert_eq!(derived_view.results::<RelationType>().unwrap().len(), relation.debug_size_and_depth().0);
+        assert_eq!(derived_view.results::<UniqueKeys>().unwrap().len(), relation.debug_size_and_depth().0);
 
         self.action(relation, derived_view);
 
