@@ -203,7 +203,7 @@ pub mod common {
         /// The number of produced items should exactly match the number of children, which need not
         /// be provided as an argument. This relies on the well-formedness of the view, which should
         /// exhaust itself just as it enumerates its last (the first) child view.
-        pub fn children_rev(&self) -> impl Iterator<Item = DerivedView<'a>> + 'a {
+        pub fn children_rev(&self) -> Vec<DerivedView<'a>> {
             // This logic is copy/paste from `Derived::children_of_rev` but it was annoying to layer
             // it over the output of that function, and perhaps clearer to rewrite in any case.
 
@@ -212,22 +212,21 @@ pub mod common {
             // Each extracted slice corresponds to a child of the current expression.
             // We should end cleanly with an empty slice, otherwise there is an issue.
             let sizes = self.results::<SubtreeSize>().expect("SubtreeSize missing");
-            let sizes = &sizes[..sizes.len() - 1];
+            let mut sizes = &sizes[..sizes.len() - 1];
 
             let offset = self.lower;
             let derived = self.derived;
-            (0..).scan(sizes, move |sizes, _| {
-                if let Some(size) = sizes.last() {
-                    *sizes = &sizes[..sizes.len() - size];
-                    Some(Self {
-                        derived,
-                        lower: offset + sizes.len(),
-                        upper: offset + sizes.len() + size,
-                    })
-                } else {
-                    None
-                }
-            })
+            let mut result = Vec::new();
+            while let Some(size) = sizes.last() {
+                sizes = &sizes[..sizes.len() - size];
+                result.push(Self {
+                    derived,
+                    lower: offset + sizes.len(),
+                    upper: offset + sizes.len() + size,
+                });
+            }
+            assert!(sizes.is_empty());
+            result
         }
 
         /// A convenience method for the view over the expressions last child.
@@ -238,7 +237,7 @@ pub mod common {
         ///
         /// It is an error to call this on a view for an expression with no children.
         pub fn last_child(&self) -> DerivedView<'a> {
-            self.children_rev().next().unwrap()
+            self.children_rev().into_iter().next().unwrap()
         }
     }
 
