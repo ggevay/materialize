@@ -24,6 +24,7 @@
 //! be used to renumber bindings in an expression starting from a provided
 //! `IdGen`, which is used to prepare distinct expressions for inlining.
 
+use itertools::Itertools;
 use mz_expr::{visit::Visit, MirRelationExpr};
 use mz_ore::{id_gen::IdGen, stack::RecursionLimitError};
 
@@ -187,7 +188,53 @@ impl NormalizeLets {
             ))?;
         }
 
+        assert_typ_matches_analysis_typ_if_non_rec(relation);
+
         Ok(())
+    }
+}
+
+fn assert_typ_matches_analysis_typ_if_non_rec(relation: &mut MirRelationExpr) {
+
+    println!("-------------------------------- relation:\n{}", relation.pretty());
+
+    if !relation.is_recursive() {
+        use crate::analysis::{DerivedBuilder, RelationType, UniqueKeys};
+        let mut builder = DerivedBuilder::default();
+        builder.require::<RelationType>();
+        builder.require::<UniqueKeys>();
+        let derived = builder.visit(relation);
+        let derived_view = derived.as_view();
+
+        let mut todo = vec![(&*relation, derived_view)];
+        while let Some((expr, view)) = todo.pop() {
+            if let MirRelationExpr::LetRec { .. } = expr {
+                unreachable!()
+            } else {
+                let cols = view
+                    .value::<RelationType>()
+                    .expect("RelationType required")
+                    .clone()
+                    .expect("Expression not well typed");
+                let keys = view
+                    .value::<UniqueKeys>()
+                    .expect("UniqueKeys required")
+                    .clone();
+                let analysis_type = mz_repr::RelationType::new(cols).with_keys(keys);
+
+                let typ = expr.typ();
+
+                println!("### expr:\n{}", expr.pretty());
+                // let mut config = ExplainConfig::default();
+                // config.keys = true;
+                // let s = expr.explain(&config, None);
+                // println!("### expr:\n{}", s);
+
+                //assert_eq!(typ.column_types, analysis_type.column_types);
+                assert_eq!(typ, analysis_type);
+            }
+            todo.extend(expr.children().rev().zip_eq(view.children_rev()));
+        }
     }
 }
 
@@ -302,13 +349,13 @@ mod support {
                     for (new, old) in typ.column_types.iter_mut().zip(prior.column_types.iter()) {
                         new.nullable = new.nullable && old.nullable
                     }
-                    for key in prior.keys.iter() {
-                        // antichain_insert(&mut typ.keys, key.clone());
-                        let into = &mut typ.keys;
-                        let item = key.clone();
-                        if into.iter().all(|key| !key.iter().all(|k| item.contains(k))) {
-                            into.retain(|key| !key.iter().all(|k| item.contains(k)));
-                            into.push(item);
+                    for prior_key in prior.keys.iter() {
+                        // antichain_insert(&mut typ.keys, prior_key.clone());
+                        let new_keys = &mut typ.keys;
+                        let prior_key_cloned = prior_key.clone();
+                        if new_keys.iter().all(|key| !key.iter().all(|c| prior_key_cloned.contains(c))) {
+                            new_keys.retain(|key| !key.iter().all(|c| prior_key_cloned.contains(c)));
+                            new_keys.push(prior_key_cloned);
                         }
                     }
                 } else {
