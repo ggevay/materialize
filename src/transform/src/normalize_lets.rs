@@ -267,7 +267,7 @@ mod support {
         while let Some((expr, view)) = todo.pop() {
             if let MirRelationExpr::LetRec { ids, .. } = expr {
                 // The `skip(1)` skips the `body` child, and is followed by binding children.
-                for (id, view) in ids.iter().rev().zip_eq(view.children_rev().skip(1)) {
+                for (id, view) in ids.iter().rev().zip(view.children_rev().into_iter().skip(1)) {
                     let cols = view
                         .value::<RelationType>()
                         .expect("RelationType required")
