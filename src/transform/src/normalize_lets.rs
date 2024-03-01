@@ -197,6 +197,8 @@ mod support {
 
     use std::collections::BTreeMap;
 
+    use itertools::Itertools;
+
     use mz_expr::{Id, LetRecLimit, LocalId, MirRelationExpr};
 
     pub(super) fn replace_bindings_from_map(
@@ -264,7 +266,8 @@ mod support {
         let mut todo = vec![(&*expr, derived_view)];
         while let Some((expr, view)) = todo.pop() {
             if let MirRelationExpr::LetRec { ids, .. } = expr {
-                for (id, view) in ids.iter().rev().zip(view.children_rev().skip(1)) {
+                // The `skip(1)` skips the `body` child, and is followed by binding children.
+                for (id, view) in ids.iter().rev().zip_eq(view.children_rev().skip(1)) {
                     let cols = view
                         .value::<RelationType>()
                         .expect("RelationType required")
@@ -277,7 +280,7 @@ mod support {
                     types.insert(*id, mz_repr::RelationType::new(cols).with_keys(keys));
                 }
             }
-            todo.extend(expr.children().rev().zip(view.children_rev()));
+            todo.extend(expr.children().rev().zip_eq(view.children_rev()));
         }
 
         refresh_types_helper(expr, &mut types)
