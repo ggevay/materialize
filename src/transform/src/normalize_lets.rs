@@ -196,6 +196,7 @@ impl NormalizeLets {
 mod support {
 
     use std::collections::BTreeMap;
+    use itertools::Itertools;
 
     use itertools::Itertools;
 
@@ -267,7 +268,7 @@ mod support {
         while let Some((expr, view)) = todo.pop() {
             if let MirRelationExpr::LetRec { ids, .. } = expr {
                 // The `skip(1)` skips the `body` child, and is followed by binding children.
-                for (id, view) in ids.iter().rev().zip(view.children_rev().into_iter().skip(1)) {
+                for (id, view) in ids.iter().rev().zip_eq(view.children_rev().into_iter().skip(1)) {
                     let cols = view
                         .value::<RelationType>()
                         .expect("RelationType required")
@@ -303,7 +304,7 @@ mod support {
                 let mut typ = value.typ();
                 if let Some(prior) = types.remove(id) {
                     // TODO: Assert some relationship between `typ` and `prior`.
-                    for (new, old) in typ.column_types.iter_mut().zip(prior.column_types.iter()) {
+                    for (new, old) in typ.column_types.iter_mut().zip_eq(prior.column_types.iter()) {
                         new.nullable = new.nullable && old.nullable
                     }
                     for key in prior.keys.iter() {
