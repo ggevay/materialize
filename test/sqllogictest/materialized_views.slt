@@ -1117,7 +1117,7 @@ CREATE CLUSTER c_schedule_1 (SIZE = '1', SCHEDULE = MANUAL);
 statement ok
 CREATE CLUSTER c_schedule_2 (SIZE = '1', SCHEDULE MANUAL);
 
-statement error db error: ERROR: cluster schedules other than MANUAL are not supported
+statement ok
 CREATE CLUSTER c_schedule_3 (SIZE = '1', SCHEDULE = ON REFRESH);
 
 statement ok
@@ -1126,7 +1126,7 @@ ALTER cluster c_schedule_1 RESET (SCHEDULE);
 statement ok
 ALTER cluster c_schedule_1 SET (SCHEDULE = MANUAL);
 
-statement error db error: ERROR: cluster schedules other than MANUAL are not supported
+statement ok
 ALTER cluster c_schedule_1 SET (SCHEDULE = ON REFRESH);
 
 statement ok
@@ -1140,3 +1140,94 @@ ALTER cluster unmanaged1 SET (SCHEDULE = ON REFRESH);
 
 statement error db error: ERROR: cluster schedules other than MANUAL are not supported for unmanaged clusters
 CREATE CLUSTER unmanaged2 (SCHEDULE = ON REFRESH, REPLICAS (r1 (SIZE '1')))
+
+statement ok
+CREATE MATERIALIZED VIEW mv9
+IN CLUSTER c_schedule_1
+WITH (REFRESH = EVERY '8 sec')
+AS SELECT sum(x*y*z) + count(*) FROM t2;
+
+query I
+SELECT * FROM mv9;
+----
+1371335
+
+statement ok
+INSERT INTO t2 VALUES (1, 0, 1);
+
+statement ok
+SELECT mz_unsafe.mz_sleep(8+1);
+
+query I
+SELECT * FROM mv9;
+----
+1371336
+
+statement ok
+CREATE MATERIALIZED VIEW mv10
+IN CLUSTER c_schedule_1
+WITH (REFRESH AT CREATION)
+AS SELECT count(*) FROM t2;
+
+query I
+SELECT * FROM mv10
+----
+10
+
+# The other refresh cluster should be off, because there is no refresh MV on it yet.
+query I
+SELECT replication_factor FROM mz_catalog.mz_clusters WHERE name = 'c_schedule_3';
+----
+0
+
+# A `REFRESH AT CREATION` MV alone on a cluster should make the cluster turn on.
+statement ok
+CREATE MATERIALIZED VIEW mv11
+IN CLUSTER c_schedule_3
+WITH (REFRESH AT CREATION)
+AS SELECT count(*) FROM t2;
+
+query I
+SELECT * FROM mv11
+----
+10
+
+## Very short refresh interval.
+
+statement ok
+CREATE CLUSTER c_schedule_4 (SIZE = '1', SCHEDULE = ON REFRESH);
+
+statement ok
+CREATE MATERIALIZED VIEW mv12
+IN CLUSTER c_schedule_4
+WITH (REFRESH EVERY '1 millisecond')
+AS SELECT count(*) FROM t2;
+
+query I
+SELECT * FROM mv12
+----
+10
+
+statement ok
+INSERT INTO t2 VALUES (1, 1, 10);
+
+query I
+SELECT * FROM mv12
+----
+11
+
+# This should set the schedule back to manual.
+statement ok
+ALTER CLUSTER c_schedule_4 RESET (SCHEDULE);
+
+statement ok
+ALTER CLUSTER c_schedule_4 SET (REPLICATION FACTOR = 0);
+
+statement ok
+SELECT mz_unsafe.mz_sleep(3);
+
+# Should stay off, because it was reset to manual.
+query I
+SELECT replication_factor FROM mz_catalog.mz_clusters WHERE name = 'c_schedule_3';
+----
+0
