@@ -137,6 +137,7 @@ use timely::PartialOrder;
 use tokio::runtime::Handle as TokioHandle;
 use tokio::select;
 use tokio::sync::{mpsc, oneshot, OwnedMutexGuard};
+use tokio::time::MissedTickBehavior;
 use tracing::{debug, info, info_span, span, warn, Instrument, Level, Span};
 use tracing_opentelemetry::OpenTelemetrySpanExt;
 use uuid::Uuid;
@@ -181,6 +182,7 @@ pub(crate) mod timeline;
 pub(crate) mod timestamp_selection;
 
 mod appends;
+mod cluster_scheduling;
 mod command_handler;
 pub mod consistency;
 mod ddl;
@@ -268,6 +270,13 @@ pub enum Message<T = mz_repr::Timestamp> {
     },
     DrainStatementLog,
     PrivateLinkVpcEndpointEvents(Vec<VpcEndpointEvent>),
+    CheckSchedulingPolicies,
+
+    /// Scheduling policy decisions about turning clusters On/Off.
+    /// `Vec<(policy name, Vec of decisions by the policy)>`
+    /// A cluster will be On if and only if there is at least one On decision for it.
+    /// Scheduling decisions for clusters that have `SCHEDULE = MANUAL` are ignored.
+    SchedulingDecisions(Vec<(&'static str, Vec<(ClusterId, bool)>)>),
 }
 
 impl Message {
@@ -317,6 +326,8 @@ impl Message {
             Message::DrainStatementLog => "drain_statement_log",
             Message::AlterConnectionValidationReady(..) => "alter_connection_validation_ready",
             Message::PrivateLinkVpcEndpointEvents(_) => "private_link_vpc_endpoint_events",
+            Message::CheckSchedulingPolicies => "check_scheduling_policies",
+            Message::SchedulingDecisions { .. } => "scheduling_decision",
         }
     }
 }
@@ -1375,13 +1386,21 @@ pub struct Coordinator {
     /// Data used by the statement logging feature.
     statement_logging: StatementLogging,
 
-    /// Limit for how many conncurrent webhook requests we allow.
+    /// Limit for how many concurrent webhook requests we allow.
     webhook_concurrency_limit: WebhookConcurrencyLimiter,
 
     /// Optional config for the Postgres-backed timestamp oracle. This is
     /// _required_ when `postgres` is configured using the `timestamp_oracle`
     /// system variable.
     pg_timestamp_oracle_config: Option<PostgresTimestampOracleConfig>,
+
+    /// Periodically asks cluster scheduling policies to make their decisions.
+    check_scheduling_policies_interval: tokio::time::Interval,
+
+    /// This keeps the last On/Off decision for each cluster and each scheduling policy.
+    /// (Clusters that have been dropped or are otherwise out of scope for automatic scheduling are
+    /// periodically cleaned up from this Map.)
+    scheduling_decisions: BTreeMap<ClusterId, BTreeMap<&'static str, bool>>,
 }
 
 impl Coordinator {
@@ -2509,6 +2528,11 @@ impl Coordinator {
                         span.follows_from(Span::current());
                         Message::GroupCommitInitiate(span, None)
                     },
+                    // `tick()` on `Interval` is cancel-safe:
+                    // https://docs.rs/tokio/1.19.2/tokio/time/struct.Interval.html#cancel-safety
+                    _ = self.check_scheduling_policies_interval.tick() => {
+                        Message::CheckSchedulingPolicies
+                    },
 
                     // Process the idle metric at the lowest priority to sample queue non-idle time.
                     // `recv()` on `Receiver` is cancellation safe:
@@ -2987,6 +3011,12 @@ pub fn serve(
         let segment_client_clone = segment_client.clone();
         let coord_now = now.clone();
         let advance_timelines_interval = tokio::time::interval(catalog.config().timestamp_interval);
+        let mut check_scheduling_policies_interval = tokio::time::interval(Duration::from_secs(
+            catalog
+                .system_config()
+                .cluster_check_scheduling_policies_interval(),
+        ));
+        check_scheduling_policies_interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
 
         if let Some(config) = pg_timestamp_oracle_config.as_ref() {
             // Apply settings from system vars as early as possible because some
@@ -3055,6 +3085,8 @@ pub fn serve(
                     statement_logging: StatementLogging::new(coord_now.clone()),
                     webhook_concurrency_limit,
                     pg_timestamp_oracle_config,
+                    check_scheduling_policies_interval,
+                    scheduling_decisions: BTreeMap::new(),
                 };
                 let bootstrap = handle.block_on(async {
                     coord

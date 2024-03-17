@@ -31,7 +31,6 @@ use mz_sql::plan::{
 };
 use mz_sql::session::metadata::SessionMetadata;
 use mz_sql::session::vars::{SystemVars, Var, MAX_REPLICAS_PER_CLUSTER};
-use mz_sql_parser::ast::ClusterScheduleOptionValue;
 
 use crate::catalog::Op;
 use crate::coord::Coordinator;
@@ -110,7 +109,7 @@ impl Coordinator {
             size,
             disk,
             optimizer_feature_overrides: _,
-            schedule,
+            schedule: _,
         }: CreateClusterManagedPlan,
         cluster_id: ClusterId,
         mut ops: Vec<catalog::Op>,
@@ -137,14 +136,6 @@ impl Coordinator {
             "cluster replica",
             MAX_REPLICAS_PER_CLUSTER.name(),
         )?;
-
-        if !matches!(schedule, ClusterScheduleOptionValue::Manual) {
-            // todo: remove this check once ClusterScheduleOptionValue::Refresh is
-            // actually implemented.
-            return Err(AdapterError::Unsupported(
-                "cluster schedules other than MANUAL",
-            ));
-        }
 
         for replica_name in (0..replication_factor).map(managed_cluster_replica_name) {
             let id = self.catalog_mut().allocate_replica_id(&cluster_id).await?;
@@ -645,13 +636,6 @@ impl Coordinator {
                 }
                 match &options.schedule {
                     Set(new_schedule) => {
-                        if !matches!(new_schedule, ClusterScheduleOptionValue::Manual) {
-                            // todo: remove this check once ClusterScheduleOptionValue::Refresh is
-                            // actually implemented.
-                            return Err(AdapterError::Unsupported(
-                                "cluster schedules other than MANUAL",
-                            ));
-                        }
                         *schedule = new_schedule.clone();
                     }
                     Reset => *schedule = Default::default(),
@@ -693,7 +677,10 @@ impl Coordinator {
         match (&config.variant, new_config.variant) {
             (Managed(config), Managed(new_config)) => {
                 self.sequence_alter_cluster_managed_to_managed(
-                    session, cluster_id, config, new_config,
+                    Some(session),
+                    cluster_id,
+                    config,
+                    new_config,
                 )
                 .await?;
             }
@@ -719,9 +706,9 @@ impl Coordinator {
         Ok(ExecuteResponse::AlteredObject(ObjectType::Cluster))
     }
 
-    async fn sequence_alter_cluster_managed_to_managed(
+    pub async fn sequence_alter_cluster_managed_to_managed(
         &mut self,
-        session: &Session,
+        session: Option<&Session>,
         cluster_id: ClusterId,
         config: &ClusterVariantManaged,
         new_config: ClusterVariantManaged,
@@ -863,7 +850,7 @@ impl Coordinator {
             config: ClusterConfig { variant },
         });
 
-        self.catalog_transact(Some(session), ops).await?;
+        self.catalog_transact(session, ops).await?;
         self.create_cluster_replicas(&create_cluster_replicas).await;
         Ok(())
     }
