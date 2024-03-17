@@ -3591,6 +3591,10 @@ pub fn plan_create_cluster(
             disk = true;
         }
 
+        if !matches!(schedule, ClusterScheduleOptionValue::Manual) {
+            scx.require_feature_flag(&ENABLE_REFRESH_EVERY_MVS)?;
+        }
+
         // Plan OptimizerFeatureOverrides.
         let ClusterFeatureExtracted {
             reoptimize_imported_views,
@@ -4768,6 +4772,10 @@ pub fn plan_alter_cluster(
                                 hypothetical_replica_count,
                             });
                         }
+                    }
+
+                    if !matches!(schedule, ClusterScheduleOptionValue::Manual) {
+                        scx.require_feature_flag(&ENABLE_REFRESH_EVERY_MVS)?;
                     }
                 }
                 false => {

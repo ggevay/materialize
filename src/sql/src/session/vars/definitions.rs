@@ -1538,6 +1538,16 @@ pub mod cluster_scheduling {
         "Always provisions a replica with disk, regardless of `DISK` DDL option.",
         true,
     );
+
+    const DEFAULT_CHECK_SCHEDULING_POLICIES_INTERVAL: u64 = 3;
+
+    pub static CLUSTER_CHECK_SCHEDULING_POLICIES_INTERVAL: VarDefinition = VarDefinition::new(
+        "cluster_check_scheduling_policies_interval",
+        value!(u64; DEFAULT_CHECK_SCHEDULING_POLICIES_INTERVAL),
+        "How often policies are invoked to automatically start/stop clusters, e.g., \
+            for REFRESH EVERY materialized views.",
+        true,
+    );
 }
 
 /// Macro to simplify creating feature flags, i.e. boolean flags that we use to toggle the

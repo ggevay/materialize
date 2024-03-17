@@ -383,4 +383,75 @@ true
   WHERE name = 'mv10';
 true
 
+# ----------------------------------------
+# Automated cluster scheduling for REFRESH
+# ----------------------------------------
+
+> CREATE CLUSTER scheduled_cluster (SIZE = '1', SCHEDULE = ON REFRESH, REPLICATION FACTOR = 1);
+
+# No MV yet, so the cluster should be turned off (even though it was turned on when we created it).
+> SELECT replication_factor FROM mz_catalog.mz_clusters WHERE name = 'scheduled_cluster';
+0
+
+> CREATE MATERIALIZED VIEW mv11
+  IN CLUSTER scheduled_cluster
+  WITH (REFRESH = EVERY '8 sec')
+  AS SELECT count(*) FROM t2;
+
+# The cluster should be turned on at some point.
+> SELECT replication_factor FROM mz_catalog.mz_clusters WHERE name = 'scheduled_cluster';
+1
+
+# And then the cluster should compute MV results.
+> SELECT * FROM mv11
+4
+
+# The cluster should be turned off at some point.
+> SELECT replication_factor FROM mz_catalog.mz_clusters WHERE name = 'scheduled_cluster';
+0
+
+> DELETE FROM t2;
+
+# The cluster should be turned on at some point again.
+> SELECT replication_factor FROM mz_catalog.mz_clusters WHERE name = 'scheduled_cluster';
+1
+
+# And then the cluster should compute MV results again.
+> SELECT * FROM mv11;
+0
+
+# Things should keep working if we switch from managed to unmanaged cluster and then back.
+> ALTER CLUSTER scheduled_cluster SET (MANAGED = false);
+> ALTER CLUSTER scheduled_cluster SET (MANAGED = true, SIZE = '1');
+
+> INSERT INTO t2 VALUES (64);
+
+> SELECT * FROM mv11;
+1
+
+## When we create an MV whose first refresh is in the far future, we should immediately turn on the cluster briefly, so
+## that the Persist shard's write frontier moves from 0 to the first refresh time.
+
+> CREATE CLUSTER scheduled_cluster_2 (SIZE = '1', SCHEDULE = ON REFRESH, REPLICATION FACTOR = 0);
+
+> CREATE MATERIALIZED VIEW mv12
+  IN CLUSTER scheduled_cluster_2
+  WITH (REFRESH AT '3000-01-01 23:59')
+  AS SELECT sum(y) FROM t2;
+
+# The MV's write frontier should move away from 0.
+> SELECT f.write_frontier > 0
+  FROM mz_internal.mz_frontiers f
+  JOIN mz_materialized_views m ON (m.id = f.object_id)
+  WHERE m.name = 'mv12'
+true
+
+# But then the cluster should turn off.
+> SELECT replication_factor FROM mz_catalog.mz_clusters WHERE name = 'scheduled_cluster_2';
+0
+
+# ----------------------------------------
+# Cleanup
+# ----------------------------------------
+
 > DROP DATABASE materialized_view_refresh_options;
