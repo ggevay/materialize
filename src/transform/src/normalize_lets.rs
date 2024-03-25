@@ -245,8 +245,6 @@ mod support {
     use std::collections::BTreeMap;
     use itertools::Itertools;
 
-    use itertools::Itertools;
-
     use mz_expr::{Id, LetRecLimit, LocalId, MirRelationExpr};
 
     pub(super) fn replace_bindings_from_map(
