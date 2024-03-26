@@ -293,7 +293,7 @@ impl EquivalencePropagation {
                 // and each input equivalence *other than* their own, projected onto the input's columns.
 
                 // Enumerate locations to find each child's analysis outputs.
-                let mut children: Vec<_> = derived.children_rev().collect::<Vec<_>>();
+                let mut children: Vec<_> = derived.children_rev();
                 children.reverse();
 
                 // For each child, assemble its equivalences using join-relative column numbers.

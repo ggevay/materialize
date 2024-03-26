@@ -189,17 +189,17 @@ impl NormalizeLets {
             ))?;
         }
 
-        assert_typ_matches_analysis_typ_if_non_rec(relation);
+        assert_typ_matches_analysis_typ(relation);
 
         Ok(())
     }
 }
 
-fn assert_typ_matches_analysis_typ_if_non_rec(relation: &mut MirRelationExpr) {
+fn assert_typ_matches_analysis_typ(relation: &mut MirRelationExpr) {
 
     println!("-------------------------------- relation:\n{}", relation.pretty());
 
-    if !relation.is_recursive() {
+    //if !relation.is_recursive() {
         use crate::analysis::{DerivedBuilder, RelationType, UniqueKeys};
         let mut builder = DerivedBuilder::default();
         builder.require::<RelationType>();
@@ -209,9 +209,10 @@ fn assert_typ_matches_analysis_typ_if_non_rec(relation: &mut MirRelationExpr) {
 
         let mut todo = vec![(&*relation, derived_view)];
         while let Some((expr, view)) = todo.pop() {
-            if let MirRelationExpr::LetRec { .. } = expr {
-                unreachable!()
-            } else {
+            // if let MirRelationExpr::LetRec { .. } = expr {
+            //     unreachable!()
+            // } else
+            {
                 let cols = view
                     .value::<RelationType>()
                     .expect("RelationType required")
@@ -236,7 +237,7 @@ fn assert_typ_matches_analysis_typ_if_non_rec(relation: &mut MirRelationExpr) {
             }
             todo.extend(expr.children().rev().zip_eq(view.children_rev()));
         }
-    }
+    //}
 }
 
 // Support methods that are unlikely to be useful to other modules.
