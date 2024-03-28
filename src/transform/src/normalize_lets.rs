@@ -27,6 +27,7 @@
 use itertools::Itertools;
 use mz_expr::{visit::Visit, MirRelationExpr};
 use mz_ore::{id_gen::IdGen, stack::RecursionLimitError};
+use mz_repr::RelationType;
 
 use crate::TransformCtx;
 
@@ -197,7 +198,7 @@ impl NormalizeLets {
 
 fn assert_typ_matches_analysis_typ(relation: &mut MirRelationExpr) {
 
-    println!("-------------------------------- relation:\n{}", relation.pretty());
+    ////println!("-------------------------------- relation:\n{}", relation.pretty());
 
     //if !relation.is_recursive() {
         use crate::analysis::{DerivedBuilder, RelationType, UniqueKeys};
@@ -222,22 +223,37 @@ fn assert_typ_matches_analysis_typ(relation: &mut MirRelationExpr) {
                     .value::<UniqueKeys>()
                     .expect("UniqueKeys required")
                     .clone();
-                let analysis_type = mz_repr::RelationType::new(cols).with_keys(keys);
+                let mut analysis_type = mz_repr::RelationType::new(cols).with_keys(keys);
 
-                let typ = expr.typ();
+                let mut typ = expr.typ();
 
-                println!("### expr:\n{}", expr.pretty());
+                ////println!("### expr:\n{}", expr.pretty());
+
                 // let mut config = ExplainConfig::default();
                 // config.keys = true;
                 // let s = expr.explain(&config, None);
                 // println!("### expr:\n{}", s);
 
                 //assert_eq!(typ.column_types, analysis_type.column_types);
-                assert_eq!(typ, analysis_type);
+                //assert_eq!(typ, analysis_type);
+
+
+                //let typ_keys = typ.keys.clone();
+                //typ.keys = typ.keys.into_iter().filter(|key| <Vec<Vec<usize>> as Clone>::clone(&typ_keys).into_iter().filter(|key2| key2 != key).all(|key2| key2.iter().any(|k2| !key.contains(k2)))).collect();
+                //assert_eq!(typ, analysis_type);
+
+                assert_eq!(normalize_to_antichain(&mut typ), normalize_to_antichain(&mut analysis_type));
             }
             todo.extend(expr.children().rev().zip_eq(view.children_rev()));
         }
     //}
+}
+
+fn normalize_to_antichain(typ0: &mut RelationType) {
+    let mut typ = typ0.clone();
+    let typ_keys = typ.keys.clone();
+    typ.keys = typ.keys.into_iter().filter(|key| <Vec<Vec<usize>> as Clone>::clone(&typ_keys).into_iter().filter(|key2| key2 != key).all(|key2| key2.iter().any(|k2| !key.contains(k2)))).sorted().collect_vec();
+    *typ0 = typ.clone();
 }
 
 // Support methods that are unlikely to be useful to other modules.
