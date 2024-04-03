@@ -272,7 +272,7 @@ pub enum Message<T = mz_repr::Timestamp> {
     },
     DrainStatementLog,
     PrivateLinkVpcEndpointEvents(Vec<VpcEndpointEvent>),
-    CheckSchedulingPolicies,
+    CheckSchedulingPolicies(Span),
 
     /// Scheduling policy decisions about turning clusters On/Off.
     /// `Vec<(policy name, Vec of decisions by the policy)>`
@@ -329,7 +329,7 @@ impl Message {
             Message::DrainStatementLog => "drain_statement_log",
             Message::AlterConnectionValidationReady(..) => "alter_connection_validation_ready",
             Message::PrivateLinkVpcEndpointEvents(_) => "private_link_vpc_endpoint_events",
-            Message::CheckSchedulingPolicies => "check_scheduling_policies",
+            Message::CheckSchedulingPolicies(_) => "check_scheduling_policies",
             Message::SchedulingDecisions { .. } => "scheduling_decision",
         }
     }
@@ -2568,7 +2568,9 @@ impl Coordinator {
                     // `tick()` on `Interval` is cancel-safe:
                     // https://docs.rs/tokio/1.19.2/tokio/time/struct.Interval.html#cancel-safety
                     _ = self.check_scheduling_policies_interval.tick() => {
-                        Message::CheckSchedulingPolicies
+                        let span = info_span!(parent: None, "coord::check_scheduling_policies_interval");
+                        span.follows_from(Span::current());
+                        Message::CheckSchedulingPolicies(span)
                     },
 
                     // Process the idle metric at the lowest priority to sample queue non-idle time.

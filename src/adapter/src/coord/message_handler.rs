@@ -206,8 +206,10 @@ impl Coordinator {
                         )
                         .await;
                 }
-                Message::CheckSchedulingPolicies => {
-                    self.check_scheduling_policies().await;
+                Message::CheckSchedulingPolicies(span) => {
+                    // Add an OpenTelemetry link to our current span.
+                    tracing::Span::current().add_link(span.context().span().span_context().clone());
+                    self.check_scheduling_policies().instrument(span).await;
                 }
                 Message::SchedulingDecisions(decisions) => {
                     self.handle_scheduling_decisions(decisions).await;
