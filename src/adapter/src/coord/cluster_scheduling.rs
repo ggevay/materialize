@@ -38,6 +38,8 @@ impl Coordinator {
         }
     }
 
+    /// Runs the `SCHEDULE = ON REFRESH` cluster scheduling policy, which checks whether the state
+    /// of any REFRESH materialized views necessitate turning a cluster On or Off.
     async fn check_refresh_policy(&mut self) -> Vec<(ClusterId, bool)> {
         let mut decisions: Vec<(ClusterId, bool)> = Vec::new();
         for cluster in self.catalog().clusters() {
@@ -86,6 +88,12 @@ impl Coordinator {
         decisions
     }
 
+    /// Handles `SchedulingDecisions`:
+    /// - Adds the newly made decisions to `cluster_scheduling_decisions`.
+    /// - Cleans up old decisions that are for clusters no longer in scope of automated scheduling
+    ///   decisions.
+    /// - For each cluster, it sums up `cluster_scheduling_decisions`, checks the summed up decision
+    ///   against the cluster state, and turns cluster On/Off if needed.
     #[mz_ore::instrument(level = "debug")]
     pub(crate) async fn handle_scheduling_decisions(
         &mut self,
