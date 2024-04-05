@@ -1142,6 +1142,12 @@ statement error db error: ERROR: cluster schedules other than MANUAL are not sup
 CREATE CLUSTER unmanaged2 (SCHEDULE = ON REFRESH, REPLICAS (r1 (SIZE '1')))
 
 statement ok
+CREATE CLUSTER c_schedule_5 (SIZE = '1');
+
+statement error db error: ERROR: Expected one of OWNER or RENAME or RESET or SET or SWAP, found left parenthesis
+ALTER CLUSTER c_schedule_5 (MANAGED = false, SCHEDULE = REFRESH);
+
+statement ok
 CREATE MATERIALIZED VIEW mv9
 IN CLUSTER c_schedule_1
 WITH (REFRESH = EVERY '8 sec')
