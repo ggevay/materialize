@@ -28,12 +28,12 @@ use mz_sql::catalog::{CatalogItemType, ObjectType, RoleAttributes, RoleMembershi
 use mz_sql::names::{
     CommentObjectId, DatabaseId, ResolvedDatabaseSpecifier, SchemaId, SchemaSpecifier,
 };
+use mz_sql::plan::ClusterSchedule;
 use mz_sql::session::vars::OwnedVarInput;
-use mz_sql_parser::ast::ClusterScheduleOptionValue;
 use mz_storage_types::instances::StorageInstanceId;
 use std::time::Duration;
 
-use crate::durable::objects::serialization::proto::{cluster_schedule_option_value, Empty};
+use crate::durable::objects::serialization::proto::{cluster_schedule, Empty};
 use crate::durable::objects::state_update::StateUpdateKindRaw;
 use crate::durable::objects::{
     AuditLogKey, ClusterIntrospectionSourceIndexKey, ClusterIntrospectionSourceIndexValue,
@@ -80,26 +80,24 @@ impl ProtoMapEntry<String, String> for proto::OptimizerFeatureOverride {
     }
 }
 
-impl RustType<proto::ClusterScheduleOptionValue> for ClusterScheduleOptionValue {
-    fn into_proto(&self) -> proto::ClusterScheduleOptionValue {
+impl RustType<proto::ClusterSchedule> for ClusterSchedule {
+    fn into_proto(&self) -> proto::ClusterSchedule {
         match self {
-            ClusterScheduleOptionValue::Manual => proto::ClusterScheduleOptionValue {
-                value: Some(cluster_schedule_option_value::Value::Manual(Empty {})),
+            ClusterSchedule::Manual => proto::ClusterSchedule {
+                value: Some(cluster_schedule::Value::Manual(Empty {})),
             },
-            ClusterScheduleOptionValue::Refresh => proto::ClusterScheduleOptionValue {
-                value: Some(cluster_schedule_option_value::Value::Refresh(Empty {})),
+            ClusterSchedule::Refresh(duration) => proto::ClusterSchedule {
+                value: Some(cluster_schedule::Value::Refresh(duration.into_proto())),
             },
         }
     }
 
-    fn from_proto(proto: proto::ClusterScheduleOptionValue) -> Result<Self, TryFromProtoError> {
+    fn from_proto(proto: proto::ClusterSchedule) -> Result<Self, TryFromProtoError> {
         match proto.value {
             None => Ok(Default::default()),
-            Some(cluster_schedule_option_value::Value::Manual(Empty {})) => {
-                Ok(ClusterScheduleOptionValue::Manual)
-            }
-            Some(cluster_schedule_option_value::Value::Refresh(Empty {})) => {
-                Ok(ClusterScheduleOptionValue::Refresh)
+            Some(cluster_schedule::Value::Manual(Empty {})) => Ok(ClusterSchedule::Manual),
+            Some(cluster_schedule::Value::Refresh(duration)) => {
+                Ok(ClusterSchedule::Refresh(Duration::from_proto(duration)?))
             }
         }
     }

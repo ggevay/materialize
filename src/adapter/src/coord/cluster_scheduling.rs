@@ -14,7 +14,7 @@ use mz_catalog::memory::objects::{CatalogItem, ClusterVariant, ClusterVariantMan
 use mz_controller_types::ClusterId;
 use mz_ore::soft_panic_or_log;
 use mz_sql::catalog::CatalogCluster;
-use mz_sql_parser::ast::ClusterScheduleOptionValue;
+use mz_sql::plan::ClusterSchedule;
 use std::time::Instant;
 use timely::progress::Antichain;
 use tracing::{debug, warn};
@@ -43,10 +43,10 @@ impl Coordinator {
         for cluster in self.catalog().clusters() {
             if let ClusterVariant::Managed(ref config) = cluster.config.variant {
                 match config.schedule {
-                    ClusterScheduleOptionValue::Manual => {
+                    ClusterSchedule::Manual => {
                         // Nothing to do, user manages this cluster manually.
                     }
-                    ClusterScheduleOptionValue::Refresh => {
+                    ClusterSchedule::Refresh(warmup) => {
                         let refresh_mv_write_frontiers = cluster
                             .bound_objects()
                             .iter()
@@ -76,6 +76,7 @@ impl Coordinator {
                         );
                         min_refresh_mv_write_frontiers.push((
                             cluster.id,
+                            warmup,
                             refresh_mv_write_frontiers
                                 .into_iter()
                                 .fold(Antichain::new(), |ac1, ac2| Lattice::meet(&ac1, ac2)),
@@ -102,10 +103,18 @@ impl Coordinator {
             );
             let decisions = min_refresh_mv_write_frontiers
                 .into_iter()
-                .map(|(cluster_id, min_refresh_mv_write_frontier)| {
+                .map(|(cluster_id, warmup, min_refresh_mv_write_frontier)| {
                     (
                         cluster_id,
-                        min_refresh_mv_write_frontier.less_than(&local_read_ts),
+                        // We are just checking that
+                        // write_frontier < local_read_ts + warmup
+                        min_refresh_mv_write_frontier.less_than(
+                            &(local_read_ts.step_forward_by(
+                                &warmup
+                                    .try_into()
+                                    .expect("`warmup` is checked during planning"),
+                            )),
+                        ),
                     )
                 })
                 .collect();
@@ -172,7 +181,7 @@ impl Coordinator {
                     self.cluster_scheduling_decisions.remove(&cluster_id);
                 }
                 Some(managed_config) => {
-                    if matches!(managed_config.schedule, ClusterScheduleOptionValue::Manual) {
+                    if matches!(managed_config.schedule, ClusterSchedule::Manual) {
                         debug!(
                             "handle_scheduling_decisions: \
                             Removing cluster {} from cluster_scheduling_decisions, \

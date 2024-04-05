@@ -3577,11 +3577,12 @@ impl<T: AstInfo> AstDisplay for RefreshOptionValue<T> {
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Deserialize, Serialize)]
 pub enum ClusterScheduleOptionValue {
     Manual,
-    Refresh,
+    Refresh(Option<IntervalValue>), // optional warmup
 }
 
 impl Default for ClusterScheduleOptionValue {
     fn default() -> Self {
+        // (Has to be consistent with `impl Default for ClusterSchedule`.)
         ClusterScheduleOptionValue::Manual
     }
 }
@@ -3592,8 +3593,13 @@ impl AstDisplay for ClusterScheduleOptionValue {
             ClusterScheduleOptionValue::Manual => {
                 f.write_str("MANUAL");
             }
-            ClusterScheduleOptionValue::Refresh => {
+            ClusterScheduleOptionValue::Refresh(warmup) => {
                 f.write_str("ON REFRESH");
+                if let Some(warmup) = warmup {
+                    f.write_str("(WARMUP =");
+                    f.write_node(warmup);
+                    f.write_str(")");
+                }
             }
         }
     }

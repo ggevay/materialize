@@ -1298,6 +1298,27 @@ SELECT mz_unsafe.mz_sleep(3);
 
 # Should stay off, because it was reset to manual.
 query I
-SELECT replication_factor FROM mz_catalog.mz_clusters WHERE name = 'c_schedule_3';
+SELECT replication_factor FROM mz_catalog.mz_clusters WHERE name = 'c_schedule_4';
 ----
 0
+
+## REHYDRATION TIME ESTIMATE (warmup)
+
+statement ok
+CREATE CLUSTER c_schedule_6 (SIZE = '1', SCHEDULE = ON REFRESH (WARMUP = '995 seconds'));
+
+# Create an MV whose first refresh is 1000 seconds from now.
+statement ok
+CREATE MATERIALIZED VIEW mv13
+IN CLUSTER c_schedule_6
+WITH (REFRESH AT mz_now()::string::int8 + 1000 * 1000)
+AS SELECT count(*) FROM t2;
+
+statement ok
+SELECT mz_unsafe.mz_sleep(5+3);
+
+# Should be turned on for warmup.
+query I
+SELECT replication_factor FROM mz_catalog.mz_clusters WHERE name = 'c_schedule_6';
+----
+1
