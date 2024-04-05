@@ -104,7 +104,12 @@ impl Coordinator {
         // - have been dropped, or
         // - were switched to unmanaged, or
         // - were switched to `SCHEDULE = MANUAL`.
-        for cluster_id in self.cluster_scheduling_decisions.keys().cloned().collect_vec() {
+        for cluster_id in self
+            .cluster_scheduling_decisions
+            .keys()
+            .cloned()
+            .collect_vec()
+        {
             match self.get_managed_cluster_config(cluster_id) {
                 None => {
                     // Cluster have been dropped or switched to unmanaged.
