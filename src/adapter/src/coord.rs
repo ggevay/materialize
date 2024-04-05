@@ -2115,7 +2115,9 @@ impl Coordinator {
     ///
     /// This method expects all dataflow plans to be available, so it must run after
     /// [`Coordinator::bootstrap_dataflow_plans`].
-    fn collect_dataflow_storage_constraints(&self) -> BTreeMap<GlobalId, StorageConstraints> {
+    pub(self) fn collect_dataflow_storage_constraints(
+        &self,
+    ) -> BTreeMap<GlobalId, StorageConstraints> {
         let is_storage_collection =
             |id: &GlobalId| self.controller.storage.check_exists(*id).is_ok();
 
@@ -2197,7 +2199,7 @@ impl Coordinator {
     /// # Panics
     ///
     /// Panics if the given dataflow exports neither an index nor a materialized view.
-    fn bootstrap_dataflow_as_of(
+    pub(self) fn bootstrap_dataflow_as_of(
         &mut self,
         dataflow: &DataflowDescription<Plan>,
         cluster_id: ComputeInstanceId,
