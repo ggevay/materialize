@@ -403,7 +403,7 @@ true
 1
 
 # And then the cluster should compute MV results.
-> SELECT * FROM mv11
+> SELECT * FROM mv11;
 4
 
 # The cluster should be turned off at some point.
@@ -449,6 +449,49 @@ true
 # But then the cluster should turn off.
 > SELECT replication_factor FROM mz_catalog.mz_clusters WHERE name = 'scheduled_cluster_2';
 0
+
+## Unbilled replicas.
+## - The auto scheduling won't create or drop unbilled replicas.
+## - But unbilled replicas can affect the auto scheduling: If a cluster has an unbilled replica at the moment when a
+##   refresh should happen, the unbilled replica might complete the refresh before the auto scheduling has a chance to
+##   create a replica. (However, it's not guaranteed that an unbilled replica will prevent the auto scheduling from
+##   creating a replica.)
+
+# Creating an unbilled replica on a `SCHEDULE = ON REFRESH` cluster shouldn't blow things up.
+
+$ postgres-connect name=mz_system url=postgres://mz_system:materialize@${testdrive.materialize-internal-sql-addr}
+$ postgres-execute connection=mz_system
+CREATE CLUSTER REPLICA scheduled_cluster.unbilled SIZE '2-2', BILLED AS 'free', INTERNAL;
+
+> INSERT INTO t2 VALUES (200);
+
+> SELECT * FROM mv11;
+2
+
+# Unbilled is not auto-dropped.
+
+> SELECT r.name
+  FROM mz_catalog.mz_cluster_replicas r, mz_catalog.mz_clusters c
+  WHERE c.id = r.cluster_id AND c.name = 'scheduled_cluster';
+unbilled
+
+> SELECT mz_unsafe.mz_sleep(3);
+<null>
+
+> SELECT r.name
+  FROM mz_catalog.mz_cluster_replicas r, mz_catalog.mz_clusters c
+  WHERE c.id = r.cluster_id AND c.name = 'scheduled_cluster';
+unbilled
+
+# Things continue normally after the unbilled is (manually) dropped.
+
+$ postgres-execute connection=mz_system
+DROP CLUSTER REPLICA scheduled_cluster.unbilled;
+
+> INSERT INTO t2 VALUES (99);
+
+> SELECT * FROM mv11;
+3
 
 # ----------------------------------------
 # Cleanup
