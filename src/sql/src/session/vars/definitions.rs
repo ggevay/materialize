@@ -1539,11 +1539,11 @@ pub mod cluster_scheduling {
         true,
     );
 
-    const DEFAULT_CHECK_SCHEDULING_POLICIES_INTERVAL: u64 = 3;
+    const DEFAULT_CHECK_SCHEDULING_POLICIES_INTERVAL: Duration = Duration::from_secs(3);
 
     pub static CLUSTER_CHECK_SCHEDULING_POLICIES_INTERVAL: VarDefinition = VarDefinition::new(
         "cluster_check_scheduling_policies_interval",
-        value!(u64; DEFAULT_CHECK_SCHEDULING_POLICIES_INTERVAL),
+        value!(Duration; DEFAULT_CHECK_SCHEDULING_POLICIES_INTERVAL),
         "How often policies are invoked to automatically start/stop clusters, e.g., \
             for REFRESH EVERY materialized views.",
         true,

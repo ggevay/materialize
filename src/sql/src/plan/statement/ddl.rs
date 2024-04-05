@@ -135,8 +135,8 @@ use crate::plan::{
     WebhookValidation,
 };
 use crate::session::vars;
-use crate::session::vars::ENABLE_REFRESH_EVERY_MVS;
 use crate::session::vars::ENABLE_CLUSTER_SCHEDULE_REFRESH;
+use crate::session::vars::ENABLE_REFRESH_EVERY_MVS;
 
 mod connection;
 

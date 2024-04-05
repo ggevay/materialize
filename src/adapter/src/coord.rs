@@ -3055,11 +3055,11 @@ pub fn serve(
         let segment_client_clone = segment_client.clone();
         let coord_now = now.clone();
         let advance_timelines_interval = tokio::time::interval(catalog.config().timestamp_interval);
-        let mut check_scheduling_policies_interval = tokio::time::interval(Duration::from_secs(
+        let mut check_scheduling_policies_interval = tokio::time::interval(
             catalog
                 .system_config()
                 .cluster_check_scheduling_policies_interval(),
-        ));
+        );
         check_scheduling_policies_interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
 
         if let Some(config) = pg_timestamp_oracle_config.as_ref() {
