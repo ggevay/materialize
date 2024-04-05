@@ -2008,7 +2008,7 @@ impl SystemVars {
         *self.expect_value(&cluster_scheduling::CLUSTER_ALWAYS_USE_DISK)
     }
 
-    pub fn cluster_check_scheduling_policies_interval(&self) -> u64 {
+    pub fn cluster_check_scheduling_policies_interval(&self) -> Duration {
         *self.expect_value(&cluster_scheduling::CLUSTER_CHECK_SCHEDULING_POLICIES_INTERVAL)
     }
 
