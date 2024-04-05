@@ -93,7 +93,7 @@ impl Coordinator {
     ) {
         for (policy_name, decisions) in decisions.iter() {
             for (cluster_id, decision) in decisions {
-                self.scheduling_decisions
+                self.cluster_scheduling_decisions
                     .entry(*cluster_id)
                     .or_insert_with(Default::default)
                     .insert(policy_name, *decision);
@@ -104,21 +104,21 @@ impl Coordinator {
         // - have been dropped, or
         // - were switched to unmanaged, or
         // - were switched to `SCHEDULE = MANUAL`.
-        for cluster_id in self.scheduling_decisions.keys().cloned().collect_vec() {
+        for cluster_id in self.cluster_scheduling_decisions.keys().cloned().collect_vec() {
             match self.get_managed_cluster_config(cluster_id) {
                 None => {
                     // Cluster have been dropped or switched to unmanaged.
-                    self.scheduling_decisions.remove(&cluster_id);
+                    self.cluster_scheduling_decisions.remove(&cluster_id);
                 }
                 Some(managed_config) => {
                     if matches!(managed_config.schedule, ClusterScheduleOptionValue::Manual) {
-                        self.scheduling_decisions.remove(&cluster_id);
+                        self.cluster_scheduling_decisions.remove(&cluster_id);
                     }
                 }
             }
         }
 
-        for (cluster_id, decisions) in self.scheduling_decisions.clone() {
+        for (cluster_id, decisions) in self.cluster_scheduling_decisions.clone() {
             // If all policies have made a decision about this cluster
             if POLICIES.iter().all(|policy| decisions.contains_key(policy)) {
                 // check whether the cluster's state matches the needed state.

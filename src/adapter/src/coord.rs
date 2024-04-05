@@ -1408,12 +1408,12 @@ pub struct Coordinator {
     pg_timestamp_oracle_config: Option<PostgresTimestampOracleConfig>,
 
     /// Periodically asks cluster scheduling policies to make their decisions.
-    check_scheduling_policies_interval: tokio::time::Interval,
+    check_cluster_scheduling_policies_interval: tokio::time::Interval,
 
     /// This keeps the last On/Off decision for each cluster and each scheduling policy.
     /// (Clusters that have been dropped or are otherwise out of scope for automatic scheduling are
     /// periodically cleaned up from this Map.)
-    scheduling_decisions: BTreeMap<ClusterId, BTreeMap<&'static str, bool>>,
+    cluster_scheduling_decisions: BTreeMap<ClusterId, BTreeMap<&'static str, bool>>,
 }
 
 impl Coordinator {
@@ -2567,7 +2567,7 @@ impl Coordinator {
                     },
                     // `tick()` on `Interval` is cancel-safe:
                     // https://docs.rs/tokio/1.19.2/tokio/time/struct.Interval.html#cancel-safety
-                    _ = self.check_scheduling_policies_interval.tick() => {
+                    _ = self.check_cluster_scheduling_policies_interval.tick() => {
                         let span = info_span!(parent: None, "coord::check_scheduling_policies_interval");
                         span.follows_from(Span::current());
                         Message::CheckSchedulingPolicies(span)
@@ -3130,8 +3130,8 @@ pub fn serve(
                     statement_logging: StatementLogging::new(coord_now.clone()),
                     webhook_concurrency_limit,
                     pg_timestamp_oracle_config,
-                    check_scheduling_policies_interval,
-                    scheduling_decisions: BTreeMap::new(),
+                    check_cluster_scheduling_policies_interval: check_scheduling_policies_interval,
+                    cluster_scheduling_decisions: BTreeMap::new(),
                 };
                 let bootstrap = handle.block_on(async {
                     coord
