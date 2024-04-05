@@ -2030,7 +2030,14 @@ feature_flags!(
     },
     {
         name: enable_refresh_every_mvs,
-        desc: "REFRESH EVERY materialized views",
+        desc: "REFRESH EVERY and REFRESH AT materialized views",
+        default: false,
+        internal: true,
+        enable_for_item_parsing: true,
+    },
+    {
+        name: enable_cluster_schedule_refresh,
+        desc: "`SCHEDULE = ON REFRESH` cluster option",
         default: false,
         internal: true,
         enable_for_item_parsing: true,

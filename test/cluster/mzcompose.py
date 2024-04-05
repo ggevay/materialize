@@ -3421,6 +3421,7 @@ def workflow_test_refresh_mv_restart(
         Materialized(
             additional_system_parameter_defaults={
                 "enable_refresh_every_mvs": "true",
+                "enable_cluster_schedule_refresh": "true",
             },
         ),
         Testdrive(no_reset=True),

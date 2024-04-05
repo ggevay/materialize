@@ -136,6 +136,7 @@ use crate::plan::{
 };
 use crate::session::vars;
 use crate::session::vars::ENABLE_REFRESH_EVERY_MVS;
+use crate::session::vars::ENABLE_CLUSTER_SCHEDULE_REFRESH;
 
 mod connection;
 
@@ -3592,7 +3593,7 @@ pub fn plan_create_cluster(
         }
 
         if !matches!(schedule, ClusterScheduleOptionValue::Manual) {
-            scx.require_feature_flag(&ENABLE_REFRESH_EVERY_MVS)?;
+            scx.require_feature_flag(&ENABLE_CLUSTER_SCHEDULE_REFRESH)?;
         }
 
         // Plan OptimizerFeatureOverrides.
@@ -4775,7 +4776,7 @@ pub fn plan_alter_cluster(
                     }
 
                     if !matches!(schedule, ClusterScheduleOptionValue::Manual) {
-                        scx.require_feature_flag(&ENABLE_REFRESH_EVERY_MVS)?;
+                        scx.require_feature_flag(&ENABLE_CLUSTER_SCHEDULE_REFRESH)?;
                     }
                 }
                 false => {
