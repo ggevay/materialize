@@ -413,6 +413,16 @@ true
 > SELECT replication_factor FROM mz_catalog.mz_clusters WHERE name = 'scheduled_cluster';
 0
 
+# We should have a "drop" in `mz_audit_events`
+> SELECT count(*) > 0
+  FROM mz_audit_events
+  WHERE
+    event_type = 'drop' AND
+    object_type = 'cluster-replica' AND
+    (details->'cluster_name')::text = '"scheduled_cluster"' AND
+    user IS NULL;
+true
+
 > DELETE FROM t2;
 
 # The cluster should be turned on at some point again.
@@ -422,6 +432,16 @@ true
 # And then the cluster should compute MV results again.
 > SELECT * FROM mv11;
 0
+
+# We should have a "create" in `mz_audit_events`
+> SELECT count(*) > 0
+  FROM mz_audit_events
+  WHERE
+    event_type = 'create' AND
+    object_type = 'cluster-replica' AND
+    (details->'cluster_name')::text = '"scheduled_cluster"' AND
+    user IS NULL;
+true
 
 # Things should keep working if we switch from managed to unmanaged cluster and then back.
 > ALTER CLUSTER scheduled_cluster SET (MANAGED = false);
