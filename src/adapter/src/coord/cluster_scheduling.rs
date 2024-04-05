@@ -13,8 +13,8 @@ use mz_catalog::memory::objects::{CatalogItem, ClusterVariant, ClusterVariantMan
 use mz_controller_types::ClusterId;
 use mz_ore::soft_panic_or_log;
 use mz_sql::catalog::CatalogCluster;
-use mz_sql_parser::ast::ClusterScheduleOptionValue;
 use tracing::warn;
+use mz_sql::plan::ClusterSchedule;
 
 const POLICIES: &[&str] = &[REFRESH_POLICY_NAME];
 
@@ -43,10 +43,10 @@ impl Coordinator {
         for cluster in self.catalog().clusters() {
             if let ClusterVariant::Managed(ref config) = cluster.config.variant {
                 match config.schedule {
-                    ClusterScheduleOptionValue::Manual => {
+                    ClusterSchedule::Manual => {
                         // nothing to do, user manages it manually
                     }
-                    ClusterScheduleOptionValue::Refresh => {
+                    ClusterSchedule::Refresh(warmup) => {
                         let refresh_mvs = cluster
                             .bound_objects()
                             .iter()
@@ -111,7 +111,7 @@ impl Coordinator {
                     self.scheduling_decisions.remove(&cluster_id);
                 }
                 Some(managed_config) => {
-                    if matches!(managed_config.schedule, ClusterScheduleOptionValue::Manual) {
+                    if matches!(managed_config.schedule, ClusterSchedule::Manual) {
                         self.scheduling_decisions.remove(&cluster_id);
                     }
                 }

@@ -42,13 +42,9 @@ use mz_sql::names::{
     Aug, CommentObjectId, DatabaseId, FullItemName, QualifiedItemName, QualifiedSchemaName,
     ResolvedDatabaseSpecifier, ResolvedIds, SchemaId, SchemaSpecifier,
 };
-use mz_sql::plan::{
-    CreateSourcePlan, HirRelationExpr, Ingestion as PlanIngestion, WebhookBodyFormat,
-    WebhookHeaders, WebhookValidation,
-};
+use mz_sql::plan::{ClusterSchedule, CreateSourcePlan, HirRelationExpr, Ingestion as PlanIngestion, WebhookBodyFormat, WebhookHeaders, WebhookValidation};
 use mz_sql::rbac;
 use mz_sql::session::vars::OwnedVarInput;
-use mz_sql_parser::ast::ClusterScheduleOptionValue;
 use mz_storage_client::controller::IntrospectionType;
 use mz_storage_types::connections::inline::ReferencedConnection;
 use mz_storage_types::sinks::{KafkaSinkFormat, SinkEnvelope, StorageSinkConnection};
@@ -1906,7 +1902,7 @@ pub struct ClusterVariantManaged {
     pub replication_factor: u32,
     pub disk: bool,
     pub optimizer_feature_overrides: OptimizerFeatureOverrides,
-    pub schedule: ClusterScheduleOptionValue,
+    pub schedule: ClusterSchedule,
 }
 
 impl From<ClusterVariantManaged> for durable::ClusterVariantManaged {

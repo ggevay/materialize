@@ -118,22 +118,7 @@ use crate::plan::statement::ddl::connection::{INALTERABLE_OPTIONS, MUTUALLY_EXCL
 use crate::plan::statement::{scl, StatementContext, StatementDesc};
 use crate::plan::typeconv::{plan_cast, CastContext};
 use crate::plan::with_options::{OptionalDuration, TryFromValue};
-use crate::plan::{
-    plan_utils, query, transform_ast, AlterClusterPlan, AlterClusterRenamePlan,
-    AlterClusterReplicaRenamePlan, AlterClusterSwapPlan, AlterConnectionPlan, AlterItemRenamePlan,
-    AlterNoopPlan, AlterOptionParameter, AlterRetainHistoryPlan, AlterRolePlan,
-    AlterSchemaRenamePlan, AlterSchemaSwapPlan, AlterSecretPlan, AlterSetClusterPlan,
-    AlterSourcePlan, AlterSystemResetAllPlan, AlterSystemResetPlan, AlterSystemSetPlan,
-    CommentPlan, ComputeReplicaConfig, ComputeReplicaIntrospectionConfig, CreateClusterManagedPlan,
-    CreateClusterPlan, CreateClusterReplicaPlan, CreateClusterUnmanagedPlan, CreateClusterVariant,
-    CreateConnectionPlan, CreateDatabasePlan, CreateIndexPlan, CreateMaterializedViewPlan,
-    CreateRolePlan, CreateSchemaPlan, CreateSecretPlan, CreateSinkPlan, CreateSourcePlan,
-    CreateTablePlan, CreateTypePlan, CreateViewPlan, DataSourceDesc, DropObjectsPlan,
-    DropOwnedPlan, FullItemName, HirScalarExpr, Index, Ingestion, MaterializedView, Params, Plan,
-    PlanClusterOption, PlanNotice, QueryContext, ReplicaConfig, Secret, Sink, Source, Table, Type,
-    VariableValue, View, WebhookBodyFormat, WebhookHeaderFilters, WebhookHeaders,
-    WebhookValidation,
-};
+use crate::plan::{plan_utils, query, transform_ast, AlterClusterPlan, AlterClusterRenamePlan, AlterClusterReplicaRenamePlan, AlterClusterSwapPlan, AlterConnectionPlan, AlterItemRenamePlan, AlterNoopPlan, AlterOptionParameter, AlterRetainHistoryPlan, AlterRolePlan, AlterSchemaRenamePlan, AlterSchemaSwapPlan, AlterSecretPlan, AlterSetClusterPlan, AlterSourcePlan, AlterSystemResetAllPlan, AlterSystemResetPlan, AlterSystemSetPlan, CommentPlan, ComputeReplicaConfig, ComputeReplicaIntrospectionConfig, CreateClusterManagedPlan, CreateClusterPlan, CreateClusterReplicaPlan, CreateClusterUnmanagedPlan, CreateClusterVariant, CreateConnectionPlan, CreateDatabasePlan, CreateIndexPlan, CreateMaterializedViewPlan, CreateRolePlan, CreateSchemaPlan, CreateSecretPlan, CreateSinkPlan, CreateSourcePlan, CreateTablePlan, CreateTypePlan, CreateViewPlan, DataSourceDesc, DropObjectsPlan, DropOwnedPlan, FullItemName, HirScalarExpr, Index, Ingestion, MaterializedView, Params, Plan, PlanClusterOption, PlanNotice, QueryContext, ReplicaConfig, Secret, Sink, Source, Table, Type, VariableValue, View, WebhookBodyFormat, WebhookHeaderFilters, WebhookHeaders, WebhookValidation, ClusterSchedule};
 use crate::session::vars;
 use crate::session::vars::ENABLE_REFRESH_EVERY_MVS;
 
@@ -3616,6 +3601,8 @@ pub fn plan_create_cluster(
             ..Default::default()
         };
 
+        let schedule = plan_cluster_schedule(schedule)?;
+
         Ok(Plan::CreateCluster(CreateClusterPlan {
             name: normalize::ident(name),
             variant: CreateClusterVariant::Managed(CreateClusterManagedPlan {
@@ -3855,6 +3842,32 @@ fn plan_compute_replica_config(
         idle_arrangement_merge_effort,
     };
     Ok(compute)
+}
+
+fn plan_cluster_schedule(schedule: ClusterScheduleOptionValue) -> Result<ClusterSchedule, PlanError> {
+    Ok(match schedule {
+        ClusterScheduleOptionValue::Manual => ClusterSchedule::Manual,
+        // If WARMUP is not explicitly given, we default to 0.
+        ClusterScheduleOptionValue::Refresh(None) => ClusterSchedule::Refresh(Duration::from_millis(0)),
+        // Otherwise we convert the `IntervalValue` to a `Duration`.
+        ClusterScheduleOptionValue::Refresh(Some(interval_value)) => {
+            let interval = Interval::try_from_value(Value::Interval(interval_value))?;
+            if interval.as_microseconds() < 0 {
+                sql_bail!("WARMUP must be non-negative; got: {}", interval);
+            }
+            if interval.months != 0 {
+                // This limitation is because we want this interval to be cleanly convertable
+                // to a unix epoch timestamp difference. When the interval involves months, then
+                // this is not true anymore, because months have variable lengths.
+                sql_bail!("WARMUP must not involve units larger than days");
+            }
+            let duration = interval.duration()?;
+            if u64::try_from(duration.as_millis()).is_err() {
+                sql_bail!("WARMUP too large");
+            }
+            ClusterSchedule::Refresh(duration)
+        }
+    })
 }
 
 pub fn describe_create_cluster_replica(
@@ -4892,7 +4905,7 @@ pub fn plan_alter_cluster(
             if !replicas.is_empty() {
                 options.replicas = AlterOptionParameter::Set(replicas);
             }
-            options.schedule = AlterOptionParameter::Set(schedule);
+            options.schedule = AlterOptionParameter::Set(plan_cluster_schedule(schedule)?);
         }
         AlterClusterAction::ResetOptions(reset_options) => {
             use AlterOptionParameter::Reset;

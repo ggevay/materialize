@@ -3801,7 +3801,17 @@ impl<'a> Parser<'a> {
             MANUAL => ClusterScheduleOptionValue::Manual,
             ON => {
                 self.expect_keyword(REFRESH)?;
-                ClusterScheduleOptionValue::Refresh
+                // Parse optional `(WARMUP ...)`
+                let warmup = if self.consume_token(&Token::LParen) {
+                    self.expect_keyword(WARMUP)?;
+                    let _ = self.consume_token(&Token::Eq);
+                    let interval = self.parse_interval_value()?;
+                    self.expect_token(&Token::RParen)?;
+                    Some(interval)
+                } else {
+                    None
+                };
+                ClusterScheduleOptionValue::Refresh(warmup)
             }
             _ => unreachable!(),
         };
