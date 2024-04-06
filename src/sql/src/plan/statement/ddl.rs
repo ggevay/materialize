@@ -3569,7 +3569,18 @@ pub fn plan_create_cluster(
             introspection_debugging.unwrap_or(false),
         )?;
 
-        let replication_factor = replication_factor.unwrap_or(1);
+        let replication_factor = if matches!(schedule, ClusterScheduleOptionValue::Manual) {
+            replication_factor.unwrap_or(1)
+        } else {
+            scx.require_feature_flag(&ENABLE_CLUSTER_SCHEDULE_REFRESH)?;
+            if replication_factor.is_some() {
+                sql_bail!("REPLICATION FACTOR cannot be given together with any SCHEDULE other than MANUAL");
+            }
+            // If we have a non-trivial schedule, then let's not have any replicas initially,
+            // to avoid quickly going back and forth if the schedule doesn't want a replica
+            // initially.
+            0
+        };
         let availability_zones = availability_zones.unwrap_or_default();
 
         if !availability_zones.is_empty() {
@@ -3590,10 +3601,6 @@ pub fn plan_create_cluster(
                 sql_bail!("DISK option not supported for cluster sizes ending in cc or C because disk is always enabled");
             }
             disk = true;
-        }
-
-        if !matches!(schedule, ClusterScheduleOptionValue::Manual) {
-            scx.require_feature_flag(&ENABLE_CLUSTER_SCHEDULE_REFRESH)?;
         }
 
         // Plan OptimizerFeatureOverrides.
@@ -4756,8 +4763,20 @@ pub fn plan_alter_cluster(
                     if replica_defs.is_some() {
                         sql_bail!("REPLICAS not supported for managed clusters");
                     }
+                    if !matches!(schedule, ClusterScheduleOptionValue::Manual) {
+                        scx.require_feature_flag(&ENABLE_CLUSTER_SCHEDULE_REFRESH)?;
+                    }
 
                     if let Some(replication_factor) = replication_factor {
+                        if !matches!(schedule, ClusterScheduleOptionValue::Manual) {
+                            sql_bail!("REPLICATION FACTOR cannot be given together with any SCHEDULE other than MANUAL");
+                        }
+                        if let Some(schedule) = cluster.schedule() {
+                            if !matches!(schedule, ClusterScheduleOptionValue::Manual) {
+                                sql_bail!("REPLICATION FACTOR cannot be set if the cluster SCHEDULE is anything other than MANUAL");
+                            }
+                        }
+
                         let internal_replica_count =
                             cluster.replicas().iter().filter(|r| r.internal()).count();
                         let hypothetical_replica_count =
@@ -4773,10 +4792,6 @@ pub fn plan_alter_cluster(
                                 hypothetical_replica_count,
                             });
                         }
-                    }
-
-                    if !matches!(schedule, ClusterScheduleOptionValue::Manual) {
-                        scx.require_feature_flag(&ENABLE_CLUSTER_SCHEDULE_REFRESH)?;
                     }
                 }
                 false => {

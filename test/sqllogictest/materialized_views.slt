@@ -1125,6 +1125,9 @@ CREATE CLUSTER c_schedule_0 (SIZE = '1', SCHEDULE = 42);
 statement error db error: ERROR: Expected one of MANUAL or ON, found REFRESH
 CREATE CLUSTER c_schedule_0 (SIZE = '1', SCHEDULE = REFRESH);
 
+statement error db error: ERROR: REPLICATION FACTOR cannot be given together with any SCHEDULE other than MANUAL
+CREATE CLUSTER c_schedule_0 (SIZE = '1', SCHEDULE = ON REFRESH, REPLICATION FACTOR = 1);
+
 statement ok
 CREATE CLUSTER c_schedule_1 (SIZE = '1', SCHEDULE = MANUAL);
 
@@ -1134,8 +1137,14 @@ CREATE CLUSTER c_schedule_2 (SIZE = '1', SCHEDULE MANUAL);
 statement ok
 CREATE CLUSTER c_schedule_3 (SIZE = '1', SCHEDULE = ON REFRESH);
 
+statement error db error: ERROR: REPLICATION FACTOR cannot be set if the cluster SCHEDULE is anything other than MANUAL
+ALTER cluster c_schedule_3 SET (REPLICATION FACTOR = 1);
+
 statement ok
 ALTER cluster c_schedule_1 RESET (SCHEDULE);
+
+statement error db error: ERROR: REPLICATION FACTOR cannot be given together with any SCHEDULE other than MANUAL
+ALTER cluster c_schedule_1 SET (REPLICATION FACTOR = 1, SCHEDULE = ON REFRESH);
 
 statement ok
 ALTER cluster c_schedule_1 SET (SCHEDULE = MANUAL);
@@ -1151,6 +1160,9 @@ ALTER cluster unmanaged1 SET (SCHEDULE = MANUAL);
 
 statement error db error: ERROR: cluster schedules other than MANUAL are not supported for unmanaged clusters
 ALTER cluster unmanaged1 SET (SCHEDULE = ON REFRESH);
+
+statement error db error: ERROR: REPLICATION FACTOR cannot be given together with any SCHEDULE other than MANUAL
+ALTER cluster unmanaged1 SET (managed = true, SCHEDULE = ON REFRESH, REPLICATION FACTOR = 1);
 
 statement error db error: ERROR: cluster schedules other than MANUAL are not supported for unmanaged clusters
 CREATE CLUSTER unmanaged2 (SCHEDULE = ON REFRESH, REPLICAS (r1 (SIZE '1')))
