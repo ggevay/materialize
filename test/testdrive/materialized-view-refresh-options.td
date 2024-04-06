@@ -523,3 +523,6 @@ DROP CLUSTER REPLICA scheduled_cluster.unbilled;
 # ----------------------------------------
 
 > DROP DATABASE materialized_view_refresh_options;
+> DROP CLUSTER refresh_cluster;
+> DROP CLUSTER scheduled_cluster;
+> DROP CLUSTER scheduled_cluster_2;
