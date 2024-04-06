@@ -390,9 +390,9 @@ true
 # Automated cluster scheduling for REFRESH
 # ----------------------------------------
 
-> CREATE CLUSTER scheduled_cluster (SIZE = '1', SCHEDULE = ON REFRESH, REPLICATION FACTOR = 1);
+> CREATE CLUSTER scheduled_cluster (SIZE = '1', SCHEDULE = ON REFRESH);
 
-# No MV yet, so the cluster should be turned off (even though it was turned on when we created it).
+# No MV yet, so the cluster should be turned off.
 > SELECT replication_factor FROM mz_catalog.mz_clusters WHERE name = 'scheduled_cluster';
 0
 
@@ -455,7 +455,9 @@ true
 ## When we create an MV whose first refresh is in the far future, we should immediately turn on the cluster briefly, so
 ## that the Persist shard's write frontier moves from 0 to the first refresh time.
 
-> CREATE CLUSTER scheduled_cluster_2 (SIZE = '1', SCHEDULE = ON REFRESH, REPLICATION FACTOR = 0);
+> CREATE CLUSTER scheduled_cluster_2 (SIZE = '1', SCHEDULE = ON REFRESH);
+> SELECT replication_factor FROM mz_catalog.mz_clusters WHERE name = 'scheduled_cluster_2';
+0
 
 > CREATE MATERIALIZED VIEW mv12
   IN CLUSTER scheduled_cluster_2
