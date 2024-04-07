@@ -15,6 +15,7 @@ use mz_controller_types::ClusterId;
 use mz_ore::soft_panic_or_log;
 use mz_sql::catalog::CatalogCluster;
 use mz_sql_parser::ast::ClusterScheduleOptionValue;
+use std::time::Instant;
 use timely::progress::Antichain;
 use tracing::warn;
 
@@ -35,6 +36,8 @@ impl Coordinator {
     /// oracle read ts), and sends `Message::SchedulingDecisions` with these decisions.
     /// (Queries the timestamp oracle on a background task.)
     fn check_refresh_policy(&mut self) {
+        let start_time = Instant::now();
+
         // Collect the smallest REFRESH MV write frontiers per cluster.
         let mut min_refresh_mv_write_frontiers = Vec::new();
         for cluster in self.catalog().clusters() {
@@ -104,6 +107,11 @@ impl Coordinator {
                 }
             },
         );
+
+        self.metrics
+            .check_scheduling_policies_seconds
+            .with_label_values(&[REFRESH_POLICY_NAME])
+            .observe((Instant::now() - start_time).as_secs_f64());
     }
 
     /// Handles `SchedulingDecisions`:
@@ -117,6 +125,8 @@ impl Coordinator {
         &mut self,
         decisions: Vec<(&'static str, Vec<(ClusterId, bool)>)>,
     ) {
+        let start_time = Instant::now();
+
         // 1. Add the received decisions to `cluster_scheduling_decisions`.
         for (policy_name, decisions) in decisions.iter() {
             for (cluster_id, decision) in decisions {
@@ -151,6 +161,7 @@ impl Coordinator {
         }
 
         // 3. Act on `scheduling_decisions` where needed.
+        let mut altered_a_cluster = false;
         for (cluster_id, decisions) in self.cluster_scheduling_decisions.clone() {
             // If all policies have made a decision about this cluster
             if POLICIES.iter().all(|policy| decisions.contains_key(policy)) {
@@ -162,6 +173,7 @@ impl Coordinator {
                 let has_replica = cluster_config.replication_factor > 0; // Is it On?
                 if needs_replica != has_replica {
                     // Turn the cluster On or Off.
+                    altered_a_cluster = true;
                     let mut new_config = cluster_config.clone();
                     new_config.replication_factor = if needs_replica { 1 } else { 0 };
                     if let Err(e) = self
@@ -187,6 +199,11 @@ impl Coordinator {
                 }
             }
         }
+
+        self.metrics
+            .handle_scheduling_decisions_seconds
+            .with_label_values(&[altered_a_cluster.to_string().as_str()])
+            .observe((Instant::now() - start_time).as_secs_f64());
     }
 
     /// Returns the managed config for a cluster. Returns None if the cluster doesn't exist or if
