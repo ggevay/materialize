@@ -12,6 +12,7 @@
 use std::collections::BTreeSet;
 
 use mz_adapter_types::compaction::CompactionWindow;
+use mz_adapter_types::connection::ConnectionId;
 use mz_catalog::memory::objects::{ClusterConfig, ClusterVariant, ClusterVariantManaged};
 use mz_compute_client::controller::ComputeReplicaConfig;
 use mz_controller::clusters::{
@@ -655,7 +656,7 @@ impl Coordinator {
         match (&config.variant, new_config.variant) {
             (Managed(config), Managed(new_config)) => {
                 self.sequence_alter_cluster_managed_to_managed(
-                    Some(session),
+                    Some(session.conn_id()),
                     cluster_id,
                     config,
                     new_config,
@@ -686,7 +687,7 @@ impl Coordinator {
 
     pub async fn sequence_alter_cluster_managed_to_managed(
         &mut self,
-        session: Option<&Session>,
+        conn_id: Option<&ConnectionId>,
         cluster_id: ClusterId,
         config: &ClusterVariantManaged,
         new_config: ClusterVariantManaged,
@@ -824,7 +825,7 @@ impl Coordinator {
             config: ClusterConfig { variant },
         });
 
-        self.catalog_transact(session, ops).await?;
+        self.catalog_transact_conn(conn_id, ops).await?;
         self.create_cluster_replicas(&create_cluster_replicas).await;
         Ok(())
     }
