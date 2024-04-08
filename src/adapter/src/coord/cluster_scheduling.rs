@@ -89,38 +89,31 @@ impl Coordinator {
         // compares this ts with the REFRESH MV write frontiers, thus making On/Off decisions per
         // cluster, and sends a `Message::SchedulingDecisions` with these decisions.
         let ts_oracle = self.get_local_timestamp_oracle();
-        let tokio_handle = tokio::runtime::Handle::current();
         let internal_cmd_tx = self.internal_cmd_tx.clone();
-        mz_ore::task::spawn_blocking(
-            || "refresh policy get ts and make decisions",
-            move || {
-                let local_read_ts = tokio_handle.block_on(async { ts_oracle.read_ts().await });
-
-                debug!(
-                    "check_refresh_policy background task: \
+        mz_ore::task::spawn(|| "refresh policy get ts and make decisions", async move {
+            let local_read_ts = ts_oracle.read_ts().await;
+            debug!(
+                "check_refresh_policy background task: \
                     local_read_ts: {}, min_refresh_mv_write_frontiers: {:?}",
-                    local_read_ts, min_refresh_mv_write_frontiers,
-                );
-
-                let decisions = min_refresh_mv_write_frontiers
-                    .into_iter()
-                    .map(|(cluster_id, min_refresh_mv_write_frontier)| {
-                        (
-                            cluster_id,
-                            min_refresh_mv_write_frontier.less_than(&local_read_ts),
-                        )
-                    })
-                    .collect();
-
-                if let Err(e) = internal_cmd_tx.send(Message::SchedulingDecisions(vec![(
-                    REFRESH_POLICY_NAME,
-                    decisions,
-                )])) {
-                    // It is not an error for this task to be running after `internal_cmd_rx` is dropped.
-                    warn!("internal_cmd_rx dropped before we could send: {:?}", e);
-                }
-            },
-        );
+                local_read_ts, min_refresh_mv_write_frontiers,
+            );
+            let decisions = min_refresh_mv_write_frontiers
+                .into_iter()
+                .map(|(cluster_id, min_refresh_mv_write_frontier)| {
+                    (
+                        cluster_id,
+                        min_refresh_mv_write_frontier.less_than(&local_read_ts),
+                    )
+                })
+                .collect();
+            if let Err(e) = internal_cmd_tx.send(Message::SchedulingDecisions(vec![(
+                REFRESH_POLICY_NAME,
+                decisions,
+            )])) {
+                // It is not an error for this task to be running after `internal_cmd_rx` is dropped.
+                warn!("internal_cmd_rx dropped before we could send: {:?}", e);
+            }
+        });
 
         self.metrics
             .check_scheduling_policies_seconds
