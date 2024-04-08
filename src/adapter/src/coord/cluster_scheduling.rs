@@ -17,7 +17,7 @@ use mz_sql::catalog::CatalogCluster;
 use mz_sql_parser::ast::ClusterScheduleOptionValue;
 use std::time::Instant;
 use timely::progress::Antichain;
-use tracing::warn;
+use tracing::{debug, warn};
 
 const POLICIES: &[&str] = &[REFRESH_POLICY_NAME];
 
@@ -47,9 +47,7 @@ impl Coordinator {
                         // Nothing to do, user manages this cluster manually.
                     }
                     ClusterScheduleOptionValue::Refresh => {
-                        min_refresh_mv_write_frontiers.push((
-                            cluster.id,
-                            cluster
+                        let refresh_mv_write_frontiers = cluster
                             .bound_objects()
                             .iter()
                             .filter_map(|id| {
@@ -70,8 +68,18 @@ impl Coordinator {
                                     None
                                 }
                             })
-                            .fold(Antichain::new(), |ac1, ac2| Lattice::meet(&ac1, ac2)))
+                            .collect_vec();
+                        debug!(
+                            "check_refresh_policy: cluster_id: {}, refresh_mv_write_frontiers: {:?}",
+                            cluster.id,
+                            refresh_mv_write_frontiers,
                         );
+                        min_refresh_mv_write_frontiers.push((
+                            cluster.id,
+                            refresh_mv_write_frontiers
+                                .into_iter()
+                                .fold(Antichain::new(), |ac1, ac2| Lattice::meet(&ac1, ac2)),
+                        ));
                     }
                 }
             }
@@ -87,6 +95,12 @@ impl Coordinator {
             || "refresh policy get ts and make decisions",
             move || {
                 let local_read_ts = tokio_handle.block_on(async { ts_oracle.read_ts().await });
+
+                debug!(
+                    "check_refresh_policy background task: \
+                    local_read_ts: {}, min_refresh_mv_write_frontiers: {:?}",
+                    local_read_ts, min_refresh_mv_write_frontiers,
+                );
 
                 let decisions = min_refresh_mv_write_frontiers
                     .into_iter()
@@ -150,10 +164,22 @@ impl Coordinator {
             match self.get_managed_cluster_config(cluster_id) {
                 None => {
                     // Cluster have been dropped or switched to unmanaged.
+                    debug!(
+                        "handle_scheduling_decisions: \
+                        Removing cluster {} from cluster_scheduling_decisions, \
+                        because get_managed_cluster_config returned None",
+                        cluster_id
+                    );
                     self.cluster_scheduling_decisions.remove(&cluster_id);
                 }
                 Some(managed_config) => {
                     if matches!(managed_config.schedule, ClusterScheduleOptionValue::Manual) {
+                        debug!(
+                            "handle_scheduling_decisions: \
+                            Removing cluster {} from cluster_scheduling_decisions, \
+                            because schedule is Manual",
+                            cluster_id
+                        );
                         self.cluster_scheduling_decisions.remove(&cluster_id);
                     }
                 }
@@ -197,6 +223,12 @@ impl Coordinator {
                         );
                     }
                 }
+            } else {
+                debug!(
+                    "handle_scheduling_decisions: \
+                    Not all policies have made a decision about cluster {}. decisions: {:?}",
+                    cluster_id, decisions,
+                );
             }
         }
 
