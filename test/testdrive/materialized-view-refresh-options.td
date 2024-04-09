@@ -444,7 +444,7 @@ true
 true
 
 # Things should keep working if we switch from managed to unmanaged cluster and then back.
-> ALTER CLUSTER scheduled_cluster SET (MANAGED = false);
+> ALTER CLUSTER scheduled_cluster SET (MANAGED = false, SCHEDULE = MANUAL);
 > ALTER CLUSTER scheduled_cluster SET (MANAGED = true, SIZE = '1', SCHEDULE = ON REFRESH);
 
 > INSERT INTO t2 VALUES (64);
