@@ -182,9 +182,12 @@ impl Coordinator {
         // 3. Act on `scheduling_decisions` where needed.
         let mut altered_a_cluster = false;
         for (cluster_id, decisions) in self.cluster_scheduling_decisions.clone() {
-            // If all policies have made a decision about this cluster
+            // We touch a cluster only when all policies have made a decision about it. This is
+            // to ensure that after an envd restart all policies have a chance to run at least once
+            // before we turn off a cluster, to avoid spuriously turning off a cluster and possibly
+            // losing a hydrated state.
             if POLICIES.iter().all(|policy| decisions.contains_key(policy)) {
-                // check whether the cluster's state matches the needed state.
+                // Check whether the cluster's state matches the needed state.
                 let needs_replica = decisions.values().contains(&true);
                 let cluster_config = self
                     .get_managed_cluster_config(cluster_id)
