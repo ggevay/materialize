@@ -4766,12 +4766,16 @@ pub fn plan_alter_cluster(
                     if replica_defs.is_some() {
                         sql_bail!("REPLICAS not supported for managed clusters");
                     }
-                    if schedule.is_some() && !matches!(schedule, Some(ClusterScheduleOptionValue::Manual)) {
+                    if schedule.is_some()
+                        && !matches!(schedule, Some(ClusterScheduleOptionValue::Manual))
+                    {
                         scx.require_feature_flag(&ENABLE_CLUSTER_SCHEDULE_REFRESH)?;
                     }
 
                     if let Some(replication_factor) = replication_factor {
-                        if schedule.is_some() && !matches!(schedule, Some(ClusterScheduleOptionValue::Manual)) {
+                        if schedule.is_some()
+                            && !matches!(schedule, Some(ClusterScheduleOptionValue::Manual))
+                        {
                             sql_bail!("REPLICATION FACTOR cannot be given together with any SCHEDULE other than MANUAL");
                         }
                         if let Some(current_schedule) = cluster.schedule() {
@@ -4816,11 +4820,15 @@ pub fn plan_alter_cluster(
                     if disk.is_some() {
                         sql_bail!("DISK not supported for unmanaged clusters");
                     }
-                    if schedule.is_some() && !matches!(schedule, Some(ClusterScheduleOptionValue::Manual)) {
+                    if schedule.is_some()
+                        && !matches!(schedule, Some(ClusterScheduleOptionValue::Manual))
+                    {
                         sql_bail!("cluster schedules other than MANUAL are not supported for unmanaged clusters");
                     }
                     if let Some(current_schedule) = cluster.schedule() {
-                        if !matches!(current_schedule, ClusterScheduleOptionValue::Manual) && schedule.is_none() {
+                        if !matches!(current_schedule, ClusterScheduleOptionValue::Manual)
+                            && schedule.is_none()
+                        {
                             sql_bail!(
                                 "when switching a cluster to unmanaged, if the managed \
                                 cluster's SCHEDULE is anything other than MANUAL, you have to \

@@ -90,7 +90,10 @@ impl Coordinator {
         // cluster, and sends a `Message::SchedulingDecisions` with these decisions.
         let ts_oracle = self.get_local_timestamp_oracle();
         let internal_cmd_tx = self.internal_cmd_tx.clone();
+        let check_scheduling_policies_seconds_cloned =
+            self.metrics.check_scheduling_policies_seconds.clone();
         mz_ore::task::spawn(|| "refresh policy get ts and make decisions", async move {
+            let task_start_time = Instant::now();
             let local_read_ts = ts_oracle.read_ts().await;
             debug!(
                 "check_refresh_policy background task: \
@@ -113,11 +116,14 @@ impl Coordinator {
                 // It is not an error for this task to be running after `internal_cmd_rx` is dropped.
                 warn!("internal_cmd_rx dropped before we could send: {:?}", e);
             }
+            check_scheduling_policies_seconds_cloned
+                .with_label_values(&[REFRESH_POLICY_NAME, "background"])
+                .observe((Instant::now() - task_start_time).as_secs_f64());
         });
 
         self.metrics
             .check_scheduling_policies_seconds
-            .with_label_values(&[REFRESH_POLICY_NAME])
+            .with_label_values(&[REFRESH_POLICY_NAME, "main"])
             .observe((Instant::now() - start_time).as_secs_f64());
     }
 

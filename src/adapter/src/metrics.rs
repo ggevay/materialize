@@ -147,7 +147,7 @@ impl Metrics {
             check_scheduling_policies_seconds: registry.register(metric!(
                 name: "mz_check_scheduling_policies_seconds",
                 help: "The time each policy in `check_scheduling_policies` takes.",
-                var_labels: ["policy"],
+                var_labels: ["policy", "thread"],
                 buckets: histogram_seconds_buckets(0.000_128, 8.0),
             )),
             handle_scheduling_decisions_seconds: registry.register(metric!(
