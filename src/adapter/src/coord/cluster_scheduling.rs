@@ -69,11 +69,7 @@ impl Coordinator {
                                 }
                             })
                             .collect_vec();
-                        debug!(
-                            "check_refresh_policy: cluster_id: {}, refresh_mv_write_frontiers: {:?}",
-                            cluster.id,
-                            refresh_mv_write_frontiers,
-                        );
+                        debug!(%cluster.id, ?refresh_mv_write_frontiers, "check_refresh_policy");
                         min_refresh_mv_write_frontiers.push((
                             cluster.id,
                             refresh_mv_write_frontiers
@@ -95,11 +91,7 @@ impl Coordinator {
         mz_ore::task::spawn(|| "refresh policy get ts and make decisions", async move {
             let task_start_time = Instant::now();
             let local_read_ts = ts_oracle.read_ts().await;
-            debug!(
-                "check_refresh_policy background task: \
-                    local_read_ts: {}, min_refresh_mv_write_frontiers: {:?}",
-                local_read_ts, min_refresh_mv_write_frontiers,
-            );
+            debug!(%local_read_ts, ?min_refresh_mv_write_frontiers, "check_refresh_policy background task");
             let decisions = min_refresh_mv_write_frontiers
                 .into_iter()
                 .map(|(cluster_id, min_refresh_mv_write_frontier)| {
