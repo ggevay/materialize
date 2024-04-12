@@ -12,6 +12,7 @@
 use std::collections::BTreeSet;
 
 use mz_adapter_types::compaction::CompactionWindow;
+use mz_adapter_types::connection::ConnectionId;
 use mz_catalog::memory::objects::{ClusterConfig, ClusterVariant, ClusterVariantManaged};
 use mz_compute_client::controller::ComputeReplicaConfig;
 use mz_controller::clusters::{
@@ -655,7 +656,8 @@ impl Coordinator {
         match (&config.variant, new_config.variant) {
             (Managed(config), Managed(new_config)) => {
                 self.sequence_alter_cluster_managed_to_managed(
-                    Some(session),
+                    session.conn_id(),
+                    session.role_metadata().current_role,
                     cluster_id,
                     config,
                     new_config,
@@ -686,7 +688,8 @@ impl Coordinator {
 
     pub async fn sequence_alter_cluster_managed_to_managed(
         &mut self,
-        session: Option<&Session>,
+        conn_id: &ConnectionId,
+        role_id: RoleId,
         cluster_id: ClusterId,
         config: &ClusterVariantManaged,
         new_config: ClusterVariantManaged,
@@ -717,9 +720,8 @@ impl Coordinator {
             },
         ) = (&config, &new_config);
 
-        let role_id = session.map(|s| s.role_metadata().current_role);
         self.catalog.ensure_valid_replica_size(
-            &self.catalog().get_role_allowed_cluster_sizes(&role_id),
+            &self.catalog().get_role_allowed_cluster_sizes(&Some(role_id)),
             new_size,
         )?;
 
@@ -823,7 +825,7 @@ impl Coordinator {
             config: ClusterConfig { variant },
         });
 
-        self.catalog_transact(session, ops).await?;
+        self.catalog_transact_conn(Some(conn_id), ops).await?;
         self.create_cluster_replicas(&create_cluster_replicas).await;
         Ok(())
     }

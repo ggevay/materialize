@@ -18,6 +18,8 @@ use mz_sql::plan::ClusterSchedule;
 use std::time::Instant;
 use timely::progress::Antichain;
 use tracing::{debug, warn};
+use mz_catalog::SYSTEM_CONN_ID;
+use mz_sql::session::user::MZ_SYSTEM_ROLE_ID;
 
 const POLICIES: &[&str] = &[REFRESH_POLICY_NAME];
 
@@ -209,7 +211,8 @@ impl Coordinator {
                     new_config.replication_factor = if needs_replica { 1 } else { 0 };
                     if let Err(e) = self
                         .sequence_alter_cluster_managed_to_managed(
-                            None,
+                            &SYSTEM_CONN_ID,
+                            MZ_SYSTEM_ROLE_ID,
                             cluster_id,
                             &cluster_config,
                             new_config.clone(),
