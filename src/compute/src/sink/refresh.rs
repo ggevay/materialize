@@ -8,8 +8,8 @@
 // by the Apache License, Version 2.0.
 
 use differential_dataflow::{AsCollection, Collection, Data};
-use mz_expr::refresh_schedule::RefreshSchedule;
 use mz_ore::soft_panic_or_log;
+use mz_repr::refresh_schedule::RefreshSchedule;
 use mz_repr::{Diff, Timestamp};
 use mz_timely_util::buffer::ConsolidateBuffer;
 use timely::dataflow::channels::pact::Pipeline;
