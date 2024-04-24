@@ -964,7 +964,8 @@ where
                         IntrospectionType::ComputeDependencies
                         | IntrospectionType::ComputeReplicaHeartbeats
                         | IntrospectionType::ComputeHydrationStatus
-                        | IntrospectionType::ComputeOperatorHydrationStatus => {
+                        | IntrospectionType::ComputeOperatorHydrationStatus
+                        | IntrospectionType::ComputeMaterializedViewRefreshes => {
                             self.reconcile_managed_collection(id, vec![]).await;
                         }
 

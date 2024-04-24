@@ -45,6 +45,7 @@ use mz_dyncfg::ConfigSet;
 use mz_expr::RowSetFinishing;
 use mz_ore::metrics::MetricsRegistry;
 use mz_ore::tracing::OpenTelemetryContext;
+use mz_repr::refresh_schedule::RefreshSchedule;
 use mz_repr::{Datum, Diff, GlobalId, Row, TimestampManipulation};
 use mz_storage_client::controller::{IntrospectionType, StorageController};
 use mz_storage_types::read_policy::ReadPolicy;
@@ -54,6 +55,7 @@ use timely::progress::Antichain;
 use tokio::time::{self, MissedTickBehavior};
 use tracing::warn;
 use uuid::Uuid;
+use mz_compute_types::plan::LirId;
 
 use crate::controller::error::{
     CollectionLookupError, CollectionMissing, CollectionUpdateError, DataflowCreationError,
@@ -157,7 +159,7 @@ pub struct ComputeController<T> {
     /// Dynamic system configuration.
     ///
     /// Updated through `ComputeController::update_configuration` calls and shared with all
-    /// subcompontents of the compute controller.
+    /// subcomponents of the compute controller.
     dyncfg: Arc<ConfigSet>,
 
     /// Receiver for responses produced by `Instance`s, to be delivered on subsequent calls to
@@ -786,6 +788,9 @@ impl<T: ComputeControllerTimestamp> ComputeInstanceRef<'_, T> {
 /// compute dataflow.
 #[derive(Debug)]
 pub struct CollectionState<T> {
+    /// The id of this collection.
+    collection_id: GlobalId,
+
     /// Whether this collection is a log collection.
     ///
     /// Log collections are special in that they are only maintained by a subset of all replicas.
@@ -833,6 +838,8 @@ pub struct CollectionState<T> {
     replica_write_frontiers: BTreeMap<ReplicaId, Antichain<T>>,
     /// The input frontiers reported by individual replicas.
     replica_input_frontiers: BTreeMap<ReplicaId, Antichain<T>>,
+    /// //////////////////todo
+    collection_introspection: CollectionIntrospection<T>,
 }
 
 impl<T> CollectionState<T> {
@@ -862,9 +869,13 @@ impl<T> CollectionState<T> {
 impl<T: ComputeControllerTimestamp> CollectionState<T> {
     /// Creates a new collection state, with an initial read policy valid from `since`.
     pub fn new(
+        collection_id: GlobalId,
         as_of: Antichain<T>,
         storage_dependencies: Vec<GlobalId>,
         compute_dependencies: Vec<GlobalId>,
+        introspection_tx: crossbeam_channel::Sender<IntrospectionUpdates>,
+        initial_as_of: Option<Antichain<T>>,
+        refresh_schedule: Option<RefreshSchedule>,
     ) -> Self {
         // A collection is not readable before the `as_of`.
         let since = as_of.clone();
@@ -880,6 +891,7 @@ impl<T: ComputeControllerTimestamp> CollectionState<T> {
         read_capabilities.update_iter(warmup_capability.iter().map(|time| (time.clone(), 1)));
 
         Self {
+            collection_id,
             log_collection: false,
             dropped: false,
             scheduled: false,
@@ -892,16 +904,124 @@ impl<T: ComputeControllerTimestamp> CollectionState<T> {
             write_frontier: upper,
             replica_write_frontiers: BTreeMap::new(),
             replica_input_frontiers: BTreeMap::new(),
+            collection_introspection: CollectionIntrospection::new(
+                collection_id,
+                introspection_tx,
+                initial_as_of,
+                refresh_schedule,
+            ),
         }
     }
 
     /// Creates a new collection state for a log collection.
-    pub fn new_log_collection() -> Self {
+    pub fn new_log_collection(
+        id: GlobalId,
+        introspection_tx: crossbeam_channel::Sender<IntrospectionUpdates>,
+    ) -> Self {
         let since = Antichain::from_elem(timely::progress::Timestamp::minimum());
-        let mut state = Self::new(since, Vec::new(), Vec::new());
+        let mut state = Self::new(
+            id,
+            since,
+            Vec::new(),
+            Vec::new(),
+            introspection_tx,
+            None,
+            None,
+        );
         state.log_collection = true;
         // Log collections are created and scheduled implicitly as part of replica initialization.
         state.scheduled = true;
         state
+    }
+}
+
+#[derive(Debug)]
+struct CollectionIntrospection<T> {
+    /// The ID of the compute collection.
+    collection_id: GlobalId,
+    /// A channel through which introspection updates are delivered.
+    introspection_tx: crossbeam_channel::Sender<IntrospectionUpdates>,
+    /// ////////todo
+    /// `Some` if it is a REFRESH MV
+    refresh_introspection_state: Option<RefreshIntrospectionState<T>>,
+}
+
+impl<T: ComputeControllerTimestamp> CollectionIntrospection<T> {
+    pub fn new(
+        collection_id: GlobalId,
+        introspection_tx: crossbeam_channel::Sender<IntrospectionUpdates>,
+        initial_as_of: Option<Antichain<T>>,
+        refresh_schedule: Option<RefreshSchedule>,
+    ) -> CollectionIntrospection<T> {
+        let self_ = CollectionIntrospection {
+            collection_id,
+            introspection_tx,
+            refresh_introspection_state: refresh_schedule.map(|refresh_schedule| {
+                RefreshIntrospectionState::new(refresh_schedule, initial_as_of.expect("if we have a refresh_schedule, then it's an MV, so we should also have an initial_as_of"))
+            })
+        };
+
+        self_.refresh_introspection_state.as_ref().map(|refresh_introspection_state| {
+            let insertion = refresh_introspection_state.row_for_collection(collection_id);
+            self_.send(
+                IntrospectionType::ComputeMaterializedViewRefreshes,
+                vec![(insertion, 1)],
+            );
+        });
+
+        self_
+    }
+
+    fn send(&self, introspection_type: IntrospectionType, updates: Vec<(Row, Diff)>) {
+        let result = self.introspection_tx.send((introspection_type, updates));
+
+        if result.is_err() {
+            // The global controller holds on to the `introspection_rx`. So when we get here that
+            // probably means that the controller was dropped and the process is shutting down, in
+            // which case we don't care about introspection updates anymore.
+            /////////// todo: comment is copy-pasted; check it
+            tracing::info!(
+                ?introspection_type,
+                "discarding introspection update because the receiver disconnected"
+            );
+        }
+    }
+}
+
+/// Information needed to compute introspection updates for a REFRESH materialized view when the
+/// write frontier advances.
+#[derive(Debug)]
+struct RefreshIntrospectionState<T> {
+    refresh_schedule: RefreshSchedule,
+    initial_as_of: Antichain<T>,
+    next_refresh: Option<T>, ///// or Antichain<T>?
+    last_completed_refresh: Option<T>,
+}
+
+impl<T: ComputeControllerTimestamp> RefreshIntrospectionState<T> {
+    pub fn new(
+        refresh_schedule: RefreshSchedule,
+        initial_as_of: Antichain<T>,
+    ) -> RefreshIntrospectionState<T> {
+        RefreshIntrospectionState {
+            refresh_schedule: refresh_schedule.clone(),
+            initial_as_of: initial_as_of.clone(),
+            next_refresh: initial_as_of
+                .as_option()
+                .cloned()
+                .map(|initial_as_of| initial_as_of.round_up(&refresh_schedule))
+                .flatten(), // first refresh
+            last_completed_refresh: None,
+        }
+    }
+
+    /// Return a `Row` reflecting the current refresh introspection state.
+    pub fn row_for_collection(&self, collection_id: GlobalId) -> Row {
+        Row::pack_slice(&[
+            Datum::String(&collection_id.to_string()),
+            ///////// todo
+            Datum::Null,
+            Datum::Null,
+        ])
     }
 }
