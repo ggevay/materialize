@@ -140,7 +140,7 @@ impl ComputeReplicaLogging {
 }
 
 /// A controller for the compute layer.
-pub struct ComputeController<T: ComputeControllerTimestamp> {
+pub struct ComputeController<T> {
     instances: BTreeMap<ComputeInstanceId, Instance<T>>,
     build_info: &'static BuildInfo,
     /// Set to `true` once `initialization_complete` has been called.
@@ -513,7 +513,7 @@ where
 }
 
 /// A wrapper around a [`ComputeController`] with a live connection to a storage controller.
-pub struct ActiveComputeController<'a, T: ComputeControllerTimestamp> {
+pub struct ActiveComputeController<'a, T> {
     compute: &'a mut ComputeController<T>,
     storage: &'a mut dyn StorageController<Timestamp = T>,
 }
@@ -760,7 +760,7 @@ where
 
 /// A read-only handle to a compute instance.
 #[derive(Debug, Clone, Copy)]
-pub struct ComputeInstanceRef<'a, T: ComputeControllerTimestamp> {
+pub struct ComputeInstanceRef<'a, T> {
     instance_id: ComputeInstanceId,
     instance: &'a Instance<T>,
 }
@@ -787,7 +787,7 @@ impl<T: ComputeControllerTimestamp> ComputeInstanceRef<'_, T> {
 /// A compute collection is either an index, or a storage sink, or a subscribe, exported by a
 /// compute dataflow.
 #[derive(Debug)]
-pub struct CollectionState<T: ComputeControllerTimestamp> {
+pub struct CollectionState<T> {
     /// The id of this collection.
     collection_id: GlobalId,
 
@@ -842,7 +842,7 @@ pub struct CollectionState<T: ComputeControllerTimestamp> {
     collection_introspection: CollectionIntrospection<T>,
 }
 
-impl<T: ComputeControllerTimestamp> CollectionState<T> {
+impl<T> CollectionState<T> {
     /// Reports the current read capability.
     pub fn read_capability(&self) -> &Antichain<T> {
         &self.implied_capability
@@ -936,7 +936,7 @@ impl<T: ComputeControllerTimestamp> CollectionState<T> {
 }
 
 #[derive(Debug)]
-struct CollectionIntrospection<T: ComputeControllerTimestamp> {
+struct CollectionIntrospection<T> {
     /// The ID of the compute collection.
     collection_id: GlobalId,
     /// A channel through which introspection updates are delivered.
@@ -985,18 +985,6 @@ impl<T: ComputeControllerTimestamp> CollectionIntrospection<T> {
                 "discarding introspection update because the receiver disconnected"
             );
         }
-    }
-}
-
-impl<T: ComputeControllerTimestamp> Drop for CollectionIntrospection<T> {
-    fn drop(&mut self) {
-        self.refresh_introspection_state.as_ref().map(|refresh_introspection_state| {
-            let retraction = refresh_introspection_state.row_for_collection(self.collection_id);
-            self.send(
-                IntrospectionType::ComputeMaterializedViewRefreshes,
-                vec![(retraction, -1)],
-            );
-        });
     }
 }
 
