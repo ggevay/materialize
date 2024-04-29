@@ -1850,6 +1850,11 @@ where
 
             self.compute
                 .update_hydration_status(id, replica_id, &new_frontier);
+            self.compute
+                .collection_mut(id)
+                .expect("we know about the collection")
+                .collection_introspection
+                .frontier_update(&new_frontier);
             self.update_write_frontiers(replica_id, &[(id, new_frontier.clone())].into());
 
             if let Ok(coll) = self.compute.collection(id) {

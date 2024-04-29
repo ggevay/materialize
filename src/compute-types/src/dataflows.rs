@@ -264,7 +264,7 @@ impl<T> DataflowDescription<OptimizedMirRelationExpr, (), T> {
 }
 
 impl<P, S, T> DataflowDescription<P, S, T> {
-    /// Assigns the `as_of` frontier to the supplied argument.
+    /// Sets the `as_of` frontier to the supplied argument.
     ///
     /// This method allows the dataflow to indicate a frontier up through
     /// which all times should be advanced. This can be done for at least
@@ -291,6 +291,7 @@ impl<P, S, T> DataflowDescription<P, S, T> {
         self.as_of = Some(as_of);
     }
 
+    /// Records the initial `as_of` of the storage collection associated with a materialized view.
     pub fn set_initial_as_of(&mut self, initial_as_of: Antichain<T>) {
         self.initial_as_of = Some(initial_as_of);
     }

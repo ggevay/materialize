@@ -3083,12 +3083,9 @@ pub static MZ_MATERIALIZED_VIEW_REFRESHES: Lazy<BuiltinSource> = Lazy::new(|| Bu
         .with_column("materialized_view_id", ScalarType::String.nullable(false))
         .with_column(
             "last_completed_refresh",
-            ScalarType::TimestampTz { precision: None }.nullable(true),
+            ScalarType::MzTimestamp.nullable(true),
         )
-        .with_column(
-            "next_refresh",
-            ScalarType::TimestampTz { precision: None }.nullable(true),
-        ),
+        .with_column("next_refresh", ScalarType::MzTimestamp.nullable(true)),
     is_retained_metrics_object: false,
     access: vec![PUBLIC_SELECT],
 });

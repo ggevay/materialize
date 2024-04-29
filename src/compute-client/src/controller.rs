@@ -45,6 +45,7 @@ use mz_dyncfg::ConfigSet;
 use mz_expr::RowSetFinishing;
 use mz_ore::metrics::MetricsRegistry;
 use mz_ore::tracing::OpenTelemetryContext;
+use mz_ore::{soft_assert_or_log, soft_panic_or_log};
 use mz_repr::refresh_schedule::RefreshSchedule;
 use mz_repr::{Datum, Diff, GlobalId, Row, TimestampManipulation};
 use mz_storage_client::controller::{IntrospectionType, StorageController};
@@ -55,7 +56,6 @@ use timely::progress::Antichain;
 use tokio::time::{self, MissedTickBehavior};
 use tracing::warn;
 use uuid::Uuid;
-use mz_compute_types::plan::LirId;
 
 use crate::controller::error::{
     CollectionLookupError, CollectionMissing, CollectionUpdateError, DataflowCreationError,
@@ -80,7 +80,8 @@ type IntrospectionUpdates = (IntrospectionType, Vec<(Row, Diff)>);
 
 /// A composite trait for types that serve as timestamps in the Compute Controller.
 /// `Into<Datum<'a>>` is needed for writing timestamps to introspection collections.
-pub trait ComputeControllerTimestamp: TimestampManipulation + for<'a> Into<Datum<'a>> {}
+//pub trait ComputeControllerTimestamp: TimestampManipulation + for<'a> Into<Datum<'a>> {}
+pub trait ComputeControllerTimestamp: TimestampManipulation + Into<Datum<'static>> {}
 
 impl ComputeControllerTimestamp for mz_repr::Timestamp {}
 
@@ -788,9 +789,6 @@ impl<T: ComputeControllerTimestamp> ComputeInstanceRef<'_, T> {
 /// compute dataflow.
 #[derive(Debug)]
 pub struct CollectionState<T> {
-    /// The id of this collection.
-    collection_id: GlobalId,
-
     /// Whether this collection is a log collection.
     ///
     /// Log collections are special in that they are only maintained by a subset of all replicas.
@@ -838,7 +836,8 @@ pub struct CollectionState<T> {
     replica_write_frontiers: BTreeMap<ReplicaId, Antichain<T>>,
     /// The input frontiers reported by individual replicas.
     replica_input_frontiers: BTreeMap<ReplicaId, Antichain<T>>,
-    /// //////////////////todo
+
+    /// Introspection state associated with this collection.
     collection_introspection: CollectionIntrospection<T>,
 }
 
@@ -891,7 +890,6 @@ impl<T: ComputeControllerTimestamp> CollectionState<T> {
         read_capabilities.update_iter(warmup_capability.iter().map(|time| (time.clone(), 1)));
 
         Self {
-            collection_id,
             log_collection: false,
             dropped: false,
             scheduled: false,
@@ -901,7 +899,7 @@ impl<T: ComputeControllerTimestamp> CollectionState<T> {
             read_policy: Some(ReadPolicy::ValidFrom(since)),
             storage_dependencies,
             compute_dependencies,
-            write_frontier: upper,
+            write_frontier: upper.clone(),
             replica_write_frontiers: BTreeMap::new(),
             replica_input_frontiers: BTreeMap::new(),
             collection_introspection: CollectionIntrospection::new(
@@ -909,6 +907,7 @@ impl<T: ComputeControllerTimestamp> CollectionState<T> {
                 introspection_tx,
                 initial_as_of,
                 refresh_schedule,
+                upper,
             ),
         }
     }
@@ -941,37 +940,12 @@ struct CollectionIntrospection<T> {
     collection_id: GlobalId,
     /// A channel through which introspection updates are delivered.
     introspection_tx: crossbeam_channel::Sender<IntrospectionUpdates>,
-    /// ////////todo
-    /// `Some` if it is a REFRESH MV
+    /// Introspection state for `mz_materialized_view_refreshes`.
+    /// `Some` if it is a REFRESH MV.
     refresh_introspection_state: Option<RefreshIntrospectionState<T>>,
 }
 
-impl<T: ComputeControllerTimestamp> CollectionIntrospection<T> {
-    pub fn new(
-        collection_id: GlobalId,
-        introspection_tx: crossbeam_channel::Sender<IntrospectionUpdates>,
-        initial_as_of: Option<Antichain<T>>,
-        refresh_schedule: Option<RefreshSchedule>,
-    ) -> CollectionIntrospection<T> {
-        let self_ = CollectionIntrospection {
-            collection_id,
-            introspection_tx,
-            refresh_introspection_state: refresh_schedule.map(|refresh_schedule| {
-                RefreshIntrospectionState::new(refresh_schedule, initial_as_of.expect("if we have a refresh_schedule, then it's an MV, so we should also have an initial_as_of"))
-            })
-        };
-
-        self_.refresh_introspection_state.as_ref().map(|refresh_introspection_state| {
-            let insertion = refresh_introspection_state.row_for_collection(collection_id);
-            self_.send(
-                IntrospectionType::ComputeMaterializedViewRefreshes,
-                vec![(insertion, 1)],
-            );
-        });
-
-        self_
-    }
-
+impl<T> CollectionIntrospection<T> {
     fn send(&self, introspection_type: IntrospectionType, updates: Vec<(Row, Diff)>) {
         let result = self.introspection_tx.send((introspection_type, updates));
 
@@ -979,7 +953,6 @@ impl<T: ComputeControllerTimestamp> CollectionIntrospection<T> {
             // The global controller holds on to the `introspection_rx`. So when we get here that
             // probably means that the controller was dropped and the process is shutting down, in
             // which case we don't care about introspection updates anymore.
-            /////////// todo: comment is copy-pasted; check it
             tracing::info!(
                 ?introspection_type,
                 "discarding introspection update because the receiver disconnected"
@@ -988,40 +961,157 @@ impl<T: ComputeControllerTimestamp> CollectionIntrospection<T> {
     }
 }
 
+impl<T: ComputeControllerTimestamp> CollectionIntrospection<T> {
+    pub fn new(
+        collection_id: GlobalId,
+        introspection_tx: crossbeam_channel::Sender<IntrospectionUpdates>,
+        initial_as_of: Option<Antichain<T>>,
+        refresh_schedule: Option<RefreshSchedule>,
+        upper: Antichain<T>,
+    ) -> CollectionIntrospection<T> {
+        let self_ = CollectionIntrospection {
+            collection_id,
+            introspection_tx,
+            refresh_introspection_state: refresh_schedule.map(|refresh_schedule| {
+                if let Some(initial_as_of) = initial_as_of {
+                    Some(RefreshIntrospectionState::new(
+                        refresh_schedule,
+                        initial_as_of,
+                        upper,
+                    ))
+                } else {
+                    soft_panic_or_log!("if we have a refresh_schedule, then it's an MV, so we should also have an initial_as_of");
+                    None
+                }
+            }).flatten()
+        };
+
+        self_
+            .refresh_introspection_state
+            .as_ref()
+            .map(|refresh_introspection_state| {
+                let insertion = refresh_introspection_state.row_for_collection(collection_id);
+                self_.send(
+                    IntrospectionType::ComputeMaterializedViewRefreshes,
+                    vec![(insertion, 1)],
+                );
+            });
+
+        self_
+    }
+
+    pub fn frontier_update(&mut self, write_frontier: &Antichain<T>) {
+        if let Some(refresh_introspection_state) = &mut self.refresh_introspection_state {
+            // Old row to retract based on old state.
+            let retraction = refresh_introspection_state.row_for_collection(self.collection_id);
+            // Update state.
+            refresh_introspection_state.frontier_update(write_frontier);
+            // New row to insert based on new state.
+            let insertion = refresh_introspection_state.row_for_collection(self.collection_id);
+            // Send changes.
+            self.send(
+                IntrospectionType::ComputeMaterializedViewRefreshes,
+                vec![(retraction, -1), (insertion, 1)],
+            );
+        }
+    }
+}
+
+impl<T> Drop for CollectionIntrospection<T> {
+    fn drop(&mut self) {
+        self.refresh_introspection_state
+            .as_ref()
+            .map(|refresh_introspection_state| {
+                let retraction = refresh_introspection_state.row_for_collection(self.collection_id);
+                self.send(
+                    IntrospectionType::ComputeMaterializedViewRefreshes,
+                    vec![(retraction, -1)],
+                );
+            });
+    }
+}
+
 /// Information needed to compute introspection updates for a REFRESH materialized view when the
 /// write frontier advances.
 #[derive(Debug)]
 struct RefreshIntrospectionState<T> {
+    // Immutable properties of the MV
     refresh_schedule: RefreshSchedule,
     initial_as_of: Antichain<T>,
-    next_refresh: Option<T>, ///// or Antichain<T>?
-    last_completed_refresh: Option<T>,
+    // Refresh state
+    next_refresh: Datum<'static>,
+    last_completed_refresh: Datum<'static>,
+}
+
+impl<T> RefreshIntrospectionState<T> {
+    /// Return a `Row` reflecting the current refresh introspection state.
+    pub fn row_for_collection(&self, collection_id: GlobalId) -> Row {
+        Row::pack_slice(&[
+            Datum::String(&collection_id.to_string()),
+            self.last_completed_refresh,
+            self.next_refresh,
+        ])
+    }
 }
 
 impl<T: ComputeControllerTimestamp> RefreshIntrospectionState<T> {
     pub fn new(
         refresh_schedule: RefreshSchedule,
         initial_as_of: Antichain<T>,
+        upper: Antichain<T>,
     ) -> RefreshIntrospectionState<T> {
-        RefreshIntrospectionState {
+        let mut self_ = RefreshIntrospectionState {
             refresh_schedule: refresh_schedule.clone(),
             initial_as_of: initial_as_of.clone(),
-            next_refresh: initial_as_of
-                .as_option()
-                .cloned()
-                .map(|initial_as_of| initial_as_of.round_up(&refresh_schedule))
-                .flatten(), // first refresh
-            last_completed_refresh: None,
-        }
+            next_refresh: Datum::Null,
+            last_completed_refresh: Datum::Null,
+        };
+        self_.frontier_update(&upper);
+        self_
     }
 
-    /// Return a `Row` reflecting the current refresh introspection state.
-    pub fn row_for_collection(&self, collection_id: GlobalId) -> Row {
-        Row::pack_slice(&[
-            Datum::String(&collection_id.to_string()),
-            ///////// todo
-            Datum::Null,
-            Datum::Null,
-        ])
+    pub fn frontier_update(&mut self, write_frontier: &Antichain<T>) {
+        if write_frontier.is_empty() {
+            self.last_completed_refresh =
+                if let Some(last_refresh) = self.refresh_schedule.last_refresh() {
+                    last_refresh.into()
+                } else {
+                    // If there is no last refresh, then we have a `REFRESH EVERY`, in which case
+                    // the saturating roundup puts a refresh at the maximum possible timestamp.
+                    T::maximum().into()
+                };
+            self.next_refresh = Datum::Null;
+        } else {
+            if timely::PartialOrder::less_equal(write_frontier, &self.initial_as_of) {
+                // We are before the first refresh.
+                self.last_completed_refresh = Datum::Null;
+                let initial_as_of = self.initial_as_of.as_option().expect(
+                    "initial_as_of can't be [], because then there would be no refreshes at all",
+                );
+                let first_refresh = initial_as_of
+                    .round_up(&self.refresh_schedule)
+                    .expect("sequencing makes sure that REFRESH MVs always have a first refresh");
+                soft_assert_or_log!(
+                    first_refresh == *initial_as_of,
+                    "initial_as_of should be set to the first refresh"
+                );
+                self.next_refresh = first_refresh.into();
+            } else {
+                // The first refresh has already happened.
+                let write_frontier = write_frontier.as_option().expect("checked above");
+                self.last_completed_refresh = write_frontier
+                    .round_down_m1(&self.refresh_schedule)
+                    .map_or_else(
+                        || {
+                            soft_panic_or_log!("rounding down should have returned the first refresh or later");
+                            Datum::Null
+                        },
+                        |last_completed_refresh| {
+                            last_completed_refresh.into()
+                        }
+                    );
+                self.next_refresh = write_frontier.clone().into();
+            }
+        }
     }
 }

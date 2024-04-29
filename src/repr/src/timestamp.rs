@@ -83,12 +83,12 @@ pub trait TimestampManipulation:
 
     /// Rounds up the timestamp to the time of the next refresh according to the given schedule.
     /// Returns None if there is no next refresh.
-    fn round_up(self, schedule: &RefreshSchedule) -> Option<Self>;
+    fn round_up(&self, schedule: &RefreshSchedule) -> Option<Self>;
 
     /// Rounds down `timestamp - 1` to the time of the previous refresh according to the given
     /// schedule.
     /// Returns None if there is no previous refresh.
-    fn round_down_m1(self, schedule: &RefreshSchedule) -> Option<Self>;
+    fn round_down_m1(&self, schedule: &RefreshSchedule) -> Option<Self>;
 }
 
 impl TimestampManipulation for Timestamp {
@@ -116,12 +116,12 @@ impl TimestampManipulation for Timestamp {
         Self::MAX
     }
 
-    fn round_up(self, schedule: &RefreshSchedule) -> Option<Self> {
-        schedule.round_up_timestamp(self)
+    fn round_up(&self, schedule: &RefreshSchedule) -> Option<Self> {
+        schedule.round_up_timestamp(*self)
     }
 
-    fn round_down_m1(self, schedule: &RefreshSchedule) -> Option<Self> {
-        schedule.round_down_timestamp_m1(self)
+    fn round_down_m1(&self, schedule: &RefreshSchedule) -> Option<Self> {
+        schedule.round_down_timestamp_m1(*self)
     }
 }
 
