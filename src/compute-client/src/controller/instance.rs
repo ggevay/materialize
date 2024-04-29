@@ -129,7 +129,7 @@ pub(super) enum SubscribeTargetError {
 
 /// The state we keep for a compute instance.
 #[derive(Debug)]
-pub(super) struct Instance<T> {
+pub(super) struct Instance<T: ComputeControllerTimestamp> {
     /// Build info for spawning replicas
     build_info: &'static BuildInfo,
     /// Whether instance initialization has been completed.
@@ -834,7 +834,7 @@ where
 
 /// A wrapper around [`Instance`] with a live storage controller.
 #[derive(Debug)]
-pub(super) struct ActiveInstance<'a, T> {
+pub(super) struct ActiveInstance<'a, T: ComputeControllerTimestamp> {
     compute: &'a mut Instance<T>,
     storage_controller: &'a mut dyn StorageController<Timestamp = T>,
 }

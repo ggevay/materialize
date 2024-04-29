@@ -142,7 +142,7 @@ enum Readiness<T> {
 }
 
 /// A client that maintains soft state and validates commands, in addition to forwarding them.
-pub struct Controller<T = mz_repr::Timestamp> {
+pub struct Controller<T: ComputeControllerTimestamp = mz_repr::Timestamp> {
     pub storage: Box<dyn StorageController<Timestamp = T>>,
     pub compute: ComputeController<T>,
     /// The clusterd image to use when starting new cluster processes.
