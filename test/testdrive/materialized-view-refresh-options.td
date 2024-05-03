@@ -548,6 +548,24 @@ DROP CLUSTER REPLICA scheduled_cluster.unbilled;
 
 ## Create MVs for checking `mz_materialized_view_refreshes`.
 
+# Const MVs, only REFRESH ATs
+> CREATE MATERIALIZED VIEW mv14_at_const
+  WITH (REFRESH AT '3000-01-01 23:59')
+  AS SELECT 1;
+
+> CREATE MATERIALIZED VIEW mv15_ats_const
+  WITH (REFRESH AT '2500-01-01 23:59', REFRESH AT '3000-01-01 23:59')
+  AS SELECT 1;
+
+> CREATE MATERIALIZED VIEW mv_at_creation
+  WITH (REFRESH AT CREATION)
+  AS SELECT 1;
+
+# Const MV, with REFRESH EVERY
+> CREATE MATERIALIZED VIEW mv16_every_const
+  WITH (REFRESH AT '2500-01-01 23:59', REFRESH AT '3000-01-01 23:59', REFRESH EVERY '1 minutes')
+  AS SELECT 1;
+
 # MV is before the first refresh
 > CREATE MATERIALIZED VIEW mv17_before_first
   WITH (REFRESH AT mz_now()::string::int8 + 1000 * 1000)
@@ -566,6 +584,22 @@ DROP CLUSTER REPLICA scheduled_cluster.unbilled;
   AS SELECT DISTINCT * FROM t2;
 
 ## Check the above MVs in `mz_materialized_view_refreshes`.
+
+> SELECT last_completed_refresh, next_refresh
+  FROM mz_internal.mz_materialized_view_refreshes mvr, mz_catalog.mz_materialized_views mv
+  WHERE mv.id = mvr.materialized_view_id AND (name = 'mv14_at_const' OR name = 'mv15_ats_const');
+32503766340000 <null>
+32503766340000 <null>
+
+> SELECT last_completed_refresh < mz_now(), next_refresh
+  FROM mz_internal.mz_materialized_view_refreshes mvr, mz_catalog.mz_materialized_views mv
+  WHERE mv.id = mvr.materialized_view_id AND name = 'mv_at_creation';
+true <null>
+
+> SELECT last_completed_refresh, next_refresh
+  FROM mz_internal.mz_materialized_view_refreshes mvr, mz_catalog.mz_materialized_views mv
+  WHERE mv.id = mvr.materialized_view_id AND name = 'mv16_every_const';
+18446744073709551615 <null>
 
 > SELECT last_completed_refresh, next_refresh > mz_now()
   FROM mz_internal.mz_materialized_view_refreshes mvr, mz_catalog.mz_materialized_views mv
