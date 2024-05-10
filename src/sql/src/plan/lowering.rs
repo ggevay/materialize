@@ -941,17 +941,9 @@ impl HirScalarExpr {
                             )?),
                         }
                     } else {
-                        expr.applied_to(
-                            id_gen,
-                            col_map,
-                            cte_map,
-                            config,
-                            inner,
-                            subquery_map,
-                        )?
+                        expr.applied_to(id_gen, col_map, cte_map, config, inner, subquery_map)?
                     }
                 }
-                ,
                 CallBinary { func, expr1, expr2 } => SS::CallBinary {
                     func,
                     expr1: Box::new(expr1.applied_to(
@@ -1611,7 +1603,7 @@ impl HirScalarExpr {
                 } else {
                     expr.lower_uncorrelated()?
                 }
-            },
+            }
             CallBinary { func, expr1, expr2 } => SS::CallBinary {
                 func,
                 expr1: Box::new(expr1.lower_uncorrelated()?),
