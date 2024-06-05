@@ -2237,7 +2237,7 @@ impl Coordinator {
         let mut max_as_of = Antichain::new();
         let dependent_frontiers =
             self.storage_frontiers(storage_constraints.dependants.iter().cloned().collect());
-        for (_id, since, upper) in dependent_frontiers {
+        for (_id, since, upper) in dependent_frontiers.clone() {
             max_as_of.meet_assign(&since.join(&upper));
         }
 
@@ -2360,6 +2360,7 @@ impl Coordinator {
             write_frontier = ?write_frontier.elements(),
             ?compaction_window,
             ?storage_constraints,
+            dependent_frontiers = ?format!("{:?}", dependent_frontiers),
             "bootstrapping dataflow `as_of`",
         );
 

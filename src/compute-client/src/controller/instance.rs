@@ -1851,6 +1851,19 @@ where
 
         // Apply a write frontier advancement.
         if let Some(new_frontier) = frontiers.write_frontier {
+
+
+
+
+            let storage_frontiers = self.storage_controller.collections_frontiers(vec![id]).unwrap_or_default();
+            for (_id, _storage_implied_cap, storage_write_frontier) in storage_frontiers {
+                assert!(!PartialOrder::less_than(&storage_write_frontier, &new_frontier));
+            }
+
+
+
+
+
             if let Some(old_frontier) = coll.replica_write_frontiers.get(&replica_id) {
                 if !PartialOrder::less_equal(old_frontier, &new_frontier) {
                     tracing::error!(
