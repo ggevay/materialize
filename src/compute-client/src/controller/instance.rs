@@ -1855,10 +1855,10 @@ where
 
 
 
-            let storage_frontiers = self.storage_controller.collections_frontiers(vec![id]).unwrap_or_default();
-            for (_id, _storage_implied_cap, storage_write_frontier) in storage_frontiers {
-                assert!(!PartialOrder::less_than(&storage_write_frontier, &new_frontier));
-            }
+            // let storage_frontiers = self.storage_controller.collections_frontiers(vec![id]).unwrap_or_default();
+            // for (_id, _storage_implied_cap, storage_write_frontier) in storage_frontiers {
+            //     assert!(!PartialOrder::less_than(&storage_write_frontier, &new_frontier));
+            // }
 
 
 
@@ -1893,6 +1893,16 @@ where
                     });
                 }
             }
+
+
+
+
+            let storage_frontiers = self.storage_controller.collections_frontiers(vec![id]).unwrap_or_default();
+            for (_id, _storage_implied_cap, storage_write_frontier) in storage_frontiers {
+                assert!(!PartialOrder::less_than(&storage_write_frontier, &new_frontier));
+            }
+
+
         }
 
         // Apply an input frontier advancement.
