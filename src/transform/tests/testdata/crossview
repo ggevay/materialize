@@ -24,12 +24,14 @@ Source x: {2}
 
 ====
 View a:
-Project (#2)
-  Get x
+Project (#0)
+  Project (#2)
+    Get x
 
 ====
 View b:
-Get a
+Project (#0)
+  Get a
 
 ----
 ----
@@ -51,15 +53,17 @@ Map ()
 
 ====
 View b:
-Project (#1)
-  Get a
+Project (#0)
+  Project (#1)
+    Get a
 
 ====
 View c:
-Join on=(#0 = #1)
-  Project (#0)
-    Get a
-  Get b
+Project (#0, #1)
+  Join on=(#0 = #1)
+    Project (#0)
+      Get a
+    Get b
 
 ----
 ----

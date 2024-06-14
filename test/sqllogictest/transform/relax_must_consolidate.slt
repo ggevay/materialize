@@ -969,21 +969,23 @@ ORDER BY max_a, b DESC;
 ----
 Explained Query:
   Finish order_by=[#0 asc nulls_last, #1 desc nulls_first] output=[#0, #1]
-    TopK::MonotonicTop1 group_by=[#0] order_by=[#1 desc nulls_first]
-      Mfp
-        project=(#1, #0)
-        input_key=#0
-        Reduce::Hierarchical
-          aggr_funcs=[max]
-          skips=[0]
-          monotonic
-          must_consolidate
-          val_plan
-            project=(#0)
-          key_plan
-            project=(#1)
-          Get::PassArrangements materialize.public.t
-            raw=true
+    Mfp
+      project=(#1, #0)
+      TopK::MonotonicTop1 group_by=[#1] order_by=[#0 desc nulls_first]
+        ArrangeBy
+          input_key=[#0]
+          raw=true
+          Reduce::Hierarchical
+            aggr_funcs=[max]
+            skips=[0]
+            monotonic
+            must_consolidate
+            val_plan
+              project=(#0)
+            key_plan
+              project=(#1)
+            Get::PassArrangements materialize.public.t
+              raw=true
 
 Source materialize.public.t
 

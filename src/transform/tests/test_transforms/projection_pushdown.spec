@@ -82,11 +82,12 @@ Project (#1)
       - (2, 5, 6)
 ----
 Project (#0)
-  Filter (#1) IS NULL
-    Project (#1, #2)
-      Constant
-        - (1, 3, 4)
-        - (2, 5, 6)
+  Project (#0)
+    Filter (#1) IS NULL
+      Project (#1, #2)
+        Constant
+          - (1, 3, 4)
+          - (2, 5, 6)
 
 # Project around a map
 apply pipeline=projection_pushdown
@@ -96,12 +97,13 @@ Project (#3)
       - (1, 3, 4)
       - (2, 5, 6)
 ----
-Project (#2)
-  Map ((#1 + #0))
-    Project (#0, #1)
-      Constant
-        - (1, 3, 4)
-        - (2, 5, 6)
+Project (#0)
+  Project (#2)
+    Map ((#1 + #0))
+      Project (#0, #1)
+        Constant
+          - (1, 3, 4)
+          - (2, 5, 6)
 
 # Project around a column where a scalar refers to another fellow member of `scalars`
 apply pipeline=projection_pushdown
@@ -128,13 +130,14 @@ Project (#3)
         - (1, 3, 4)
         - (2, 5, 6)
 ----
-Project (#2)
-  Filter (#1 >= #0)
-    Map ((#0 + #1))
-      Project (#1, #2)
-        Constant
-          - (1, 3, 4)
-          - (2, 5, 6)
+Project (#0)
+  Project (#2)
+    Filter (#1 >= #0)
+      Map ((#0 + #1))
+        Project (#1, #2)
+          Constant
+            - (1, 3, 4)
+            - (2, 5, 6)
 
 # Projection pushdown causes elimination of unnecessary map scalars (2)
 apply pipeline=projection_pushdown
@@ -165,16 +168,18 @@ Project (#3)
     Project (#0)
       Get x
 ----
-Project (#1)
-  Join on=(#0 = #2)
-    Project (#0, #3)
-      Filter (#2 >= #1)
-        Map ((#1 + #2))
-          Constant
-            - (1, 3, 4)
-            - (2, 5, 6)
-    Project (#0)
-      Get x
+Project (#0)
+  Project (#1)
+    Join on=(#0 = #2)
+      Project (#0, #3)
+        Filter (#2 >= #1)
+          Map ((#1 + #2))
+            Constant
+              - (1, 3, 4)
+              - (2, 5, 6)
+      Project (#0)
+        Project (#0)
+          Get x
 
 # Query not using the columns newly created by FlatMap
 apply pipeline=projection_pushdown
@@ -182,9 +187,10 @@ Project (#1)
   FlatMap generate_series(#0, #2, 1)
     Get x
 ----
-Project (#1)
-  FlatMap generate_series(#0, #2, 1)
-    Get x
+Project (#0)
+  Project (#1)
+    FlatMap generate_series(#0, #2, 1)
+      Get x
 
 # Query using the columns newly created by FlatMap
 apply pipeline=projection_pushdown
@@ -192,10 +198,11 @@ Project (#3)
   FlatMap generate_series(#0, #2, 1)
     Get x
 ----
-Project (#2)
-  FlatMap generate_series(#0, #1, 1)
-    Project (#0, #2)
-      Get x
+Project (#0)
+  Project (#2)
+    FlatMap generate_series(#0, #1, 1)
+      Project (#0, #2)
+        Get x
 
 
 # Project around a union (1)
@@ -205,11 +212,12 @@ Project (#1, #0)
     Get x
     Get y
 ----
-Union
-  Project (#1, #0)
-    Get x
-  Project (#1, #0)
-    Get y
+Project (#1, #0)
+  Union
+    Project (#0, #1)
+      Get x
+    Project (#0, #1)
+      Get y
 
 # Project around a union (2)
 apply pipeline=projection_pushdown
@@ -234,13 +242,14 @@ Project (#0, #2)
       Filter (#1 = 1)
         Get x
 ----
-Union
-  Project (#0, #2)
-    Get x
-  Negate
+Project (#0, #1)
+  Union
     Project (#0, #2)
-      Filter (#1 = 1)
-        Get x
+      Get x
+    Negate
+      Project (#0, #2)
+        Filter (#1 = 1)
+          Get x
 
 # Project around an ArrangeBy (1) - barrier!
 apply pipeline=projection_pushdown
@@ -248,9 +257,10 @@ Project (#2)
   ArrangeBy keys=[[#0], [#1]]
     Get x
 ----
-Project (#2)
-  ArrangeBy keys=[[#0], [#1]]
-    Get x
+Project (#0)
+  Project (#2)
+    ArrangeBy keys=[[#0], [#1]]
+      Get x
 
 # Project around an ArrangeBy (2) - barrier!
 apply pipeline=projection_pushdown
@@ -258,9 +268,10 @@ Project (#1)
   ArrangeBy keys=[[#0], [#1]]
     Get x
 ----
-Project (#1)
-  ArrangeBy keys=[[#0], [#1]]
-    Get x
+Project (#0)
+  Project (#1)
+    ArrangeBy keys=[[#0], [#1]]
+      Get x
 
 # Project around an ArrangeBy (3) - barrier!
 apply pipeline=projection_pushdown
@@ -269,8 +280,9 @@ Project (#1, #0)
     Get x
 ----
 Project (#1, #0)
-  ArrangeBy keys=[[#0], [#1]]
-    Get x
+  Project (#0, #1)
+    ArrangeBy keys=[[#0], [#1]]
+      Get x
 
 # Project around a Reduce (1)
 apply pipeline=projection_pushdown
@@ -279,9 +291,10 @@ Project ()
     Get x
 ----
 Project ()
-  Distinct project=[(#0 + #1)]
-    Project (#0, #2)
-      Get x
+  Project ()
+    Distinct project=[(#0 + #1)]
+      Project (#0, #2)
+        Get x
 
 # Project around a Reduce (2)
 apply pipeline=projection_pushdown
@@ -289,10 +302,11 @@ Project (#1)
   Reduce group_by=[#0] aggregates=[sum((#0 * #2))]
     Get x
 ----
-Project (#1)
-  Reduce group_by=[#0] aggregates=[sum((#0 * #1))]
-    Project (#0, #2)
-      Get x
+Project (#0)
+  Project (#1)
+    Reduce group_by=[#0] aggregates=[sum((#0 * #1))]
+      Project (#0, #2)
+        Get x
 
 # Project around a Reduce (3)
 apply pipeline=projection_pushdown
@@ -334,9 +348,10 @@ Project (#2, #1)
   TopK group_by=[#2] order_by=[#1 asc nulls_first] limit=(#2 + 4)
     Get x
 ----
-TopK group_by=[#0] order_by=[#1 asc nulls_first] limit=(#0 + 4)
-  Project (#2, #1)
-    Get x
+Project (#1, #0)
+  TopK group_by=[#1] order_by=[#0 asc nulls_first] limit=(#1 + 4)
+    Project (#1, #2)
+      Get x
 
 # Project around a Let (1)
 apply pipeline=projection_pushdown
@@ -352,12 +367,13 @@ With
       Get y
 ----
 Return
-  Project (#1)
-    Join on=(#0 = #2)
-      Project (#0, #2)
-        Get l0
-      Project (#1)
-        Get l0
+  Project (#0)
+    Project (#1)
+      Join on=(#0 = #2)
+        Project (#0, #2)
+          Get l0
+        Project (#1)
+          Get l0
 With
   cte l0 =
     Project (#0, #1, #3)
@@ -381,11 +397,12 @@ With
       Get y
 ----
 Return
-  Project (#1)
-    Join on=(#0 = #2)
-      Get l0
-      Project (#1)
+  Project (#0)
+    Project (#1)
+      Join on=(#0 = #2)
         Get l0
+        Project (#1)
+          Get l0
 With
   cte l0 =
     Project (#0, #1)
@@ -412,10 +429,11 @@ With
 ----
 Return
   Union
-    Join on=(#0 = #1)
-      Project (#0)
-        Get l0
-      Get y
+    Project (#0..=#3)
+      Join on=(#0 = #1)
+        Project (#0)
+          Get l0
+        Get y
     Project (#0, #1, #0, #2)
       Get l0
 With
@@ -443,12 +461,13 @@ With Mutually Recursive
       Get y
 ----
 Return
-  Project (#1)
-    Join on=(#0 = #2)
-      Project (#0, #2)
-        Get l0
-      Project (#1)
-        Get l0
+  Project (#0)
+    Project (#1)
+      Join on=(#0 = #2)
+        Project (#0, #2)
+          Get l0
+        Project (#1)
+          Get l0
 With Mutually Recursive
   cte l0 =
     Project (#0, #1, #3)
@@ -472,11 +491,12 @@ With Mutually Recursive
       Get y
 ----
 Return
-  Project (#1)
-    Join on=(#0 = #2)
-      Get l0
-      Project (#1)
+  Project (#0)
+    Project (#1)
+      Join on=(#0 = #2)
         Get l0
+        Project (#1)
+          Get l0
 With Mutually Recursive
   cte l0 =
     Project (#0, #1)
@@ -503,10 +523,11 @@ With Mutually Recursive
 ----
 Return
   Union
-    Join on=(#0 = #1)
-      Project (#0)
-        Get l0
-      Get y
+    Project (#0..=#3)
+      Join on=(#0 = #1)
+        Project (#0)
+          Get l0
+        Get y
     Project (#0, #1, #0, #2)
       Get l0
 With Mutually Recursive
@@ -538,10 +559,11 @@ With Mutually Recursive
     Get x
 ----
 Return
-  Join on=(#0 = #1)
-    Get l2
-    Project (#0)
-      Get l1
+  Project (#0, #1)
+    Join on=(#0 = #1)
+      Get l2
+      Project (#0)
+        Get l1
 With Mutually Recursive
   cte l2 =
     Get l0
@@ -550,9 +572,11 @@ With Mutually Recursive
       Distinct project=[#0]
         Union
           Project (#0)
-            Get l1
+            Project (#0)
+              Get l1
           Project (#0)
-            Get x
+            Project (#0)
+              Get x
   cte l0 =
     Project (#0)
       Get x

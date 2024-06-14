@@ -202,9 +202,10 @@ LIMIT 3;
 ----
 Explained Query:
   Finish order_by=[#0{state} asc nulls_last, #1{name} asc nulls_last] limit=3 output=[#0, #1]
-    TopK group_by=[#0{state}] limit=integer_to_bigint((ascii(substr(#0{state}, 1, 1)) - 64)) // { arity: 2 }
-      Project (#1{name}, #0{state}) // { arity: 2 }
-        ReadStorage materialize.public.cities // { arity: 3 }
+    Project (#1{name}, #0{state}) // { arity: 2 }
+      TopK group_by=[#1{state}] limit=integer_to_bigint((ascii(substr(#1{state}, 1, 1)) - 64)) // { arity: 2 }
+        Project (#0{name}, #1{state}) // { arity: 2 }
+          ReadStorage materialize.public.cities // { arity: 3 }
 
 Source materialize.public.cities
 

@@ -420,8 +420,8 @@ WHERE l_commitDATE >= '1998-03-22'
 ----
 Explained Query:
   Return // { arity: 2 }
-    Union // { arity: 2 }
-      Project (#1, #0) // { arity: 2 }
+    Project (#1, #0) // { arity: 2 }
+      Union // { arity: 2 }
         Map (null) // { arity: 2 }
           Union // { arity: 1 }
             Negate // { arity: 1 }
@@ -438,9 +438,9 @@ Explained Query:
                         Get l0 // { arity: 5 }
             Project (#4) // { arity: 1 }
               Get l1 // { arity: 16 }
-      Project (#4, #1) // { arity: 2 }
-        Filter ((#2 = #3) OR ((#0 <= 100) AND (#0 >= 59) AND (#2 >= 1998-03-22))) // { arity: 5 }
-          Get l0 // { arity: 5 }
+        Project (#1, #4) // { arity: 2 }
+          Filter ((#2 = #3) OR ((#0 <= 100) AND (#0 >= 59) AND (#2 >= 1998-03-22))) // { arity: 5 }
+            Get l0 // { arity: 5 }
   With
     cte l1 =
       Filter (null OR ((#0 <= 100) AND (#0 >= 59) AND (#11 >= 1998-03-22))) // { arity: 16 }

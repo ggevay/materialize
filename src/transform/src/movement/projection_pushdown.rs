@@ -32,7 +32,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use itertools::zip_eq;
+use itertools::{Itertools, zip_eq};
 use mz_expr::{Id, JoinInputMapper, MirRelationExpr, MirScalarExpr, RECURSION_LIMIT};
 use mz_ore::stack::{CheckedRecursion, RecursionGuard};
 
@@ -93,6 +93,7 @@ impl ProjectionPushdown {
         desired_projection: &Vec<usize>,
         gets: &mut BTreeMap<Id, BTreeSet<usize>>,
     ) -> Result<(), TransformError> {
+        assert!(desired_projection.iter().all_unique());
         self.checked_recur(|_| {
             // First, try to push the desired projection down through `relation`.
             // In the process `relation` is transformed to a `MirRelationExpr`
@@ -272,8 +273,16 @@ impl ProjectionPushdown {
                     let unique_outputs = outputs.iter().map(|i| *i).collect::<BTreeSet<_>>();
                     if outputs.len() == unique_outputs.len() {
                         // Push down the project as is.
-                        self.action(input, outputs, gets)?;
-                        *relation = input.take_dangerous();
+                        //self.action(input, outputs, gets)?;
+                        //*relation = input.take_dangerous();
+
+                        let columns_to_pushdown = unique_outputs.into_iter().collect::<Vec<_>>();
+                        reverse_permute_columns(outputs.iter_mut(), columns_to_pushdown.iter());
+                        self.action(input, &columns_to_pushdown, gets)?; //////////////////////////////////
+
+                        //////// todo: change the condition to go to the else branch if outputs is not sorted, but retain the original then branch
+
+
                     } else {
                         // Push down only the unique elems in `outputs`.
                         let columns_to_pushdown = unique_outputs.into_iter().collect::<Vec<_>>();
@@ -427,6 +436,11 @@ impl ProjectionPushdown {
                     (0..arity).collect()
                 }
             };
+            assert!(actual_projection.iter().all_unique());
+
+            println!("{:?}", actual_projection);
+            ////let actual_projection: Vec<_> = actual_projection.into_iter().sorted().collect();
+
             let add_project = desired_projection != &actual_projection;
             if add_project {
                 let mut projection_to_add = desired_projection.to_owned();
