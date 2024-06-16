@@ -4859,7 +4859,8 @@ derive_unary!(
     AclItemPrivileges,
     QuoteIdent,
     TryParseMonotonicIso8601Timestamp,
-    RegexpSplitToArray
+    RegexpSplitToArray,
+    ListMap
 );
 
 impl UnaryFunc {
@@ -5667,6 +5668,7 @@ impl RustType<ProtoUnaryFunc> for UnaryFunc {
             UnaryFunc::TryParseMonotonicIso8601Timestamp(_) => {
                 TryParseMonotonicIso8601Timestamp(())
             }
+            UnaryFunc::ListMap(inner) => todo!(),
         };
         ProtoUnaryFunc { kind: Some(kind) }
     }

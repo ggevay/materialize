@@ -256,3 +256,81 @@ impl fmt::Display for ListLength {
         f.write_str("list_length")
     }
 }
+
+/// Applies the encapsulated scalar expression to each element of the input list, and returns the
+/// results as a new list. The `map_fn` is given an input element as a row with a single column,
+/// i.e., `map_fn` should involve only #0 column references.
+#[derive(
+    Arbitrary, Ord, PartialOrd, Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash, MzReflect,
+)]
+pub struct ListMap {
+    pub map_fn: Box<MirScalarExpr>,
+}
+
+impl LazyUnaryFunc for ListMap {
+    fn eval<'a>(
+        &'a self,
+        datums: &[Datum<'a>],
+        temp_storage: &'a RowArena,
+        a: &'a MirScalarExpr,
+    ) -> Result<Datum<'a>, EvalError> {
+        let a = a.eval(datums, temp_storage)?;
+        if a.is_null() {
+            return Ok(Datum::Null);
+        }
+        let out_elems = a
+            .unwrap_list()
+            .iter()
+            .map(|in_elem| self.map_fn.eval(&[in_elem], temp_storage))
+            .collect::<Result<Vec<Datum>, _>>()?;
+        Ok(temp_storage.make_datum(|packer| packer.push_list(out_elems)))
+    }
+
+    fn output_type(&self, input_type: ColumnType) -> ColumnType {
+        let inp_elem_scalar_typ = if let ScalarType::List {
+            element_type,
+            custom_id: _,
+        } = input_type.scalar_type
+        {
+            *element_type.clone()
+        } else {
+            panic!("input type of ListMap is not a List type");
+        };
+        let inp_elem_column_typ = ColumnType {
+            scalar_type: inp_elem_scalar_typ,
+            nullable: true,
+        };
+        let out_elem_column_typ = self.map_fn.typ(&[inp_elem_column_typ]);
+        ScalarType::List {
+            element_type: Box::new(out_elem_column_typ.scalar_type),
+            custom_id: None,
+        }
+        .nullable(input_type.nullable)
+    }
+
+    fn propagates_nulls(&self) -> bool {
+        true
+    }
+
+    fn introduces_nulls(&self) -> bool {
+        false
+    }
+
+    fn preserves_uniqueness(&self) -> bool {
+        false
+    }
+
+    fn inverse(&self) -> Option<crate::UnaryFunc> {
+        None
+    }
+
+    fn is_monotone(&self) -> bool {
+        false
+    }
+}
+
+impl fmt::Display for ListMap {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "list_map[{}]", self.map_fn)
+    }
+}

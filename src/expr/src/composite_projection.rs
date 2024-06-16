@@ -58,7 +58,7 @@ use std::collections::BTreeSet;
 
 use mz_repr::ColumnName;
 
-use crate::func::RecordGet;
+use crate::func::{ListMap, RecordGet};
 use crate::{MirRelationExpr, MirScalarExpr, UnaryFunc, VariadicFunc};
 
 #[derive(Debug, Clone)]
@@ -176,11 +176,12 @@ impl CompositeConstructor {
                 list_reference,
                 elem_constructor,
             } => {
-                todo!()
-                // asszem itt kb. az kell, hogy a ListMap-et meghivni
-                // `elem_ctor.to_mir_on_expr(#0)` fuggvennyel (fontos hogy on_expr)
-                // Es a ListMap-et meg ugy megirni, hogy a list elemeit berakja egy row #0-jara, es `eval`-ozza a megadott `MirScalarExpr`-t minden elemre.
-                // De mi a ListMap list argumentje? `list_reference`
+                MirScalarExpr::CallUnary {
+                    func: UnaryFunc::ListMap(ListMap {
+                        map_fn: Box::new(elem_constructor.to_mir_on_expr(MirScalarExpr::Column(0))),
+                    }),
+                    expr: Box::new(list_reference.to_mir(input.clone())),
+                }
             }
         }
     }
@@ -191,7 +192,8 @@ impl CompositeConstructor {
             CompositeConstructor::Record(fields) => fields
                 .iter()
                 .map(|(_field_name, ctor)| ctor.valid_on_row())
-                .reduce(|a, b| a && b).unwrap_or(true),
+                .reduce(|a, b| a && b)
+                .unwrap_or(true),
             CompositeConstructor::List {
                 list_reference,
                 elem_constructor: _,
