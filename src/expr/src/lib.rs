@@ -23,6 +23,7 @@ mod linear;
 mod relation;
 mod scalar;
 
+pub mod composite_projection;
 pub mod explain;
 pub mod virtual_syntax;
 pub mod visit;

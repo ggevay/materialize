@@ -32,9 +32,10 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use itertools::zip_eq;
-use mz_expr::{Id, JoinInputMapper, MirRelationExpr, MirScalarExpr, RECURSION_LIMIT};
+use itertools::{zip_eq, Itertools};
+use mz_expr::{Id, JoinInputMapper, MirRelationExpr, MirScalarExpr, RECURSION_LIMIT, VariadicFunc};
 use mz_ore::assert_none;
+use mz_ore::soft_assert_no_log;
 use mz_ore::stack::{CheckedRecursion, RecursionGuard};
 
 use crate::{TransformCtx, TransformError};
@@ -94,6 +95,7 @@ impl ProjectionPushdown {
         desired_projection: &Vec<usize>,
         gets: &mut BTreeMap<Id, BTreeSet<usize>>,
     ) -> Result<(), TransformError> {
+        soft_assert_no_log!(desired_projection.iter().all_unique());
         self.checked_recur(|_| {
             // First, try to push the desired projection down through `relation`.
             // In the process `relation` is transformed to a `MirRelationExpr`
@@ -234,6 +236,35 @@ impl ProjectionPushdown {
                     columns_to_pushdown.into_iter().collect()
                 }
                 MirRelationExpr::FlatMap { input, func, exprs } => {
+
+                    // Lehet, hogy nem kene erolkodni a CompositeProjection-ben a listak kezelesevel,
+                    // hanem egyszeruen itt at lehetne ugrani a listas reszt:
+                    // - Ugyebar fokeppen azert nehez a ComopsiteProjection-ben kezelni a listakat, mert
+                    //   kene az a higher-order map fn, ami viszont azert bajos, mert at kene nezni az osszes scalar visitationt az egesz kodban.
+                    // - Az alabb lathato ketfele mintat kene kezelni. (Leellenoriztem a window_funcs.slt-re, hogy nem fordul elo mas. (Persze manualisan osszerakva elofordulhat mas, de az nem erdekes.))
+                    //   - Sot, a list_create utan FlatMap UnnestList mintat el is lehetne tuntetni teljesen (akar vhol mashol)
+                    //     - Vhol kezelni kene (vagy itt, vagy mashol eltuntetni teljesen), mert kulonben behoznank egy nemmonotonitast: ha unique key van, akkor elakadna a ProjectionPushdown
+                    // - Az egesz window funct pattern bonyolult lenne, mert az unnest_list utan mindenfele dolgok tortenhetnek:
+                    //   Nem biztos, hogy egy MFP szedi szet a rekordot, hanem pl. bemehet ujabb reduce-ba, vagy barmi masba ami scalar expr-t var
+                    //   - (Bar amugy volt az a terv, hogy non-trivialis expr csak MFP-ben lehetne. De ez rovid tavon nem tortenik vszeg.)
+
+                    if matches!(func, mz_expr::TableFunc::UnnestList {..}) {
+                        let reduce = matches!(**input, MirRelationExpr::Reduce {..});
+                        let map_list_create = match (**input).clone() {
+                            MirRelationExpr::Map {scalars, ..} => {
+                                scalars.len() == 1 && matches!(scalars[0], MirScalarExpr::CallVariadic {func: VariadicFunc::ListCreate {..}, ..})
+                            }
+                            _ => false
+                        };
+                        if !reduce && !map_list_create {
+                            println!(">>>>>>>>>>>>>>>>>>>>>>>>>>\n{}\n", input.pretty());
+                            panic!()
+                        }
+                        // assert!(
+                        //     matches!(**input, MirRelationExpr::Reduce {..})
+                        // );
+                    }
+
                     let inner_arity = input.arity();
                     // A FlatMap which returns zero rows acts like a filter
                     // so we always need to execute it
@@ -290,7 +321,7 @@ impl ProjectionPushdown {
                     let mut actual_projection =
                         desired_projection.iter().cloned().collect::<BTreeSet<_>>();
                     for (i, scalar) in scalars.iter().enumerate().rev() {
-                        if actual_projection.contains(&(i + arity)) {
+                        if actual_projection.contains(&(i + arity)) { /////////// todo: we have to note when only a field of it is requested
                             scalar.support_into(&mut actual_projection);
                         }
                     }
@@ -478,7 +509,7 @@ impl ProjectionPushdown {
 /// `permutation` can be thought of as a mapping of column references from
 /// `stateA` to `stateB`. [MirScalarExpr.permute] assumes that the column
 /// references of the expression are in `stateA` and need to be remapped to
-/// their `stateB` counterparts. This methods assumes that the column
+/// their `stateB` counterparts. This method assumes that the column
 /// references are in `stateB` and need to be remapped to `stateA`.
 ///
 /// The `outputs` field of [MirRelationExpr::Project] is a mapping from "after"
@@ -498,7 +529,7 @@ where
     }
 }
 
-/// Same as [reverse_permute], but takes column numbers as input
+/// Same as [reverse_permute], but takes column numbers as input.
 fn reverse_permute_columns<'a, I, J>(columns: I, permutation: J)
 where
     I: Iterator<Item = &'a mut usize>,
@@ -510,5 +541,233 @@ where
         .collect::<BTreeMap<_, _>>();
     for c in columns {
         *c = reverse_col_map[c];
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::fold_constants::FoldConstants;
+    use crate::Transform;
+    use crate::{typecheck, DataflowMetainfo, OptimizerFeatures};
+    use mz_expr::composite_projection::{
+        CompositeConstructor, CompositeProjection, CompositeReference,
+    };
+    use mz_repr::{ColumnName, ColumnType, Datum, Diff, RelationType, Row, RowArena, ScalarType};
+
+    #[mz_ore::test]
+    fn test_composite_projection_apply() {
+        /// Calls `FoldConstants` on the given expr and returns the resulting constant
+        /// or panics if we don't arrive at a constant.
+        fn fold_to_constant(mut expr: MirRelationExpr) -> Vec<(Row, Diff)> {
+            let fc = FoldConstants { limit: None };
+
+            let features = OptimizerFeatures::default();
+            let typecheck_ctx = typecheck::empty_context();
+            let mut df_meta = DataflowMetainfo::default();
+            let mut transform_ctx = TransformCtx::local(&features, &typecheck_ctx, &mut df_meta);
+
+            fc.transform(&mut expr, &mut transform_ctx).unwrap();
+            match expr {
+                MirRelationExpr::Constant { rows: Ok(rows), .. } => {
+                    return rows;
+                }
+                MirRelationExpr::Constant { rows: Err(e), .. } => {
+                    panic!("FoldConstants has run into an EvalError: {}", e);
+                }
+                _ => {
+                    panic!("FoldConstants hasn't arrived at a constant");
+                }
+            }
+        }
+
+        fn test(
+            inp_data: Vec<Vec<Datum>>,
+            inp_type: RelationType,
+            proj: CompositeProjection,
+            expected: Vec<Vec<Datum>>,
+        ) {
+            let inp_rows = inp_data
+                .into_iter()
+                .map(|row_datums| (Row::pack(row_datums), 1))
+                .collect();
+            let expected_rows: Vec<_> = expected
+                .into_iter()
+                .map(|row_datums| (Row::pack(row_datums), 1))
+                .collect();
+
+            let input_expr = proj.apply(MirRelationExpr::Constant {
+                rows: Ok(inp_rows),
+                typ: inp_type,
+            });
+            let result_rows = fold_to_constant(input_expr);
+            assert_eq!(result_rows, expected_rows);
+        }
+
+        fn record<'a>(arena: &'a mut RowArena, datums: Vec<Datum<'a>>) -> Datum<'a> {
+            arena.make_datum(|packer| packer.push_list(datums))
+        }
+
+        let mut arena = RowArena::new();
+        let mut arena2 = RowArena::new();
+
+        // Simple values in input.
+        let inp_data1 = vec![vec![
+            Datum::Int32(0),
+            Datum::Int32(10),
+            Datum::Int32(20),
+            Datum::Int32(30),
+        ]];
+        let int32_type = ColumnType {
+            scalar_type: ScalarType::Int32,
+            nullable: true,
+        };
+        let inp_type1 = RelationType::new(vec![
+            int32_type.clone(),
+            int32_type.clone(),
+            int32_type.clone(),
+            int32_type.clone(),
+        ]);
+
+        // Build simple values only.
+        test(
+            inp_data1.clone(),
+            inp_type1.clone(),
+            CompositeProjection {
+                constructors: vec![
+                    CompositeConstructor::Simple(CompositeReference::Row(
+                        3,
+                        Box::new(CompositeReference::Simple),
+                    )),
+                    CompositeConstructor::Simple(CompositeReference::Row(
+                        1,
+                        Box::new(CompositeReference::Simple),
+                    )),
+                ],
+            },
+            vec![vec![Datum::Int32(30), Datum::Int32(10)]],
+        );
+        test(
+            inp_data1.clone(),
+            inp_type1.clone(),
+            CompositeProjection {
+                constructors: vec![],
+            },
+            vec![vec![]],
+        );
+
+        // Build a record from simple values.
+        test(
+            inp_data1.clone(),
+            inp_type1.clone(),
+            CompositeProjection {
+                constructors: vec![
+                    CompositeConstructor::Record(vec![
+                        (
+                            "a".into(),
+                            CompositeConstructor::Simple(CompositeReference::Row(
+                                3,
+                                Box::new(CompositeReference::Simple),
+                            )),
+                        ),
+                        (
+                            "b".into(),
+                            CompositeConstructor::Simple(CompositeReference::Row(
+                                2,
+                                Box::new(CompositeReference::Simple),
+                            )),
+                        ),
+                    ]),
+                    CompositeConstructor::Simple(CompositeReference::Row(
+                        1,
+                        Box::new(CompositeReference::Simple),
+                    )),
+                ],
+            },
+            vec![vec![
+                record(&mut arena, vec![Datum::Int32(30), Datum::Int32(20)]),
+                Datum::Int32(10),
+            ]],
+        );
+
+        // Record in input.
+        let inp_data2 = vec![vec![
+            Datum::Int32(0),
+            record(&mut arena, vec![Datum::Int32(10), Datum::Int32(20)]),
+            Datum::Int32(30),
+        ]];
+        let inp_type2 = RelationType::new(vec![
+            int32_type.clone(),
+            ColumnType {
+                scalar_type: ScalarType::Record {
+                    fields: vec![
+                        (ColumnName::from("a"), int32_type.clone()),
+                        (ColumnName::from("b"), int32_type.clone()),
+                    ],
+                    custom_id: None,
+                },
+                nullable: true,
+            },
+            int32_type.clone(),
+        ]);
+
+        // Build simple values from record.
+        test(
+            inp_data2.clone(),
+            inp_type2.clone(),
+            CompositeProjection {
+                constructors: vec![
+                    CompositeConstructor::Simple(CompositeReference::Row(
+                        2,
+                        Box::new(CompositeReference::Simple),
+                    )),
+                    CompositeConstructor::Simple(CompositeReference::Row(
+                        1,
+                        Box::new(CompositeReference::Record(
+                            0,
+                            Box::new(CompositeReference::Simple),
+                        )),
+                    )),
+                ],
+            },
+            vec![vec![Datum::Int32(30), Datum::Int32(10)]],
+        );
+
+        // Build a record from a record.
+        test(
+            inp_data2.clone(),
+            inp_type2.clone(),
+            CompositeProjection {
+                constructors: vec![
+                    CompositeConstructor::Simple(CompositeReference::Row(
+                        2,
+                        Box::new(CompositeReference::Simple),
+                    )),
+                    CompositeConstructor::Record(vec![
+                        (
+                            ColumnName::from("c"),
+                            CompositeConstructor::Simple(CompositeReference::Row(
+                                0,
+                                Box::new(CompositeReference::Simple),
+                            )),
+                        ),
+                        (
+                            ColumnName::from("d"),
+                            CompositeConstructor::Simple(CompositeReference::Row(
+                                1,
+                                Box::new(CompositeReference::Record(
+                                    0,
+                                    Box::new(CompositeReference::Simple),
+                                )),
+                            )),
+                        ),
+                    ]),
+                ],
+            },
+            vec![vec![
+                Datum::Int32(30),
+                record(&mut arena2, vec![Datum::Int32(0), Datum::Int32(10)]),
+            ]],
+        );
     }
 }
