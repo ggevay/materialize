@@ -23,10 +23,10 @@ mod linear;
 mod relation;
 mod scalar;
 
+pub mod composite_projection;
 pub mod explain;
 pub mod virtual_syntax;
 pub mod visit;
-pub mod composite_projection;
 
 pub use id::{Id, LocalId, ProtoId, ProtoLocalId, SourceInstanceId};
 pub use interpret::{ColumnSpec, ColumnSpecs, Interpreter, ResultSpec, Trace, TraceSummary};

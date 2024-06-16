@@ -32,7 +32,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use itertools::{Itertools, zip_eq};
+use itertools::{zip_eq, Itertools};
 use mz_expr::{Id, JoinInputMapper, MirRelationExpr, MirScalarExpr, RECURSION_LIMIT};
 use mz_ore::assert_none;
 use mz_ore::soft_assert_no_log;

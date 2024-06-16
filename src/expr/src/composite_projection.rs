@@ -23,16 +23,18 @@
 //! is when it wants to push a projection through the window function MIR pattern.)
 //!
 //! This struct relies on some other structs:
-//!
-//! `CompositeReference` points to a part of a row or a record, including the ability to dig into
-//! composite types. For example, it can reference to field 3 of the record that is at column 2 of
-//! a row.
-//!
-//! `CompositeConstructor` contains instructions for how a `CompositeProjection` should build an
-//! output column or a field of an output record.
+//! - `CompositeReference` points to a part of a row or a record, including the ability to dig into
+//!   composite types. For example, it can reference to field 2 of the record that is at column 3 of
+//!   a row.
+//! - `CompositeConstructor` contains instructions for how a `CompositeProjection` should build an
+//!   output column or a field of an output record.
 //!
 //! Finally, `CompositeProjection` is just an ordered list of `CompositeConstructor`s, each of which
 //! builds one column of the output row.
+//!
+//! `CompositeConstructor` has the invariant that fields can't come out or go into a list, i.e.,
+//! a `CompositeReference` should always go through exactly the same list that is being built by
+//! the `CompositeConstructor` that contains the `CompositeReference`.
 //!
 //! Additionally, the struct `CompositeReferenceSet` is defined here. In some places where
 //! `ProjectionPushdown` used to have a `Vec<usize>`, it now has a either a `CompositeProjection`
@@ -43,16 +45,13 @@
 //! `Project` that needs to exist anyway, because it needs to also project away columns.
 //! (See the slt changes in
 //! <https://github.com/ggevay/materialize/commit/cbd3eec578e16515b99c6c9073d7b9bca1702459>.)
-//!
-//! `CompositeConstructor` has the invariant that fields can't come out or go into a list, i.e.,
-//! a `CompositeReference` should always go through exactly the same list that is being built by
-//! the `CompositeConstructor` that contains the `CompositeReference`.
 
 use std::collections::BTreeSet;
 
 use mz_repr::ColumnName;
 
-use crate::{MirRelationExpr, MirScalarExpr, VariadicFunc};
+use crate::{MirRelationExpr, MirScalarExpr, UnaryFunc, VariadicFunc};
+use crate::func::RecordGet;
 
 #[derive(Debug)]
 pub struct CompositeProjection {
@@ -66,10 +65,19 @@ enum CompositeConstructor {
     List(Box<CompositeConstructor>),
 }
 
-/// For example, simply referring to col 3 of a row is
-/// `CompositeReference::Row(3, CompositeReference::Simple)`
+/// Examples:
+///
+/// Referring to col 3 of a row:
 /// (This works both when col 3 is a simple type, and also when it's a complex type, but we don't
 /// want to dig into it.)
+/// `CompositeReference::Row(3, CompositeReference::Simple)`
+/// Converted to `MirScalarExpr`:
+/// `#3`
+///
+/// Referring to field 2 of the record that is at column 3 of a row:
+/// `CompositeReference::Row(3, CompositeReference::Record(2, CompositeReference::Simple))`
+/// Converted to `MirScalarExpr`:
+/// `record_get[2](#3)`
 #[derive(Debug)]
 enum CompositeReference {
     Simple,
@@ -95,7 +103,9 @@ impl CompositeProjection {
             match ctor {
                 // If the column to construct is a simple type, and we are constructing it from a
                 // simple column of a row, then we can represent this ctor simply in the Project.
-                CompositeConstructor::Simple(CompositeReference::Row(col, inner_ref)) if matches!(*inner_ref, CompositeReference::Simple) => {
+                CompositeConstructor::Simple(CompositeReference::Row(col, inner_ref))
+                    if matches!(*inner_ref, CompositeReference::Simple) =>
+                {
                     projections.push(col);
                 }
                 // Otherwise, we need to build a non-trivial expression, put it in the Map, and put
@@ -117,16 +127,12 @@ impl CompositeProjection {
 impl CompositeConstructor {
     fn to_mir(self) -> MirScalarExpr {
         match self {
-            CompositeConstructor::Simple(reference) => {
-                reference.to_mir()
-            }
+            CompositeConstructor::Simple(reference) => reference.to_mir_on_expr(),
             CompositeConstructor::Record(fields) => {
                 let (field_names, ctors): (_, Vec<_>) = fields.into_iter().unzip();
                 MirScalarExpr::CallVariadic {
-                    func: VariadicFunc::RecordCreate {
-                        field_names
-                    },
-                    exprs: ctors.into_iter().map(|ctor| ctor.to_mir()).collect()
+                    func: VariadicFunc::RecordCreate { field_names },
+                    exprs: ctors.into_iter().map(|ctor| ctor.to_mir()).collect(),
                 }
             }
             CompositeConstructor::List(elem_ctor) => {
@@ -144,13 +150,14 @@ impl CompositeConstructor {
     {
         match self {
             CompositeConstructor::Simple(r) => CompositeConstructor::Simple(f(r)),
-            CompositeConstructor::Record(fields) => {
-                CompositeConstructor::Record(
-                    fields.into_iter().map(|(field_name, ctor): (ColumnName, CompositeConstructor)| {
+            CompositeConstructor::Record(fields) => CompositeConstructor::Record(
+                fields
+                    .into_iter()
+                    .map(|(field_name, ctor): (ColumnName, CompositeConstructor)| {
                         (field_name, ctor.map_references(f))
-                    }).collect()
-                )
-            }
+                    })
+                    .collect(),
+            ),
             CompositeConstructor::List(ctor) => {
                 CompositeConstructor::List(Box::new(ctor.map_references(f)))
             }
@@ -159,8 +166,31 @@ impl CompositeConstructor {
 }
 
 impl CompositeReference {
-    fn to_mir(self) -> MirScalarExpr {
-        todo!()
+    fn to_mir_on_row(self) -> MirScalarExpr {
+        self.to_mir_on_expr(None)
+    }
+
+    /// Turns the `CompositeReference` into a `MirScalarExpr`, which operates on the result of the
+    /// given input expression.
+    fn to_mir_on_expr(self, input: Option<MirScalarExpr>) -> MirScalarExpr {
+        match self {
+            CompositeReference::Simple => input.expect("naked CompositeReference::Simple"),
+            CompositeReference::Row(col_ind, inner_ref) => {
+                assert!(input.is_none());
+                inner_ref.to_mir_on_expr(Some(MirScalarExpr::Column(col_ind)))
+            }
+            CompositeReference::Record(field_ind, inner_ref) => {
+                inner_ref.to_mir_on_expr(Some(
+                    MirScalarExpr::CallUnary {
+                        func: UnaryFunc::RecordGet(RecordGet(field_ind)),
+                        expr: Box::new(input.expect("naked CompositeReference::Record")),
+                    }
+                ))
+            }
+            CompositeReference::List(..) => {
+                panic!("CompositeReference digging into a list from the outside");
+            }
+        }
     }
 
     /// Dig down into the `CompositeReference` until we reach a `List`, and return the reference in
@@ -170,13 +200,12 @@ impl CompositeReference {
             CompositeReference::Simple => {
                 // It shouldn't happen that we reach a leaf before reaching a `List`.
                 panic!("CompositeConstructor invariant violated: a CompositeReference in a CompositeConstructor::List references outside the list");
-            },
-            CompositeReference::Row(_col_ind, r)
-            | CompositeReference::Record(_col_ind, r) => {
+            }
+            CompositeReference::Row(_col_ind, r) | CompositeReference::Record(_col_ind, r) => {
                 // Dig further down.
                 r.peel_list()
             }
-            CompositeReference::List(r) => *r
+            CompositeReference::List(r) => *r,
         }
     }
 }
