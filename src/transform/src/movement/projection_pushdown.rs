@@ -32,9 +32,10 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use itertools::zip_eq;
+use itertools::{Itertools, zip_eq};
 use mz_expr::{Id, JoinInputMapper, MirRelationExpr, MirScalarExpr, RECURSION_LIMIT};
 use mz_ore::assert_none;
+use mz_ore::soft_assert_no_log;
 use mz_ore::stack::{CheckedRecursion, RecursionGuard};
 
 use crate::{TransformCtx, TransformError};
@@ -94,6 +95,7 @@ impl ProjectionPushdown {
         desired_projection: &Vec<usize>,
         gets: &mut BTreeMap<Id, BTreeSet<usize>>,
     ) -> Result<(), TransformError> {
+        soft_assert_no_log!(desired_projection.iter().all_unique());
         self.checked_recur(|_| {
             // First, try to push the desired projection down through `relation`.
             // In the process `relation` is transformed to a `MirRelationExpr`
@@ -478,7 +480,7 @@ impl ProjectionPushdown {
 /// `permutation` can be thought of as a mapping of column references from
 /// `stateA` to `stateB`. [MirScalarExpr.permute] assumes that the column
 /// references of the expression are in `stateA` and need to be remapped to
-/// their `stateB` counterparts. This methods assumes that the column
+/// their `stateB` counterparts. This method assumes that the column
 /// references are in `stateB` and need to be remapped to `stateA`.
 ///
 /// The `outputs` field of [MirRelationExpr::Project] is a mapping from "after"
@@ -498,7 +500,7 @@ where
     }
 }
 
-/// Same as [reverse_permute], but takes column numbers as input
+/// Same as [reverse_permute], but takes column numbers as input.
 fn reverse_permute_columns<'a, I, J>(columns: I, permutation: J)
 where
     I: Iterator<Item = &'a mut usize>,
