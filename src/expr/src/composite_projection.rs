@@ -7,10 +7,6 @@
 // the Business Source License, use of this software will be governed
 // by the Apache License, Version 2.0.
 
-use std::collections::BTreeSet;
-use mz_repr::ColumnName;
-use crate::{MirRelationExpr, MirScalarExpr, VariadicFunc};
-
 //! `CompositeProjection` is a projection that can look into composite types, such as a record or a
 //! list. (Later, we could extend this to be able to look into json.)
 //!
@@ -28,9 +24,9 @@ use crate::{MirRelationExpr, MirScalarExpr, VariadicFunc};
 //!
 //! This struct relies on some other structs:
 //!
-//! `CompositeReference` points to a column in a row or a record, including the ability to open up
-//! composite types. `CompositeOpener` is a co-recursive helper to `CompositeReference`, modeling
-//! the opening of a composite type.
+//! `CompositeReference` points to a part of a row or a record, including the ability to dig into
+//! composite types. For example, it can reference to field 3 of the record that is at column 2 of
+//! a row.
 //!
 //! `CompositeConstructor` contains instructions for how a `CompositeProjection` should build an
 //! output column or a field of an output record.
@@ -52,6 +48,12 @@ use crate::{MirRelationExpr, MirScalarExpr, VariadicFunc};
 //! a `CompositeReference` should always go through exactly the same list that is being built by
 //! the `CompositeConstructor` that contains the `CompositeReference`.
 
+use std::collections::BTreeSet;
+
+use mz_repr::ColumnName;
+
+use crate::{MirRelationExpr, MirScalarExpr, VariadicFunc};
+
 #[derive(Debug)]
 pub struct CompositeProjection {
     constructors: Vec<CompositeConstructor>,
@@ -64,21 +66,16 @@ enum CompositeConstructor {
     List(Box<CompositeConstructor>),
 }
 
-/// ///////////// todo: make this an enum:
-/// Row(col, opener)
-/// Record(col, opener)
-/// Simple(opener)
+/// For example, simply referring to col 3 of a row is
+/// `CompositeReference::Row(3, CompositeReference::Simple)`
+/// (This works both when col 3 is a simple type, and also when it's a complex type, but we don't
+/// want to dig into it.)
 #[derive(Debug)]
-struct CompositeReference {
-    col: usize,
-    opener: CompositeOpener,
-}
-
-#[derive(Debug)]
-enum CompositeOpener {
+enum CompositeReference {
     Simple,
-    Record(Box<CompositeReference>),
-    List(Box<CompositeOpener>),
+    Row(usize, Box<CompositeReference>),
+    Record(usize, Box<CompositeReference>),
+    List(Box<CompositeReference>),
 }
 
 #[derive(Debug)]
@@ -96,9 +93,13 @@ impl CompositeProjection {
         let mut map_exprs = Vec::new();
         for ctor in self.constructors {
             match ctor {
-                CompositeConstructor::Simple(CompositeReference {col, opener: CompositeOpener::Simple}) => {
+                // If the column to construct is a simple type, and we are constructing it from a
+                // simple column of a row, then we can represent this ctor simply in the Project.
+                CompositeConstructor::Simple(CompositeReference::Row(col, inner_ref)) if matches!(*inner_ref, CompositeReference::Simple) => {
                     projections.push(col);
                 }
+                // Otherwise, we need to build a non-trivial expression, put it in the Map, and put
+                // a reference it into the Project.
                 _ => {
                     map_exprs.push(ctor.to_mir());
                     projections.push(arity_before_project);
@@ -129,7 +130,7 @@ impl CompositeConstructor {
                 }
             }
             CompositeConstructor::List(elem_ctor) => {
-                ///////let elem_transform = elem_ctor.map_references(CompositeReference::peel_list);
+                let elem_transform = elem_ctor.map_references(&mut CompositeReference::peel_list);
                 todo!()
             }
         }
@@ -137,7 +138,7 @@ impl CompositeConstructor {
 
     /// Yields a new `CompositeConstructor` by applying the given function to all
     /// `CompositeReference`s contained in the given `CompositeConstructor`.
-    fn map_references<F>(self, mut f: F) -> CompositeConstructor
+    fn map_references<F>(self, f: &mut F) -> CompositeConstructor
     where
         F: FnMut(CompositeReference) -> CompositeReference,
     {
@@ -145,8 +146,8 @@ impl CompositeConstructor {
             CompositeConstructor::Simple(r) => CompositeConstructor::Simple(f(r)),
             CompositeConstructor::Record(fields) => {
                 CompositeConstructor::Record(
-                    fields.into_iter().map(&mut |(field_name, ctor): (ColumnName, CompositeConstructor)| {
-                        (field_name, ctor.map_references(&mut f))
+                    fields.into_iter().map(|(field_name, ctor): (ColumnName, CompositeConstructor)| {
+                        (field_name, ctor.map_references(f))
                     }).collect()
                 )
             }
@@ -162,15 +163,20 @@ impl CompositeReference {
         todo!()
     }
 
-    /// //////////////// todo: mention the implication of the CompositeReference invariant to this function
-    fn peel_list(self) -> CompositeOpener {
-        if let CompositeReference {
-            col: _,
-            opener: CompositeOpener::List(opener)
-        } = self {
-            *opener
-        } else {
-            panic!("CompositeConstructor invariant violated: a CompositeReference in a CompositeConstructor::List references outside the list");
+    /// Dig down into the `CompositeReference` until we reach a `List`, and return the reference in
+    /// that `List`.
+    fn peel_list(self) -> CompositeReference {
+        match self {
+            CompositeReference::Simple => {
+                // It shouldn't happen that we reach a leaf before reaching a `List`.
+                panic!("CompositeConstructor invariant violated: a CompositeReference in a CompositeConstructor::List references outside the list");
+            },
+            CompositeReference::Row(_col_ind, r)
+            | CompositeReference::Record(_col_ind, r) => {
+                // Dig further down.
+                r.peel_list()
+            }
+            CompositeReference::List(r) => *r
         }
     }
 }
