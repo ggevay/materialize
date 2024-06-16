@@ -36,9 +36,12 @@
 //! Finally, `CompositeProjection` is just an ordered list of `CompositeConstructor`s, each of which
 //! builds one column of the output row.
 //!
-//! `CompositeConstructor` has the invariant that fields can't come out or go into a list, i.e.,
-//! a `CompositeReference` should always go through exactly the same list that is being built by
-//! the `CompositeConstructor` that contains the `CompositeReference`.
+//! When it comes to `List`s, `CompositeProjection` is meant to be able to drop or reorganize
+//! information only within each list element individually. In other words, `CompositeProjection` is
+//! _not_ meant to be able to move information between list elements or make lists appear or
+//! disappear or make list elements appear or disappear. (`CompositeProjection`s involving lists
+//! arise when pushing a projection through a `FlatMap unnest_list(...)`: the projection was
+//! originally operating on each row, now it needs to operate on each list element.)
 //!
 //! Additionally, the struct `CompositeReferenceSet` is defined here. In some places where
 //! `ProjectionPushdown` used to have a `Vec<usize>`, it now has a either a `CompositeProjection`
@@ -64,9 +67,18 @@ pub struct CompositeProjection {
 
 #[derive(Debug)]
 enum CompositeConstructor {
+    // Construct a non-composite value.
     Simple(CompositeReference),
+    // Construct a `Record` with the given field names. How to construct the value of each field is
+    // specified by further `CompositeConstructor`s.
     Record(Vec<(ColumnName, CompositeConstructor)>),
-    List(Box<CompositeConstructor>),
+    // Construct a `List`.
+    List {
+        // How to get the list from the input.
+        list_reference: CompositeReference,
+        // How to construct an element of the output list from an element of the input list.
+        elem_constructor: Box<CompositeConstructor>,
+    },
 }
 
 /// Examples:
@@ -87,7 +99,6 @@ enum CompositeReference {
     Simple,
     Row(usize, Box<CompositeReference>),
     Record(usize, Box<CompositeReference>),
-    List(Box<CompositeReference>),
 }
 
 #[derive(Debug)]
@@ -140,13 +151,12 @@ impl CompositeConstructor {
                     exprs: ctors.into_iter().map(|ctor| ctor.to_mir_on_row()).collect(),
                 }
             }
-            CompositeConstructor::List(elem_ctor) => {
-                let elem_ctor = elem_ctor.map_references(&mut CompositeReference::peel_list);
+            CompositeConstructor::List {list_reference, elem_constructor } => {
                 todo!()
                 // asszem itt kb. az kell, hogy a ListMap-et meghivni
                 // `elem_ctor.to_mir_on_expr(#0)` fuggvennyel
                 // Es a ListMap-et meg ugy megirni, hogy a list elemeit berakja egy row #0-jara, es `eval`-ozza a megadott `MirScalarExpr`-t minden elemre.
-                // De mi a ListMap list argumentje? Asszem a peel_list elott meg elo kene banyaszni a lista eleresenek az expressionjet
+                // De mi a ListMap list argumentje? `list_reference`
             }
         }
     }
@@ -167,8 +177,11 @@ impl CompositeConstructor {
                     })
                     .collect(),
             ),
-            CompositeConstructor::List(ctor) => {
-                CompositeConstructor::List(Box::new(ctor.map_references(f)))
+            CompositeConstructor::List {list_reference, elem_constructor} => {
+                CompositeConstructor::List {
+                    list_reference: f(list_reference),
+                    elem_constructor: Box::new(elem_constructor.map_references(f)),
+                }
             }
         }
     }
@@ -201,25 +214,6 @@ impl CompositeReference {
                     }
                 )
             }
-            CompositeReference::List(..) => {
-                panic!("CompositeReference digging into a list from the outside");
-            }
-        }
-    }
-
-    /// Dig down into the `CompositeReference` until we reach a `List`, and return the reference in
-    /// that `List`.
-    fn peel_list(self) -> CompositeReference {
-        match self {
-            CompositeReference::Simple => {
-                // It shouldn't happen that we reach a leaf before reaching a `List`.
-                panic!("CompositeConstructor invariant violated: a CompositeReference in a CompositeConstructor::List references outside the list");
-            }
-            CompositeReference::Row(_col_ind, r) | CompositeReference::Record(_col_ind, r) => {
-                // Dig further down.
-                r.peel_list()
-            }
-            CompositeReference::List(r) => *r,
         }
     }
 }
