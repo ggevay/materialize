@@ -10,10 +10,14 @@
 //! `CompositeProjection` is a projection that can look into composite types, such as a record or a
 //! list. (Later, we could extend this to be able to look into json.)
 //!
+//! Applying a `CompositeProjection` constructs a row involving composite types from an input row
+//! that also involves composite types, dropping and/or reorganizing columns/fields in the process.
+//!
 //! In most situations, Materialize represents a projection simply by a `Vec<usize>`, which
 //! expresses that the projection is taking the given columns in the given order. However, a column
-//! might contain a record (or other compound type), in which case `CompositeProjection` can express
-//! that only certain fields of the record are needed.
+//! might contain a record (or other compound type), in which case `CompositeProjection` is smarter
+//! than a `Vec<usize>` in that it can express that only certain fields of the record are needed
+//! and/or reorganize fields.
 //!
 //! `CompositeProjection`'s purpose is to be used in `ProjectionPushdown`, but it needs to be
 //! defined here, in `mz-expr`, because the /// todo /// scalar function relies on it, and scalar
@@ -111,7 +115,7 @@ impl CompositeProjection {
                 // Otherwise, we need to build a non-trivial expression, put it in the Map, and put
                 // a reference it into the Project.
                 _ => {
-                    map_exprs.push(ctor.to_mir());
+                    map_exprs.push(ctor.to_mir_on_row());
                     projections.push(arity_before_project);
                     arity_before_project += 1;
                 }
@@ -125,25 +129,30 @@ impl CompositeProjection {
 }
 
 impl CompositeConstructor {
-    fn to_mir(self) -> MirScalarExpr {
+    /// Turns the `CompositeConstructor` into a `MirScalarExpr` that operates on an input row.
+    fn to_mir_on_row(self) -> MirScalarExpr {
         match self {
-            CompositeConstructor::Simple(reference) => reference.to_mir_on_expr(),
+            CompositeConstructor::Simple(reference) => reference.to_mir_on_row(),
             CompositeConstructor::Record(fields) => {
                 let (field_names, ctors): (_, Vec<_>) = fields.into_iter().unzip();
                 MirScalarExpr::CallVariadic {
                     func: VariadicFunc::RecordCreate { field_names },
-                    exprs: ctors.into_iter().map(|ctor| ctor.to_mir()).collect(),
+                    exprs: ctors.into_iter().map(|ctor| ctor.to_mir_on_row()).collect(),
                 }
             }
             CompositeConstructor::List(elem_ctor) => {
-                let elem_transform = elem_ctor.map_references(&mut CompositeReference::peel_list);
+                let elem_ctor = elem_ctor.map_references(&mut CompositeReference::peel_list);
                 todo!()
+                // asszem itt kb. az kell, hogy a ListMap-et meghivni
+                // `elem_ctor.to_mir_on_expr(#0)` fuggvennyel
+                // Es a ListMap-et meg ugy megirni, hogy a list elemeit berakja egy row #0-jara, es `eval`-ozza a megadott `MirScalarExpr`-t minden elemre.
+                // De mi a ListMap list argumentje? Asszem a peel_list elott meg elo kene banyaszni a lista eleresenek az expressionjet
             }
         }
     }
 
     /// Yields a new `CompositeConstructor` by applying the given function to all
-    /// `CompositeReference`s contained in the given `CompositeConstructor`.
+    /// `CompositeReference`s therein.
     fn map_references<F>(self, f: &mut F) -> CompositeConstructor
     where
         F: FnMut(CompositeReference) -> CompositeReference,
@@ -166,26 +175,31 @@ impl CompositeConstructor {
 }
 
 impl CompositeReference {
+    /// Turns the `CompositeReference` into a `MirScalarExpr` that operates on an input row.
     fn to_mir_on_row(self) -> MirScalarExpr {
-        self.to_mir_on_expr(None)
+        match self {
+            CompositeReference::Row(col_ind, inner_ref) => {
+                inner_ref.to_mir_on_expr(MirScalarExpr::Column(col_ind))
+            }
+            _ => panic!("to_mir_on_row called on a non-row CompositeReference")
+        }
     }
 
-    /// Turns the `CompositeReference` into a `MirScalarExpr`, which operates on the result of the
-    /// given input expression.
-    fn to_mir_on_expr(self, input: Option<MirScalarExpr>) -> MirScalarExpr {
+    /// Turns the `CompositeReference` into a `MirScalarExpr` that includes the given input
+    /// expression and operates on the result of it.
+    fn to_mir_on_expr(self, input: MirScalarExpr) -> MirScalarExpr {
         match self {
-            CompositeReference::Simple => input.expect("naked CompositeReference::Simple"),
-            CompositeReference::Row(col_ind, inner_ref) => {
-                assert!(input.is_none());
-                inner_ref.to_mir_on_expr(Some(MirScalarExpr::Column(col_ind)))
+            CompositeReference::Simple => input,
+            CompositeReference::Row(..) => {
+                panic!("to_mir_on_expr called on a CompositeReference::Row");
             }
             CompositeReference::Record(field_ind, inner_ref) => {
-                inner_ref.to_mir_on_expr(Some(
+                inner_ref.to_mir_on_expr(
                     MirScalarExpr::CallUnary {
                         func: UnaryFunc::RecordGet(RecordGet(field_ind)),
-                        expr: Box::new(input.expect("naked CompositeReference::Record")),
+                        expr: Box::new(input),
                     }
-                ))
+                )
             }
             CompositeReference::List(..) => {
                 panic!("CompositeReference digging into a list from the outside");
