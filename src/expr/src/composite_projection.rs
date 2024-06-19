@@ -28,7 +28,7 @@
 //!
 //! This struct relies on some other structs:
 //! - `CompositeReference` points to a part of a row or a record, including the ability to dig into
-//!   composite types. For example, it can reference to field 2 of the record that is at column 3 of
+//!   composite types. For example, it can reference field 2 of the record that is at column 3 of
 //!   a row.
 //! - `CompositeConstructor` contains instructions for how a `CompositeProjection` should build an
 //!   output column or a field of an output record.
@@ -44,13 +44,13 @@
 //! originally operating on each row, now it needs to operate on each list element.)
 //!
 //! Additionally, the struct `CompositeReferenceSet` is defined here. In some places where
-//! `ProjectionPushdown` used to have a `Vec<usize>`, it now has a either a `CompositeProjection`
+//! `ProjectionPushdown` used to have a `Vec<usize>`, it now has either a `CompositeProjection`
 //! or a `CompositeReferenceSet`. It would be tempting to simplify it to use a
 //! `CompositeReferenceSet` everywhere, but then it couldn't express the pushdown of a reordering of
 //! columns. This would mean that often an extra `Mfp` stage would appear at the roots of plans, to
 //! perform a reordering that could have been performed somewhere deeper in the plan by a
 //! `Project` that needs to exist anyway, because it needs to also project away columns.
-//! (See the slt changes in
+//! (See the would be slt changes in
 //! <https://github.com/ggevay/materialize/commit/cbd3eec578e16515b99c6c9073d7b9bca1702459>.)
 
 use mz_ore::soft_assert_no_log;
@@ -63,11 +63,11 @@ use crate::{MirRelationExpr, MirScalarExpr, UnaryFunc, VariadicFunc};
 
 #[derive(Debug, Clone)]
 pub struct CompositeProjection {
-    constructors: Vec<CompositeConstructor>,
+    pub constructors: Vec<CompositeConstructor>,
 }
 
 #[derive(Debug, Clone)]
-enum CompositeConstructor {
+pub enum CompositeConstructor {
     // Construct a non-composite value.
     Simple(CompositeReference),
     // Construct a `Record` with the given field names. How to construct the value of each field is
@@ -75,7 +75,8 @@ enum CompositeConstructor {
     Record(Vec<(ColumnName, CompositeConstructor)>),
     // Construct a `List`.
     List {
-        // How to get the list from the input.
+        // How to get the list from the input. At the point of reaching the list, there should be a
+        // `CompositeReference::Simple`.
         list_reference: CompositeReference,
         // How to construct an element of the output list from an element of the input list.
         elem_constructor: Box<CompositeConstructor>,
@@ -96,10 +97,17 @@ enum CompositeConstructor {
 /// Converted to `MirScalarExpr`:
 /// `record_get[2](#3)`
 #[derive(Debug, Clone)]
-enum CompositeReference {
+pub enum CompositeReference {
+    /// The referenced value is treated as a simple type. (It might actually be a composite type,
+    /// but we are not digging into it.)
     Simple,
+    /// The referenced value is found at the given column index of a row.
     Row(usize, Box<CompositeReference>),
+    /// The referenced value is found at the given field index of a record.
     Record(usize, Box<CompositeReference>),
+    // Note that there is no `List` case here. This is because lists are never digged into from the
+    // outside. `CompositeReference`s that are inside `elem_constructor` are based on a list
+    // element, not on the top level of a row.
 }
 
 #[derive(Debug, Clone)]
@@ -125,7 +133,7 @@ impl CompositeProjection {
                     projections.push(col);
                 }
                 // Otherwise, we need to build a non-trivial expression, put it in the Map, and put
-                // a reference it into the Project.
+                // a reference to it into the Project.
                 _ => {
                     map_exprs.push(ctor.to_mir_on_row());
                     projections.push(arity_before_project);
@@ -175,14 +183,12 @@ impl CompositeConstructor {
             CompositeConstructor::List {
                 list_reference,
                 elem_constructor,
-            } => {
-                MirScalarExpr::CallUnary {
-                    func: UnaryFunc::ListMap(ListMap {
-                        map_fn: Box::new(elem_constructor.to_mir_on_expr(MirScalarExpr::Column(0))),
-                    }),
-                    expr: Box::new(list_reference.to_mir(input.clone())),
-                }
-            }
+            } => MirScalarExpr::CallUnary {
+                func: UnaryFunc::ListMap(ListMap {
+                    map_fn: Box::new(elem_constructor.to_mir_on_expr(MirScalarExpr::Column(0))),
+                }),
+                expr: Box::new(list_reference.to_mir(input.clone())),
+            },
         }
     }
 
@@ -214,7 +220,7 @@ impl CompositeConstructor {
     }
 
     /// Yields a new `CompositeConstructor` by applying the given function to all
-    /// `CompositeReference`s therein.
+    /// `CompositeReference`s therein. (It's _not_ lazy.)
     fn map_references<F>(self, f: &mut F) -> CompositeConstructor
     where
         F: FnMut(CompositeReference) -> CompositeReference,
