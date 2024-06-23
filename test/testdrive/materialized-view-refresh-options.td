@@ -385,6 +385,47 @@ true
   WHERE name = 'mv10';
 true
 
+## Negative test for `mz_hydration_statuses`,
+## i.e., a regression test for https://github.com/MaterializeInc/materialize/issues/25518
+## It's hard to observe the bug before the first hydration, so we make the first hydration quick to just get it over
+## with, and then we make the next hydration slow, and try to catch the bug there.
+> CREATE CLUSTER cluster_to_be_bricked SIZE = '1', REPLICATION FACTOR = 1;
+> CREATE TABLE t6 (a int);
+> INSERT INTO t6 VALUES (1);
+> CREATE MATERIALIZED VIEW mv_long_hydration
+  IN CLUSTER cluster_to_be_bricked
+  WITH (REFRESH EVERY '1 day') AS
+  SELECT mz_unsafe.mz_sleep(a)
+  FROM t6;
+
+# Wait for the first rehydration to complete
+> SELECT * FROM mv_long_hydration;
+<null>
+
+> SELECT DISTINCT hydrated
+  FROM mz_internal.mz_hydration_statuses h JOIN mz_objects o ON (h.object_id = o.id)
+  WHERE name = 'mv_long_hydration';
+true
+
+# Make the next rehydration take 1000000 ms.
+> INSERT INTO t6 VALUES (1000000);
+
+# Restart the cluster to force a rehydration.
+> ALTER CLUSTER cluster_to_be_bricked SET (REPLICATION FACTOR 0);
+> ALTER CLUSTER cluster_to_be_bricked SET (REPLICATION FACTOR 1);
+
+# Give the following hydration status query some time to wrongly turn to true if there is a bug.
+> SELECT mz_unsafe.mz_sleep(3);
+<null>
+
+> SELECT DISTINCT hydrated
+  FROM mz_internal.mz_hydration_statuses h JOIN mz_objects o ON (h.object_id = o.id)
+  WHERE name = 'mv_long_hydration';
+false
+
+> DROP MATERIALIZED VIEW mv_long_hydration;
+> DROP CLUSTER cluster_to_be_bricked;
+
 # ----------------------------------------
 # Automated cluster scheduling for REFRESH
 # ----------------------------------------
