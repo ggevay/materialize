@@ -441,6 +441,7 @@ impl Default for FuseAndCollapse {
                 // Removes redundant inputs from joins.
                 // Note that this eliminates one redundant input per join,
                 // so it is necessary to run this section in a loop.
+                Box::new(nonnullable::NonNullable),
                 Box::new(redundant_join::RedundantJoin::default()),
                 // As a final logical action, convert any constant expression to a constant.
                 // Some optimizations fight against this, and we want to be sure to end as a
@@ -689,6 +690,7 @@ impl Optimizer {
                     Box::new(fusion::join::Join),
                     // Predicate pushdown required to tidy after join fusion.
                     Box::new(predicate_pushdown::PredicatePushdown::default()),
+                    Box::new(nonnullable::NonNullable),
                     Box::new(redundant_join::RedundantJoin::default()),
                     // Redundant join produces projects that need to be fused.
                     Box::new(fusion::Fusion),
