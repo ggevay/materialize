@@ -184,7 +184,7 @@ Explained Query:
               ReadIndex on=t1 i1=[*** full scan ***] // { arity: 2 }
           Map (error("more than one record produced in subquery")) // { arity: 1 }
             Project () // { arity: 0 }
-              Filter error("more than one record produced in subquery") AND (#0 > 1) // { arity: 1 }
+              Filter (#0 > 1) // { arity: 1 }
                 Reduce aggregates=[count(*)] // { arity: 1 }
                   Project () // { arity: 0 }
                     ReadIndex on=t1 i1=[*** full scan ***] // { arity: 2 }
@@ -220,7 +220,7 @@ Explained Query:
             Get l0 // { arity: 3 }
           Map (error("more than one record produced in subquery")) // { arity: 1 }
             Project () // { arity: 0 }
-              Filter error("more than one record produced in subquery") AND (#0 > 1) // { arity: 1 }
+              Filter (#0 > 1) // { arity: 1 }
                 Reduce aggregates=[count(*)] // { arity: 1 }
                   Project () // { arity: 0 }
                     Get l0 // { arity: 3 }
@@ -251,7 +251,7 @@ Explained Query:
               ReadIndex on=t1 i1=[*** full scan ***] // { arity: 2 }
           Map (error("more than one record produced in subquery")) // { arity: 1 }
             Project () // { arity: 0 }
-              Filter error("more than one record produced in subquery") AND (#0 > 1) // { arity: 1 }
+              Filter (#0 > 1) // { arity: 1 }
                 Reduce aggregates=[count(*)] // { arity: 1 }
                   Project () // { arity: 0 }
                     ReadIndex on=t1 i1=[*** full scan ***] // { arity: 2 }
@@ -980,7 +980,7 @@ Explained Query:
                 Get l1 // { arity: 3 }
               Map (error("more than one record produced in subquery")) // { arity: 1 }
                 Project () // { arity: 0 }
-                  Filter error("more than one record produced in subquery") AND (#0 > 1) // { arity: 1 }
+                  Filter (#0 > 1) // { arity: 1 }
                     Reduce aggregates=[count(*)] // { arity: 1 }
                       Project () // { arity: 0 }
                         Get l1 // { arity: 3 }

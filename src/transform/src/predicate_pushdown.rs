@@ -95,6 +95,7 @@ use mz_ore::stack::{CheckedRecursion, RecursionGuard, RecursionLimitError};
 use mz_repr::{ColumnType, Datum, ScalarType};
 
 use crate::{TransformCtx, TransformError};
+use crate::nonnullable::NonNullable;
 
 /// Pushes predicates down through other operators.
 #[derive(Debug)]
@@ -150,6 +151,7 @@ impl PredicatePushdown {
         relation: &mut MirRelationExpr,
         get_predicates: &mut BTreeMap<Id, BTreeSet<MirScalarExpr>>,
     ) -> Result<(), TransformError> {
+        NonNullable.action(relation);
         self.checked_recur(|_| {
             // In the case of Filter or Get we have specific work to do;
             // otherwise we should recursively descend.
