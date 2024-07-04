@@ -431,6 +431,7 @@ impl Default for FuseAndCollapse {
                 Box::new(fusion::join::Join),
                 Box::new(normalize_lets::NormalizeLets::new(false)),
                 Box::new(fusion::reduce::Reduce),
+                Box::new(predicate_pushdown::PredicatePushdown::default()),
                 Box::new(compound::UnionNegateFusion),
                 // This goes after union fusion so we can cancel out
                 // more branches at a time.
