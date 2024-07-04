@@ -637,6 +637,7 @@ impl Optimizer {
                 limit: 100,
                 transforms: vec![Box::new(join_implementation::JoinImplementation::default())],
             }),
+            Box::new(nonnullable::NonNullable),
             Box::new(canonicalize_mfp::CanonicalizeMfp),
             // Identifies common relation subexpressions.
             Box::new(cse::relation_cse::RelationCSE::new(false)),

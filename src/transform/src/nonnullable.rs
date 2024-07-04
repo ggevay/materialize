@@ -122,10 +122,14 @@ fn scalar_nonnullable(expr: &mut MirScalarExpr, metadata: &RelationType) {
             expr,
         } = e
         {
-            if let MirScalarExpr::Column(c) = &**expr {
-                if !metadata.column_types[*c].nullable {
-                    *e = MirScalarExpr::literal_ok(Datum::False, ScalarType::Bool);
-                }
+            // if let MirScalarExpr::Column(c) = &**expr {
+            //     if !metadata.column_types[*c].nullable {
+            //         *e = MirScalarExpr::literal_ok(Datum::False, ScalarType::Bool);
+            //     }
+            // }
+
+            if !expr.typ(&metadata.column_types).nullable && !expr.could_error() {
+                *e = MirScalarExpr::literal_ok(Datum::False, ScalarType::Bool);
             }
         }
     });
