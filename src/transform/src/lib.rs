@@ -554,6 +554,7 @@ impl Optimizer {
                 name: "fixpoint02",
                 limit: 100,
                 transforms: vec![
+                    Box::new(nonnullable::NonNullable),
                     Box::new(semijoin_idempotence::SemijoinIdempotence::default()),
                     // Pushes aggregations down
                     Box::new(reduction_pushdown::ReductionPushdown),
