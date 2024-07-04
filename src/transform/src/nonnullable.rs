@@ -44,32 +44,32 @@ impl NonNullable {
     /// Harvests information about non-nullability of columns from sources.
     pub fn action(&self, relation: &mut MirRelationExpr) {
         match relation {
-            MirRelationExpr::Map { input, scalars } => {
-                let contains_isnull = scalars
-                    .iter()
-                    .map(scalar_contains_isnull)
-                    .fold(false, |b1, b2| b1 || b2);
-                if contains_isnull {
-                    let mut metadata = input.typ();
-                    for scalar in scalars.iter_mut() {
-                        scalar_nonnullable(scalar, &metadata);
-                        let typ = scalar.typ(&metadata.column_types);
-                        metadata.column_types.push(typ);
-                    }
-                }
-            }
-            MirRelationExpr::Filter { input, predicates } => {
-                let contains_isnull = predicates
-                    .iter()
-                    .map(scalar_contains_isnull)
-                    .fold(false, |b1, b2| b1 || b2);
-                if contains_isnull {
-                    let metadata = input.typ();
-                    for predicate in predicates.iter_mut() {
-                        scalar_nonnullable(predicate, &metadata);
-                    }
-                }
-            }
+            // MirRelationExpr::Map { input, scalars } => {
+            //     let contains_isnull = scalars
+            //         .iter()
+            //         .map(scalar_contains_isnull)
+            //         .fold(false, |b1, b2| b1 || b2);
+            //     if contains_isnull {
+            //         let mut metadata = input.typ();
+            //         for scalar in scalars.iter_mut() {
+            //             scalar_nonnullable(scalar, &metadata);
+            //             let typ = scalar.typ(&metadata.column_types);
+            //             metadata.column_types.push(typ);
+            //         }
+            //     }
+            // }
+            // MirRelationExpr::Filter { input, predicates } => {
+            //     let contains_isnull = predicates
+            //         .iter()
+            //         .map(scalar_contains_isnull)
+            //         .fold(false, |b1, b2| b1 || b2);
+            //     if contains_isnull {
+            //         let metadata = input.typ();
+            //         for predicate in predicates.iter_mut() {
+            //             scalar_nonnullable(predicate, &metadata);
+            //         }
+            //     }
+            // }
             MirRelationExpr::Reduce {
                 input,
                 group_key: _,
@@ -88,7 +88,7 @@ impl NonNullable {
                 if contains_isnull_or_count {
                     let metadata = input.typ();
                     for aggregate in aggregates.iter_mut() {
-                        scalar_nonnullable(&mut aggregate.expr, &metadata);
+                        // scalar_nonnullable(&mut aggregate.expr, &metadata);
                         aggregate_nonnullable(aggregate, &metadata);
                     }
                 }
