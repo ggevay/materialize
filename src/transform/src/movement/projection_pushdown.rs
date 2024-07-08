@@ -292,7 +292,7 @@ impl ProjectionPushdown {
                     let mut actual_projection =
                         desired_projection.iter().cloned().collect::<BTreeSet<_>>();
                     for (i, scalar) in scalars.iter().enumerate().rev() {
-                        if actual_projection.contains(&(i + arity)) {
+                        if actual_projection.contains(&(i + arity)) { /////////// todo: we have to note when only a field of it is requested
                             scalar.support_into(&mut actual_projection);
                         }
                     }

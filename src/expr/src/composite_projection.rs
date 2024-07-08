@@ -53,13 +53,15 @@
 //! (See the would be slt changes in
 //! <https://github.com/ggevay/materialize/commit/cbd3eec578e16515b99c6c9073d7b9bca1702459>.)
 
-use mz_ore::soft_assert_no_log;
 use std::collections::BTreeSet;
 
+use mz_ore::soft_assert_no_log;
+use mz_ore::stack::RecursionLimitError;
 use mz_repr::ColumnName;
 
 use crate::func::{ListMap, RecordGet};
 use crate::{MirRelationExpr, MirScalarExpr, UnaryFunc, VariadicFunc};
+use crate::visit::Visit;
 
 #[derive(Debug, Clone)]
 pub struct CompositeProjection {
@@ -96,7 +98,7 @@ pub enum CompositeConstructor {
 /// `CompositeReference::Row(3, CompositeReference::Record(2, CompositeReference::Simple))`
 /// Converted to `MirScalarExpr`:
 /// `record_get[2](#3)`
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialOrd, PartialEq, Ord, Eq)]
 pub enum CompositeReference {
     /// The referenced value is treated as a simple type. (It might actually be a composite type,
     /// but we are not digging into it.)
@@ -282,5 +284,55 @@ impl CompositeReference {
             None => self.to_mir_on_row(),
             Some(input) => self.to_mir_on_expr(input),
         }
+    }
+}
+
+impl CompositeReferenceSet {
+    pub fn new() -> Self {
+        CompositeReferenceSet {refs: BTreeSet::new()}
+    }
+
+    pub fn add_support_of(&mut self, expr: &MirScalarExpr, ref_above_expr: &CompositeReference) -> Result<(), RecursionLimitError> {
+        expr.visit_pre_with_context(
+            Vec::new(),
+            &mut |record_gets, expr| {
+                match expr {
+                    MirScalarExpr::CallUnary {
+                        func: UnaryFunc::RecordGet(RecordGet(field)),
+                        expr: _,
+                    } => {
+                        let mut cloned = record_gets.clone();
+                        cloned.push(*field);
+                        cloned
+                    },
+                    _ => {
+                        // forget record_gets
+                        Vec::new()
+                    }
+                }
+            },
+            &mut |record_gets, expr| {
+                match expr {
+                    MirScalarExpr::Column(c) => {
+                        let mut r = ref_above_expr.clone();
+                        for field in record_gets.into_iter().rev() {
+                            r = CompositeReference::Record(*field, Box::new(r));
+                        }
+                        self.refs.insert(r);
+                    },
+                    _ => {},
+                }
+            }
+        )
+        /////// todo: normalize?
+        // - 0. make unique? Will be needed for reverse_permute?
+        // - 1. when both a full record and some of its fields are requested, forget about the fields and just keep the full record?
+        // - 2. when all fields of a record all requested, just request the record itself?
+
+        ////// todo: rewrite in terms of visit_pre_post?:
+        // - match record_get, and go inwards while there are record_gets
+        // - if there are not record_gets at all, return None (to just continue the visitation with all children)
+        // - if in the middle there is something else than a column ref, then just vist it and forget about the record_gets
+        // - if in the middle there is a column ref, then create CompositeReference::Record, and don't visit any children
     }
 }
