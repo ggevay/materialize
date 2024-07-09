@@ -177,15 +177,13 @@ Note that the compaction of downstream objects, e.g. an index on the materialize
 
 ### Starting the Refresh Early
 
-TODO: update this section with the latest discussion on `REHYDRATION TIME ESTIMATE`.
-
 Notice that if we turn on the replica at exactly the moment when a refresh should happen, then the MV's upper will be stuck for the time that the refresh takes. This is because the upper would still be at the logical time of the refresh during most of the time of the replica's rehydration. (More specifically, until the replica is finished processing the input data whose timestamps are before the time of the refresh, which are rounded up to the time of the refresh.) This would violate success criterion 3. for the time of performing the refresh, because other objects' sinces would keep ticking forward, and would therefore have no overlap with our special materialized view's since-upper interval.
 
 There is a workaround for this until we properly fix it: If there is a specific query involving a `REFRESH EVERY` MV and some other object that one knows will need to be run during a refresh, then creating another (normal) MV (or view + index) on that query would ensure that the sinces of other involved objects are held back until the refresh completes, so the data would be queryable under serializable isolation.
 
 A proper fix would be to start up the replica a bit before the exact moment of the refresh, so that it can rehydrate already. For example, let's say we have an MV that is to be updated at every midnight. If we know that a refresh will take approximately 1 hour, then we can start up the replica at, say, 10:50 PM, so that it will be rehydrated by about 11:50 PM. At this point, most of the Compute processing that is needed for the refresh has already happened. Now the replica just needs to process the last 10 minutes of input data until midnight at a normal pace. We let the replica run until the MV's upper passes midnight (and jumps to the next midnight), which should happen within a few seconds after midnight. Note that before midnight, queries against the MV will still read the old state (as they should), because the new data is written at timestamps rounded up to midnight.
 
-How do we know how much earlier than the refresh time should we turn on the replica, that is, how much time the refresh will take? In the first version of this feature, we can let the user set this explicitly by something like `REFRESH EVERY <interval> EARLY <interval>`. Later, we should record the times the refreshes take, and infer the time requirement of the next refresh based on earlier ones. Note that this will be complicated by the fact that we have different instance types [that have wildly differing CPU performance](https://materializeinc.slack.com/archives/CM7ATT65S/p1697816482502819).
+How do we know how much earlier than the refresh time should we turn on the replica, that is, how much time the refresh will take? In the first version of this feature, we can let the user set this explicitly by something like `REFRESH EVERY <interval> EARLY <interval>`. Later, we should record the times the refreshes take, and infer the time requirement of the next refresh based on earlier ones. Note that this will be complicated by the fact that we have different instance types [that have wildly differing CPU performance](https://materializeinc.slack.com/archives/CM7ATT65S/p1697816482502819). Update: This is now set on the auto-scheduled cluster, with the `REHYDRATION TIME ESTIMATE` syntax.
 
 ### Logical Times vs. Wall Clock Times
 
@@ -193,7 +191,7 @@ Note that generally we can't guarantee that refreshes will happen at exactly the
 
 ### Delta Join Tweaks
 
-TODO
+See [#23179](https://github.com/MaterializeInc/materialize/issues/23179).
 
 ## Possible Future Work
 
@@ -253,7 +251,16 @@ As mentioned in the [scoping section](#out-of-scope), an alternative implementat
 
 ## Automated Cluster Scheduling for `REFRESH` MVs
 
-TODO: write down the updated discussion
+E.g.:
+```
+ALTER CLUSTER c1 SET (SCHEDULE = ON REFRESH (REHYDRATION TIME ESTIMATE = '1 hour'));
+```
+
+Discussions:
+- [Original discussion](https://github.com/MaterializeInc/materialize/issues/25712)
+- [Overview](https://www.notion.so/materialize/REFRESH-user-docs-draft-4a8f30b737a94619ac9f645abc9f84ce?pvs=4#025fd5733fcd4f38b48ee967bc8fb763)
+- [Syntax discussion](https://materializeinc.slack.com/archives/C063H5S7NKE/p1710355545343079)
+- [REHYDRATION TIME ESTIMATE discussion](https://materializeinc.slack.com/archives/C063H5S7NKE/p1712165305916299)
 
 ## Introspection / Observability
 
