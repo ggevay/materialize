@@ -5,6 +5,7 @@
   - Main epics:
     - [#22878 [Epic] Refresh options for materialized views](https://github.com/MaterializeInc/materialize/issues/22878)
     - [#25712 [Epic] Automatic cluster scheduling for REFRESH EVERY matviews](https://github.com/MaterializeInc/materialize/issues/25712)
+  - The user whose needs originally prompted this work: [accounts/#3](https://github.com/MaterializeInc/accounts/issues/3)
   - Older issues:
     - [#13762: CREATE MATERIALIZED VIEW could support REFRESH modifiers](https://github.com/MaterializeInc/materialize/issues/13762)
     - [#6745: Consider WITH FREQUENCY option for sources, views, sinks.](https://github.com/MaterializeInc/materialize/issues/6745)
@@ -119,6 +120,8 @@ Another consideration for `<aligned_to_timestamp>`s in the past is that we'd lik
 
 To support more complex refresh schedules, we'll also support [cron schedule expressions](https://cloud.google.com/scheduler/docs/configuring/cron-job-schedules). For example, the user whose needs prompted this work would like to have daily refreshes, but not on the weekends. While this is possible to express using `REFRESH EVERY <every_interval> [ALIGNED TO <aligned_to_timestamp>]`, it is quite cumbersome: one would need to specify a `REFRESH EVERY '7 days'` 5 times: for each of the weekdays when a refresh should happen.
 
+Cron schedules would also solve daylight saving time issues: `EVERY` is shifted by 1 hour, but a Cron schedule would not.
+
 The implementation for refreshes scheduled by cron expressions will be similar to `REFRESH EVERY`, except for the determination of when the next refresh should happen.
 
 #### Refresh `AT {CREATION | <timestamp>}`
@@ -194,7 +197,7 @@ TODO
 
 ## Possible Future Work
 
-- REFRESH ON DEMAND (and ALTER ...)
+- REFRESH ON DEMAND (and ALTER ...). This is hard, see [#26572](https://github.com/MaterializeInc/materialize/issues/26572)
 - When we have custom compaction windows, make sure stuff works. E.g., `<aligned_to_timestamp>` in the past should actually start in the past.
 
 ## Minimal Viable Prototype
@@ -278,4 +281,4 @@ We might want to also track the time it takes to actually perform a refresh, ass
 
 ## Rollout
 
-I plan to first implement the feature without automatically turning replicas on and off, and release the feature in this half-finished state behind a feature flag. At this point, we can already show the feature to the customer whose needs prompted this work, and they can validate it to some degree. At this point, the user will need to manually manage the replicas. Update: this is done, the user is using it in their prototype, managing replicas with GitHub Actions at hardcoded times.
+I plan to first implement the feature without automatically turning replicas on and off, and release the feature in this half-finished state behind a feature flag. At this point, we can already show the feature to the customer whose needs prompted this work, and they can validate it to some degree. At this point, the user will need to manually manage the replicas. Update: this is done, the user is using it in their prototype, managing replicas with GitHub Actions at hardcoded times. Update 2: The user is now using the automated cluster scheduling instead of GitHub actions.
