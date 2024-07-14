@@ -33,7 +33,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use itertools::{zip_eq, Itertools};
-use mz_expr::{Id, JoinInputMapper, MirRelationExpr, MirScalarExpr, RECURSION_LIMIT};
+use mz_expr::{Id, JoinInputMapper, MirRelationExpr, MirScalarExpr, RECURSION_LIMIT, VariadicFunc};
 use mz_ore::assert_none;
 use mz_ore::soft_assert_no_log;
 use mz_ore::stack::{CheckedRecursion, RecursionGuard};
@@ -236,6 +236,35 @@ impl ProjectionPushdown {
                     columns_to_pushdown.into_iter().collect()
                 }
                 MirRelationExpr::FlatMap { input, func, exprs } => {
+
+                    // Lehet, hogy nem kene erolkodni a CompositeProjection-ben a listak kezelesevel,
+                    // hanem egyszeruen itt at lehetne ugrani a listas reszt:
+                    // - Ugyebar fokeppen azert nehez a ComopsiteProjection-ben kezelni a listakat, mert
+                    //   kene az a higher-order map fn, ami viszont azert bajos, mert at kene nezni az osszes scalar visitationt az egesz kodban.
+                    // - Az alabb lathato ketfele mintat kene kezelni.
+                    //   - Sot, a list_create utan FlatMap UnnestList mintat el is lehetne tuntetni teljesen (akar vhol mashol)
+                    //     - Vhol kezelni kene (vagy itt, vagy mashol eltuntetni teljesen), mert kulonben behoznank egy nemmonotonitast: ha unique key van, akkor elakadna a ProjectionPushdown
+                    // - Az egesz window funct pattern bonyolult lenne, mert az unnest_list utan mindenfele dolgok tortenhetnek:
+                    //   Nem biztos, hogy egy MFP szedi szet a rekordot, hanem pl. bemehet ujabb reduce-ba, vagy barmi masba ami scalar expr-t var
+                    //   - (Bar amugy volt az a terv, hogy non-trivialis expr csak MFP-ben lehetne. De ez rovid tavon nem tortenik vszeg.)
+
+                    if matches!(func, mz_expr::TableFunc::UnnestList {..}) {
+                        let reduce = matches!(**input, MirRelationExpr::Reduce {..});
+                        let map_list_create = match (**input).clone() {
+                            MirRelationExpr::Map {scalars, ..} => {
+                                scalars.len() == 1 && matches!(scalars[0], MirScalarExpr::CallVariadic {func: VariadicFunc::ListCreate {..}, ..})
+                            }
+                            _ => false
+                        };
+                        if !reduce && !map_list_create {
+                            println!(">>>>>>>>>>>>>>>>>>>>>>>>>>\n{}\n", input.pretty());
+                            panic!()
+                        }
+                        // assert!(
+                        //     matches!(**input, MirRelationExpr::Reduce {..})
+                        // );
+                    }
+
                     let inner_arity = input.arity();
                     // A FlatMap which returns zero rows acts like a filter
                     // so we always need to execute it
