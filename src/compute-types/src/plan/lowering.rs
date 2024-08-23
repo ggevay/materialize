@@ -16,7 +16,7 @@ use mz_expr::{
     permutation_for_arrangement, Id, JoinInputMapper, MapFilterProject, MirRelationExpr,
     MirScalarExpr, OptimizedMirRelationExpr,
 };
-use mz_ore::{assert_none, soft_assert_eq_or_log, soft_panic_or_log};
+use mz_ore::{assert_none, soft_assert_eq_or_log, soft_assert_or_log, soft_panic_or_log};
 use mz_repr::optimize::OptimizerFeatures;
 use mz_repr::GlobalId;
 use timely::progress::Timestamp;
@@ -420,16 +420,16 @@ impl Context {
                 let input_mapper = JoinInputMapper::new(inputs);
 
                 // Plan each of the join inputs independently.
-                // The `plans` get surfaced upwards, and the `input_keys` should
+                // The `plans` get surfaced upwards, and the `input_keys` should //// todo: fix comment
                 // be used as part of join planning / to validate the existing
                 // plans / to aid in indexed seeding of update streams.
-                let mut plans = Vec::new();
+                let mut input_plans = Vec::new();
                 let mut input_keys = Vec::new();
                 let mut input_arities = Vec::new();
                 for input in inputs.iter() {
                     let (plan, keys) = self.lower_mir_expr(input)?;
                     input_arities.push(input.arity());
-                    plans.push(plan);
+                    input_plans.push(plan);
                     input_keys.push(keys);
                 }
 
@@ -460,6 +460,7 @@ impl Context {
                         (JoinPlan::Linear(ljp), missing)
                     }
                     Differential((start, start_arr, _start_characteristic), order) => {
+                        soft_assert_or_log!(start_arr.is_some(), "starting arrangement is always specified nowadays");
                         let source_arrangement = start_arr.as_ref().and_then(|key| {
                             input_keys[*start]
                                 .arranged
@@ -467,6 +468,7 @@ impl Context {
                                 .find(|(k, _, _)| k == key)
                                 .clone()
                         });
+                        soft_assert_or_log!(source_arrangement.is_some(), "Mir JoinImplementation should have inserted an ArrangeBy, so we should always find it in AvailableCollections");
                         let (ljp, missing) = LinearJoinPlan::create_from(
                             *start,
                             source_arrangement,
@@ -494,7 +496,7 @@ impl Context {
                 // The renderer will expect certain arrangements to exist; if any of those are not available, the join planning functions above should have returned them in
                 // `missing`. We thus need to plan them here so they'll exist.
                 let is_delta = matches!(plan, JoinPlan::Delta(_));
-                for (((input_plan, input_keys), missing), arity) in plans
+                for (((input_plan, input_keys), missing), arity) in input_plans
                     .iter_mut()
                     .zip(input_keys.iter())
                     .zip(missing.into_iter())
@@ -534,12 +536,14 @@ This is not expected to cause incorrect results, but could indicate a performanc
                             },
                         );
                         *input_plan = self.arrange_by(raw_plan, missing, input_keys, arity);
+                        //todo: rewrite to
+                        // *input_plan = self.arrange_by(input_plan.take_dangerous(), missing, input_keys, arity);
                     }
                 }
                 // Return the plan, and no arrangements.
                 (
                     Plan::Join {
-                        inputs: plans,
+                        inputs: input_plans,
                         plan,
                         lir_id: self.allocate_lir_id(),
                     },

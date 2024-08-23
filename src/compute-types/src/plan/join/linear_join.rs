@@ -127,8 +127,10 @@ pub struct LinearStagePlan {
     /// The key expressions to use for the lookup relation.
     pub lookup_key: Vec<MirScalarExpr>,
     /// The closure to apply to the concatenation of the key columns,
-    /// the stream value columns, and the lookup value colunms.
-    pub closure: JoinClosure,
+    /// the stream value columns, and the lookup value columns.
+    pub post_closure: JoinClosure,
+    ///
+    pub input_fragment_mfps: Vec<MapFilterProject>, // only for the already-arranged case
 }
 
 impl RustType<ProtoLinearStagePlan> for LinearStagePlan {
@@ -166,10 +168,11 @@ impl LinearJoinPlan {
         input_mapper: mz_expr::JoinInputMapper,
         // An MFP to apply to the result of the join.
         mfp_above: &mut MapFilterProject,
-        available: &[AvailableCollections],
-    ) -> (Self, Vec<AvailableCollections>) {
-        let mut requested: Vec<AvailableCollections> =
-            vec![Default::default(); input_mapper.total_inputs()];
+        available: Vec<Vec<AvailableCollections>>,
+        input_fragment_mfps: Vec<Vec<MapFilterProject>>,
+    ) -> (Self, Vec<Vec<AvailableCollections>>) {
+        let mut requested =
+            vec![vec![Default::default(); input_mapper.total_inputs()]];
         // Temporal predicates cannot currently be pushed down, and so we extract them and
         // set `mfp` to be the temporal predicates at the end of the method.
         let temporal_mfp = mfp_above.extract_temporal();
