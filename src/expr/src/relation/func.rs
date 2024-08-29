@@ -596,9 +596,9 @@ fn lag_lead_inner_ignore_nulls<'a>(
         let idx = i64::try_from(idx).expect("Array index does not fit in i64");
         let offset = i64::from(offset.unwrap_int32());
         // By default, offset is applied backwards (for `lag`): flip the sign if `lead` should run instead
-        let (offset, decrement) = match lag_lead_type {
-            LagLeadType::Lag => (offset, 1),
-            LagLeadType::Lead => (-offset, -1),
+        let (offset, increment) = match lag_lead_type {
+            LagLeadType::Lag => (offset, -1),
+            LagLeadType::Lead => (-offset, 1),
         };
 
         // Get a Datum from `datums`. Return None if index is out of range.
@@ -621,10 +621,10 @@ fn lag_lead_inner_ignore_nulls<'a>(
             // But a common use case is an offset of 1, for which this doesn't matter.
             let mut j = idx;
             for _ in 0..num::abs(offset) {
-                j -= decrement;
+                j += increment;
                 // Jump over a run of nulls
                 while datums_get(j).is_some_and(|d| d.is_null()) {
-                    j -= decrement;
+                    j += increment;
                 }
                 if datums_get(j).is_none() {
                     break;
