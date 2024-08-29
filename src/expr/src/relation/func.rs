@@ -586,6 +586,17 @@ fn lag_lead_inner_ignore_nulls<'a>(
     lag_lead_type: &LagLeadType,
 ) -> Vec<Datum<'a>> {
     let mut result: Vec<Datum> = Vec::with_capacity(args.len());
+    let lag_lead_sign = match lag_lead_type {
+        LagLeadType::Lag => -1,
+        LagLeadType::Lead => 1,
+    };
+    // Conceptually, we'll be keeping two indexes:
+    // - `idx` will be the index of the row for whom we are computing a result.
+    // - `lagged_idx` will be the index of the row from which we are grabbing the value that we'll
+    //   put as the result for the current row.
+    let mut prev_idx = -1;
+    let mut prev_offset = 0;
+    let mut prev_lagged_idx = -1;
     for (idx, (_, offset, default_value)) in args.iter().enumerate() {
         // Null offsets are acceptable, and always return null
         if offset.is_null() {
@@ -595,11 +606,8 @@ fn lag_lead_inner_ignore_nulls<'a>(
 
         let idx = i64::try_from(idx).expect("Array index does not fit in i64");
         let offset = i64::from(offset.unwrap_int32());
-        // By default, offset is applied backwards (for `lag`): flip the sign if `lead` should run instead
-        let (offset, decrement) = match lag_lead_type {
-            LagLeadType::Lag => (offset, 1),
-            LagLeadType::Lead => (-offset, -1),
-        };
+        let to_go = idx - prev_idx + (offset - prev_offset) * lag_lead_sign;
+        let to_go_sign = to_go.signum();
 
         // Get a Datum from `datums`. Return None if index is out of range.
         let datums_get = |i: i64| -> Option<Datum> {
@@ -613,34 +621,46 @@ fn lag_lead_inner_ignore_nulls<'a>(
         };
 
         let lagged_value = {
-            // We start j from idx, and step j until we have seen an abs(offset) number of non-null
-            // values.
-            //
-            // (This is a very naive implementation: We could avoid an inner loop, and instead step
-            // two indexes in one loop, with one index lagging behind. But a common use case is an
-            // offset of 1 and not too many nulls, for which this doesn't matter. And anyhow, the
-            // whole thing hopefully will be replaced by prefix sum soon.)
-            let mut to_go = num::abs(offset);
-            let mut j = idx;
-            loop {
-                j -= decrement;
+            let mut to_go = num::abs(to_go);
+            let mut j = prev_lagged_idx;
+            let lagged_value = if to_go == 0 {
                 match datums_get(j) {
                     Some(datum) => {
-                        if !datum.is_null() {
-                            to_go -= 1;
-                            if to_go == 0 {
-                                break datum;
-                            }
-                        }
+                        datum
                     }
                     None => {
-                        break *default_value;
+                        *default_value
                     }
-                };
-            }
+                }
+            } else {
+                loop {
+                    j += to_go_sign;
+                    match datums_get(j) {
+                        Some(datum) => {
+                            if !datum.is_null() {
+                                to_go -= 1;
+                                if to_go == 0 {
+                                    break datum;
+                                }
+                            }
+                        }
+                        None => {
+                            to_go -= 1;
+                            if to_go == 0 {
+                                break *default_value;
+                            }
+                        }
+                    };
+                }
+            };
+            prev_lagged_idx = j;
+            lagged_value
         };
 
         result.push(lagged_value);
+
+        prev_idx = idx;
+        prev_offset = offset;
     }
 
     result
