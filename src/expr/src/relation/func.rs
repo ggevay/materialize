@@ -3493,11 +3493,21 @@ impl fmt::Display for TableFunc {
 
 #[cfg(test)]
 mod tests {
+    use num::ToPrimitive;
+    use std::time::Instant;
+
+    use super::{
+        order_aggregate_datums_with_rank, AggregateFunc, ProtoAggregateFunc, ProtoTableFunc,
+        TableFunc,
+    };
+    use crate::ColumnOrder;
+    use chrono::DateTime;
     use mz_ore::assert_ok;
     use mz_proto::protobuf_roundtrip;
+    use mz_repr::adt::timestamp::CheckedTimestamp;
+    use mz_repr::{Datum, RowArena};
     use proptest::prelude::*;
-
-    use super::{AggregateFunc, ProtoAggregateFunc, ProtoTableFunc, TableFunc};
+    use rand::distributions::{Uniform, Distribution};
 
     proptest! {
        #[mz_ore::test]
@@ -3517,5 +3527,98 @@ mod tests {
             assert_ok!(actual);
             assert_eq!(actual.unwrap(), expect);
         }
+    }
+
+    /// This is not a real test, but a benchmark.
+    ///
+    /// To run it as a benchmark, go to the directory of this file, and run with
+    /// `cargo test order_aggregate_datums_with_rank_benchmark --release -- --nocapture`
+    /// to see the prints.
+    #[mz_ore::test]
+    #[cfg_attr(miri, ignore)] // too slow
+    fn order_aggregate_datums_with_rank_benchmark() {
+        let scale = 10000; // Make this big for benchmarking. E.g., 1000000.
+        let num_runs = 7;
+
+        let mut preparation_times = Vec::new();
+        let mut computation_times = Vec::new();
+        for _ in 0..num_runs {
+            let start = Instant::now();
+
+            let mut rng = rand::thread_rng();
+            let temp_storage = RowArena::new();
+
+            let order_by = vec![ColumnOrder {
+                column: 0,
+                desc: false,
+                nulls_last: false,
+            }];
+
+            // Simulate a lag/lead, e.g.
+            // row(
+            //   row(
+            //     row(#0, #1, #2, #3), // original row
+            //     row(#1, 1, null) // args to lag/lead
+            //   ),
+            //   <order_by_col_1>,
+            // )
+            let distr = Uniform::new(0, 1000000000);
+            let mut datums = Vec::with_capacity(scale);
+            for _i in 0..scale {
+                datums.push(temp_storage.make_datum(|packer| {
+                    let orig_row_and_args = temp_storage.make_datum(|packer| {
+                        packer.push(Datum::Int32(3));
+                        packer.push(Datum::Int32(545577777));
+                        packer.push(Datum::Int32(123456789));
+                        packer.push(Datum::String("aaaaaaaaaa"));
+                    });
+
+                    // An early version had non-random stuff here, but surprisingly this is much faster
+                    // to sort, so it's not representative.
+                    //let order_by_col_1 = Datum::Int32((scale - i) as i32);
+                    // This is faster, probably because Int32 is easier to decode than a Timestamp.
+                    //let order_by_col_1 = Datum::Int32(distr.sample(&mut rng));
+                    // So, we generate a random timestamp. Timestamps are a common thing to order by in
+                    // window functions.
+                    let order_by_col_1 = Datum::TimestampTz(
+                        CheckedTimestamp::from_timestamplike(
+                            DateTime::from_timestamp_millis(distr.sample(&mut rng)).unwrap(),
+                        )
+                        .unwrap(),
+                    );
+
+                    packer.push_list_with(|packer| {
+                        packer.push(orig_row_and_args);
+                        packer.push(order_by_col_1);
+                    });
+                }));
+            }
+
+            preparation_times.push(start.elapsed().as_millis());
+
+            let start = Instant::now();
+            order_aggregate_datums_with_rank(datums, &order_by)
+                // Do something with the result to avoid things getting optimized out.
+                .for_each(|d| assert!(!d.0.is_null()));
+
+            computation_times.push(start.elapsed().as_millis());
+        }
+
+        println!("Preparation times (ms):");
+        for t in preparation_times.iter() {
+            println!("{}", t);
+        }
+        println!(
+            "avg: {}",
+            preparation_times.iter().sum::<u128>().to_usize().unwrap() / preparation_times.len()
+        );
+        println!("Computation times (ms):");
+        for t in computation_times.iter() {
+            println!("{}", t);
+        }
+        println!(
+            "avg: {}",
+            computation_times.iter().sum::<u128>().to_usize().unwrap() / computation_times.len()
+        );
     }
 }
