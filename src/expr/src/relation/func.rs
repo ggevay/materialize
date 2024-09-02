@@ -619,13 +619,15 @@ where
 
 fn row_number<'a, I>(
     datums: I,
-    temp_storage: &'a RowArena,
+    callers_temp_storage: &'a RowArena,
     order_by: &'a [ColumnOrder],
 ) -> Datum<'a>
 where
     I: IntoIterator<Item = Datum<'a>>,
 {
     let datums = order_aggregate_datums(datums, order_by);
+
+    let temp_storage = RowArena::with_capacity(datums.size_hint().0);
     let datums = datums
         .into_iter()
         .map(|d| d.unwrap_list().iter())
@@ -637,17 +639,23 @@ where
             })
         });
 
-    temp_storage.make_datum(|packer| {
+    callers_temp_storage.make_datum(|packer| {
         packer.push_list(datums);
     })
 }
 
-fn rank<'a, I>(datums: I, temp_storage: &'a RowArena, order_by: &'a [ColumnOrder]) -> Datum<'a>
+fn rank<'a, I>(
+    datums: I,
+    callers_temp_storage: &'a RowArena,
+    order_by: &'a [ColumnOrder],
+) -> Datum<'a>
 where
     I: IntoIterator<Item = Datum<'a>>,
 {
     // Keep the row used for ordering around, as it is used to determine the rank
     let datums = order_aggregate_datums_with_rank(datums, order_by);
+
+    let temp_storage = RowArena::with_capacity(datums.size_hint().0);
 
     let mut datums = datums
         .into_iter()
@@ -680,14 +688,14 @@ where
         })
     });
 
-    temp_storage.make_datum(|packer| {
+    callers_temp_storage.make_datum(|packer| {
         packer.push_list(datums);
     })
 }
 
 fn dense_rank<'a, I>(
     datums: I,
-    temp_storage: &'a RowArena,
+    callers_temp_storage: &'a RowArena,
     order_by: &'a [ColumnOrder],
 ) -> Datum<'a>
 where
@@ -695,6 +703,8 @@ where
 {
     // Keep the row used for ordering around, as it is used to determine the rank
     let datums = order_aggregate_datums_with_rank(datums, order_by);
+
+    let temp_storage = RowArena::with_capacity(datums.size_hint().0);
 
     let mut datums = datums
         .into_iter()
@@ -726,7 +736,7 @@ where
             })
         });
 
-    temp_storage.make_datum(|packer| {
+    callers_temp_storage.make_datum(|packer| {
         packer.push_list(datums);
     })
 }
@@ -754,7 +764,7 @@ where
 /// )
 fn lag_lead<'a, I>(
     datums: I,
-    temp_storage: &'a RowArena,
+    callers_temp_storage: &'a RowArena,
     order_by: &'a [ColumnOrder],
     lag_lead_type: &LagLeadType,
     ignore_nulls: &bool,
@@ -781,6 +791,7 @@ where
 
     let result = lag_lead_inner(unwrapped_args, lag_lead_type, ignore_nulls);
 
+    let temp_storage = RowArena::with_capacity(result.len());
     let result = result
         .into_iter()
         .zip_eq(orig_rows)
@@ -790,7 +801,7 @@ where
             })
         });
 
-    temp_storage.make_datum(|packer| {
+    callers_temp_storage.make_datum(|packer| {
         packer.push_list(result);
     })
 }
@@ -983,7 +994,7 @@ fn lag_lead_inner_ignore_nulls<'a>(
 /// The expected input is in the format of [((OriginalRow, InputValue), OrderByExprs...)]
 fn first_value<'a, I>(
     datums: I,
-    temp_storage: &'a RowArena,
+    callers_temp_storage: &'a RowArena,
     order_by: &'a [ColumnOrder],
     window_frame: &WindowFrame,
 ) -> Datum<'a>
@@ -1007,6 +1018,7 @@ where
 
     let results = first_value_inner(args, window_frame);
 
+    let temp_storage = RowArena::with_capacity(results.len());
     let results_with_orig_rows =
         results
             .into_iter()
@@ -1017,7 +1029,7 @@ where
                 })
             });
 
-    temp_storage.make_datum(|packer| {
+    callers_temp_storage.make_datum(|packer| {
         packer.push_list(results_with_orig_rows);
     })
 }
@@ -1087,7 +1099,7 @@ fn first_value_inner<'a>(datums: Vec<Datum<'a>>, window_frame: &WindowFrame) -> 
 /// The expected input is in the format of [((OriginalRow, InputValue), OrderByExprs...)]
 fn last_value<'a, I>(
     datums: I,
-    temp_storage: &'a RowArena,
+    callers_temp_storage: &'a RowArena,
     order_by: &'a [ColumnOrder],
     window_frame: &WindowFrame,
 ) -> Datum<'a>
@@ -1114,6 +1126,7 @@ where
 
     let results = last_value_inner(args, &order_by_rows, window_frame);
 
+    let temp_storage = RowArena::with_capacity(results.len());
     let result = results
         .into_iter()
         .zip_eq(original_rows)
@@ -1123,7 +1136,7 @@ where
             })
         });
 
-    temp_storage.make_datum(|packer| {
+    callers_temp_storage.make_datum(|packer| {
         packer.push_list(result);
     })
 }
@@ -1231,11 +1244,6 @@ fn fused_value_window_func<'a, I>(
 where
     I: IntoIterator<Item = Datum<'a>>,
 {
-    // Let's create a new RowArena, to avoid flooding the caller's arena with stuff proportional to
-    // the window partition size. We will use our own arena for internal evaluations, and will use
-    // the caller's at the very end to return the final result Datum.
-    let temp_storage = RowArena::new();
-
     let has_last_value = funcs
         .iter()
         .any(|f| matches!(f, AggregateFunc::LastValue { .. }));
@@ -1300,6 +1308,10 @@ where
         }
     }
 
+    // Let's create a new RowArena, to avoid flooding the caller's arena with stuff proportional to
+    // the window partition size. We will use our own arena for internal evaluations, and will use
+    // the caller's at the very end to return the final result Datum.
+    let temp_storage = RowArena::with_capacity(2 * original_rows.len());
     let results_with_orig_rows = results_per_row.into_iter().enumerate().map(|(i, results)| {
         temp_storage.make_datum(|packer| {
             packer.push_list(vec![
@@ -1314,8 +1326,8 @@ where
     })
 }
 
-// The expected input is in the format of [((OriginalRow, InputValue), OrderByExprs...)]
-// See also in the comment in `window_func_applied_to`.
+/// The expected input is in the format of `[((OriginalRow, InputValue), OrderByExprs...)]`
+/// See also in the comment in `window_func_applied_to`.
 fn window_aggr<'a, I, A>(
     input_datums: I, // An entire window partition.
     callers_temp_storage: &'a RowArena,
@@ -1329,11 +1341,6 @@ where
     I: IntoIterator<Item = Datum<'a>>,
     A: OneByOneAggr,
 {
-    // Let's create a new RowArena, to avoid flooding the caller's arena with stuff proportional to
-    // the window partition size. We will use our own arena for internal evaluations, and will use
-    // the caller's at the very end to return the final result Datum.
-    let temp_storage = RowArena::new();
-
     // Sort the datums according to the ORDER BY expressions and return the ((OriginalRow, InputValue), OrderByRow) record
     // The OrderByRow is kept around because it is required to compute the peer groups in RANGE mode
     let datums = order_aggregate_datums_with_rank(input_datums, order_by);
@@ -1352,6 +1359,11 @@ where
 
     let length = input_datums.len();
     let mut result: Vec<(Datum, Datum)> = Vec::with_capacity(length);
+
+    // Let's create a new RowArena, to avoid flooding the caller's arena with stuff proportional to
+    // the window partition size. We will use our own arena for internal evaluations, and will use
+    // the caller's at the very end to return the final result Datum.
+    let temp_storage = RowArena::with_capacity(length);
 
     // In this degenerate case, all results would be `wrapped_aggregate.default()` (usually null).
     // However, this currently can't happen, because

@@ -2457,6 +2457,12 @@ impl RowArena {
         }
     }
 
+    pub fn with_capacity(capacity: usize) -> Self {
+        RowArena {
+            inner: RefCell::new(Vec::with_capacity(capacity)),
+        }
+    }
+
     /// Take ownership of `bytes` for the lifetime of the arena.
     #[allow(clippy::transmute_ptr_to_ptr)]
     pub fn push_bytes<'a>(&'a self, bytes: Vec<u8>) -> &'a [u8] {
