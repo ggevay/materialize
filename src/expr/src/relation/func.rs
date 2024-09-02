@@ -283,7 +283,9 @@ fn order_aggregate_datums<'a, I>(
 where
     I: IntoIterator<Item = Datum<'a>>,
 {
-    order_aggregate_datums_with_rank(datums, order_by).map(|(expr, _order_row)| expr)
+    order_aggregate_datums_with_rank_inner(datums, order_by)
+        .into_iter()
+        .map(|(payload, _order_datums)| payload)
 }
 
 /// Assuming datums is a List, sort them by the 2nd through Nth elements
@@ -295,7 +297,19 @@ fn order_aggregate_datums_with_rank<'a, I>(
 where
     I: IntoIterator<Item = Datum<'a>>,
 {
-    let mut rows: Vec<(Datum, Vec<Datum>)> = datums
+    order_aggregate_datums_with_rank_inner(datums, order_by)
+        .into_iter()
+        .map(|(payload, order_by_datums)| (payload, Row::pack(order_by_datums.into_iter())))
+}
+
+fn order_aggregate_datums_with_rank_inner<'a, I>(
+    datums: I,
+    order_by: &[ColumnOrder],
+) -> Vec<(Datum<'a>, Vec<Datum<'a>>)>
+where
+    I: IntoIterator<Item = Datum<'a>>,
+{
+    let mut decoded: Vec<(Datum, Vec<Datum>)> = datums
         .into_iter()
         .map(|d| {
             let list = d.unwrap_list();
@@ -338,10 +352,8 @@ where
     // enough here, because if two elements are equal in our `compare` function, then the elements
     // are actually binary-equal (because of the `tiebreaker` given to `compare_columns`), so it
     // doesn't matter what order they end up in.
-    rows.sort_unstable_by(&mut sort_by);
-
-    rows.into_iter()
-        .map(|(payload, order_by_datums)| (payload, Row::pack(order_by_datums.into_iter())))
+    decoded.sort_unstable_by(&mut sort_by);
+    decoded
 }
 
 fn array_concat<'a, I>(datums: I, temp_storage: &'a RowArena, order_by: &[ColumnOrder]) -> Datum<'a>
@@ -1195,7 +1207,7 @@ where
         fn rows_between_offset_and_offset<'a, 'b>(
             input_datums: Vec<(Datum<'a>, Datum<'b>, Row)>,
             result: &mut Vec<(Datum<'a>, Datum<'b>)>,
-            wrapped_aggregate: &AggregateFunc,
+            wrapped_aggregate: &'a AggregateFunc,
             temp_storage: &'a RowArena,
             offset_start: i64,
             offset_end: i64,
@@ -2018,7 +2030,7 @@ impl RustType<ProtoAggregateFunc> for AggregateFunc {
 }
 
 impl AggregateFunc {
-    pub fn eval<'a, I>(&self, datums: I, temp_storage: &'a RowArena) -> Datum<'a>
+    pub fn eval<'a, I>(&'a self, datums: I, temp_storage: &'a RowArena) -> Datum<'a>
     where
         I: IntoIterator<Item = Datum<'a>>,
     {
@@ -2126,7 +2138,7 @@ impl AggregateFunc {
     /// the given [OneByOneAggr] will be used to evaluate the wrapped aggregate inside the
     /// `WindowAggregate`. If `self` is not a `WindowAggregate`, then it simply calls `eval`.
     pub fn eval_with_fast_window_agg<'a, I, W>(
-        &self,
+        &'a self,
         datums: I,
         temp_storage: &'a RowArena,
     ) -> Datum<'a>
@@ -3526,8 +3538,7 @@ mod tests {
     use std::time::Instant;
 
     use super::{
-        order_aggregate_datums_with_rank, AggregateFunc, ProtoAggregateFunc, ProtoTableFunc,
-        TableFunc,
+        order_aggregate_datums, AggregateFunc, ProtoAggregateFunc, ProtoTableFunc, TableFunc,
     };
     use crate::ColumnOrder;
     use chrono::DateTime;
@@ -3561,11 +3572,11 @@ mod tests {
     /// This is not a real test, but a benchmark.
     ///
     /// To run it as a benchmark, go to the directory of this file, and run with
-    /// `cargo test order_aggregate_datums_with_rank_benchmark --release -- --nocapture`
+    /// `cargo test order_aggregate_datums_benchmark --release -- --nocapture`
     /// to see the prints.
     #[mz_ore::test]
     #[cfg_attr(miri, ignore)] // too slow
-    fn order_aggregate_datums_with_rank_benchmark() {
+    fn order_aggregate_datums_benchmark() {
         let scale = 10000; // Make this big for benchmarking. E.g., 1000000.
         let num_runs = 7;
 
@@ -3626,12 +3637,12 @@ mod tests {
             preparation_times.push(start.elapsed().as_millis());
 
             let start = Instant::now();
-            black_box(order_aggregate_datums_with_rank(
+            black_box(order_aggregate_datums(
                 black_box(datums),
                 black_box(&order_by),
             ))
             // Do something with the result to force the iterator.
-            .for_each(|d| assert!(!d.0.is_null()));
+            .for_each(|d| assert!(!d.is_null()));
 
             computation_times.push(start.elapsed().as_millis());
         }
