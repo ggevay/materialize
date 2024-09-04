@@ -7608,3 +7608,41 @@ Source materialize.public.t7
 Target cluster: quickstart
 
 EOF
+
+# ORDER BYs of various lengths in OVER clause. `order_aggregate_datums` does some magic around this, which we test here.
+query IIIIIIIIIIIIIIIIIIII
+SELECT
+  x,
+  y,
+  sum(y)       OVER (),
+  lag(y)       OVER (),
+  row_number() OVER (),
+  sum(y)       OVER (ORDER BY x),
+  lag(y)       OVER (ORDER BY x),
+  row_number() OVER (ORDER BY x),
+  sum(y)       OVER (ORDER BY x, y),
+  lag(y)       OVER (ORDER BY x, y),
+  row_number() OVER (ORDER BY x, y),
+  sum(y)       OVER (ORDER BY x, 2*x, 3*x),
+  lag(y)       OVER (ORDER BY x, 2*x, 3*x),
+  row_number() OVER (ORDER BY x, 2*x, 3*x),
+  sum(y)       OVER (ORDER BY x, 2*x, 3*x, 4*x),
+  lag(y)       OVER (ORDER BY x, 2*x, 3*x, 4*x),
+  row_number() OVER (ORDER BY x, 2*x, 3*x, 4*x),
+  sum(y)       OVER (ORDER BY x, 2*x, 3*x, 4*x, 5*x),
+  lag(y)       OVER (ORDER BY x, 2*x, 3*x, 4*x, 5*x),
+  row_number() OVER (ORDER BY x, 2*x, 3*x, 4*x, 5*x)
+FROM t7
+ORDER BY x;
+----
+1  2  -26  NULL  1  2  NULL  1  2  NULL  1  2  NULL  1  2  NULL  1  2  NULL  1
+3  NULL  -26  2  2  2  2  2  2  2  2  2  2  2  2  2  2  2  2  2
+5  6  -26  NULL  3  8  NULL  3  8  NULL  3  8  NULL  3  8  NULL  3  8  NULL  3
+7  8  -26  6  4  16  6  4  16  6  4  16  6  4  16  6  4  16  6  4
+9  NULL  -26  8  5  16  8  5  16  8  5  16  8  5  16  8  5  16  8  5
+10  -50  -26  NULL  6  -74  NULL  6  -34  NULL  6  -74  NULL  6  -74  NULL  6  -74  NULL  6
+10  -40  -26  -50  7  -74  -50  7  -74  -50  7  -74  -50  7  -74  -50  7  -74  -50  7
+11  NULL  -26  -40  8  -74  -40  8  -74  -40  8  -74  -40  8  -74  -40  8  -74  -40  8
+13  14  -26  NULL  9  -60  NULL  9  -60  NULL  9  -60  NULL  9  -60  NULL  9  -60  NULL  9
+15  16  -26  14  10  -44  14  10  -44  14  10  -44  14  10  -44  14  10  -44  14  10
+17  18  -26  16  11  -26  16  11  -26  16  11  -26  16  11  -26  16  11  -26  16  11
