@@ -3310,8 +3310,53 @@ impl RowSetFinishing {
 
 /// Compare `left` and `right` using `order`. If that doesn't produce a strict
 /// ordering, call `tiebreaker`.
+///
+/// If your `order` has a constant length, then use `compare_columns_const_order_len`.
 pub fn compare_columns<F>(
     order: &[ColumnOrder],
+    left: &[Datum],
+    right: &[Datum],
+    tiebreaker: F,
+) -> Ordering
+where
+    F: Fn() -> Ordering,
+{
+    for order in order {
+        let cmp = match (&left[order.column], &right[order.column]) {
+            (Datum::Null, Datum::Null) => Ordering::Equal,
+            (Datum::Null, _) => {
+                if order.nulls_last {
+                    Ordering::Greater
+                } else {
+                    Ordering::Less
+                }
+            }
+            (_, Datum::Null) => {
+                if order.nulls_last {
+                    Ordering::Less
+                } else {
+                    Ordering::Greater
+                }
+            }
+            (lval, rval) => {
+                if order.desc {
+                    rval.cmp(lval)
+                } else {
+                    lval.cmp(rval)
+                }
+            }
+        };
+        if cmp != Ordering::Equal {
+            return cmp;
+        }
+    }
+    tiebreaker()
+}
+
+/// Same as `compare_columns`, but with an `order` slice that has a constant length, given as a
+/// generic parameter.
+pub fn compare_columns_const_order_len<F, const O: usize>(
+    order: &[ColumnOrder; O],
     left: &[Datum],
     right: &[Datum],
     tiebreaker: F,

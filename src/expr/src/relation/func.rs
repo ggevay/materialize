@@ -19,7 +19,6 @@ use dec::OrderedDecimal;
 use itertools::Itertools;
 use mz_lowertest::MzReflect;
 use mz_ore::cast::CastFrom;
-
 use mz_ore::soft_assert_or_log;
 use mz_ore::str::separated;
 use mz_proto::{IntoRustIfSome, ProtoType, RustType, TryFromProtoError};
@@ -42,8 +41,8 @@ use crate::explain::{HumanizedExpr, HumanizerMode};
 use crate::relation::proto_aggregate_func::{self, ProtoColumnOrders, ProtoFusedValueWindowFunc};
 use crate::relation::proto_table_func::ProtoTabletizedScalar;
 use crate::relation::{
-    compare_columns, proto_table_func, ColumnOrder, ProtoAggregateFunc, ProtoTableFunc,
-    WindowFrame, WindowFrameBound, WindowFrameUnits,
+    compare_columns, compare_columns_const_order_len, proto_table_func, ColumnOrder,
+    ProtoAggregateFunc, ProtoTableFunc, WindowFrame, WindowFrameBound, WindowFrameUnits,
 };
 use crate::scalar::func::{add_timestamp_months, jsonb_stringify};
 use crate::EvalError;
@@ -274,6 +273,46 @@ where
     })
 }
 
+enum MultiIter<Item, I1, I2, I3, I4, I5, I6>
+where
+    I1: Iterator<Item = Item>,
+    I2: Iterator<Item = Item>,
+    I3: Iterator<Item = Item>,
+    I4: Iterator<Item = Item>,
+    I5: Iterator<Item = Item>,
+    I6: Iterator<Item = Item>,
+{
+    I1(I1),
+    I2(I2),
+    I3(I3),
+    I4(I4),
+    I5(I5),
+    I6(I6),
+}
+
+impl<Item, I1, I2, I3, I4, I5, I6> Iterator for MultiIter<Item, I1, I2, I3, I4, I5, I6>
+where
+    I1: Iterator<Item = Item>,
+    I2: Iterator<Item = Item>,
+    I3: Iterator<Item = Item>,
+    I4: Iterator<Item = Item>,
+    I5: Iterator<Item = Item>,
+    I6: Iterator<Item = Item>,
+{
+    type Item = Item;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match self {
+            MultiIter::I1(iter) => iter.next(),
+            MultiIter::I2(iter) => iter.next(),
+            MultiIter::I3(iter) => iter.next(),
+            MultiIter::I4(iter) => iter.next(),
+            MultiIter::I5(iter) => iter.next(),
+            MultiIter::I6(iter) => iter.next(),
+        }
+    }
+}
+
 /// Assuming datums is a List, sort them by the 2nd through Nth elements
 /// corresponding to order_by, then return the 1st element.
 ///
@@ -290,10 +329,70 @@ pub fn order_aggregate_datums<'a: 'b, 'b, I>(
 where
     I: IntoIterator<Item = Datum<'a>>,
 {
-    order_aggregate_datums_with_rank_inner(datums, order_by)
-        .into_iter()
-        // (`payload` is coerced here to `Datum<'b>` in the argument of the closure)
-        .map(|(payload, _order_datums)| payload)
+    // This is basically just
+    // ```
+    // order_aggregate_datums_with_rank_inner(datums, order_by)
+    //   .into_iter().map(|(payload, _order_datums)| payload)
+    // (`payload` is coerced here to `Datum<'b>` in the argument of the closure)
+    // ```
+    // but with some boilerplate for dispatching on the length of `order_by`.
+    match order_by.len() {
+        0 => MultiIter::I1(
+            order_aggregate_datums_with_rank_inner_const_order_by_len::<I, 0>(
+                datums,
+                order_by[0..0]
+                    .try_into()
+                    .expect("slice with incorrect length"),
+            )
+            .into_iter()
+            .map(|(payload, _order_datums)| payload),
+        ),
+        1 => MultiIter::I2(
+            order_aggregate_datums_with_rank_inner_const_order_by_len::<I, 1>(
+                datums,
+                order_by[0..1]
+                    .try_into()
+                    .expect("slice with incorrect length"),
+            )
+            .into_iter()
+            .map(|(payload, _order_datums)| payload),
+        ),
+        2 => MultiIter::I3(
+            order_aggregate_datums_with_rank_inner_const_order_by_len::<I, 2>(
+                datums,
+                order_by[0..2]
+                    .try_into()
+                    .expect("slice with incorrect length"),
+            )
+            .into_iter()
+            .map(|(payload, _order_datums)| payload),
+        ),
+        3 => MultiIter::I4(
+            order_aggregate_datums_with_rank_inner_const_order_by_len::<I, 3>(
+                datums,
+                order_by[0..3]
+                    .try_into()
+                    .expect("slice with incorrect length"),
+            )
+            .into_iter()
+            .map(|(payload, _order_datums)| payload),
+        ),
+        4 => MultiIter::I5(
+            order_aggregate_datums_with_rank_inner_const_order_by_len::<I, 4>(
+                datums,
+                order_by[0..4]
+                    .try_into()
+                    .expect("slice with incorrect length"),
+            )
+            .into_iter()
+            .map(|(payload, _order_datums)| payload),
+        ),
+        _ => MultiIter::I6(
+            order_aggregate_datums_with_rank_inner(datums, order_by)
+                .into_iter()
+                .map(|(payload, _order_datums)| payload),
+        ),
+    }
 }
 
 /// Assuming datums is a List, sort them by the 2nd through Nth elements
@@ -305,11 +404,74 @@ fn order_aggregate_datums_with_rank<'a, I>(
 where
     I: IntoIterator<Item = Datum<'a>>,
 {
-    order_aggregate_datums_with_rank_inner(datums, order_by)
-        .into_iter()
-        .map(|(payload, order_by_datums)| (payload, Row::pack(order_by_datums)))
+    // This is basically just
+    // ```
+    // order_aggregate_datums_with_rank_inner(datums, order_by)
+    //    .into_iter()
+    //    .map(|(payload, order_by_datums)| (payload, Row::pack(order_by_datums)))
+    // ```
+    // but with some boilerplate for dispatching on the length of `order_by`.
+    match order_by.len() {
+        0 => MultiIter::I1(
+            order_aggregate_datums_with_rank_inner_const_order_by_len::<I, 0>(
+                datums,
+                order_by[0..0]
+                    .try_into()
+                    .expect("slice with incorrect length"),
+            )
+            .into_iter()
+            .map(|(payload, order_by_datums)| (payload, Row::pack(order_by_datums))),
+        ),
+        1 => MultiIter::I2(
+            order_aggregate_datums_with_rank_inner_const_order_by_len::<I, 1>(
+                datums,
+                order_by[0..1]
+                    .try_into()
+                    .expect("slice with incorrect length"),
+            )
+            .into_iter()
+            .map(|(payload, order_by_datums)| (payload, Row::pack(order_by_datums))),
+        ),
+        2 => MultiIter::I3(
+            order_aggregate_datums_with_rank_inner_const_order_by_len::<I, 2>(
+                datums,
+                order_by[0..2]
+                    .try_into()
+                    .expect("slice with incorrect length"),
+            )
+            .into_iter()
+            .map(|(payload, order_by_datums)| (payload, Row::pack(order_by_datums))),
+        ),
+        3 => MultiIter::I4(
+            order_aggregate_datums_with_rank_inner_const_order_by_len::<I, 3>(
+                datums,
+                order_by[0..3]
+                    .try_into()
+                    .expect("slice with incorrect length"),
+            )
+            .into_iter()
+            .map(|(payload, order_by_datums)| (payload, Row::pack(order_by_datums))),
+        ),
+        4 => MultiIter::I5(
+            order_aggregate_datums_with_rank_inner_const_order_by_len::<I, 4>(
+                datums,
+                order_by[0..4]
+                    .try_into()
+                    .expect("slice with incorrect length"),
+            )
+            .into_iter()
+            .map(|(payload, order_by_datums)| (payload, Row::pack(order_by_datums))),
+        ),
+        _ => MultiIter::I6(
+            order_aggregate_datums_with_rank_inner(datums, order_by)
+                .into_iter()
+                .map(|(payload, order_by_datums)| (payload, Row::pack(order_by_datums))),
+        ),
+    }
 }
 
+/// Same as `order_aggregate_datums_with_rank`, but doesn't re-encode the order_by Datums into a
+/// Row.
 fn order_aggregate_datums_with_rank_inner<'a, I>(
     datums: I,
     order_by: &[ColumnOrder],
@@ -360,6 +522,64 @@ where
     // enough here, because if two elements are equal in our `compare` function, then the elements
     // are actually binary-equal (because of the `tiebreaker` given to `compare_columns`), so it
     // doesn't matter what order they end up in.
+    decoded.sort_unstable_by(&mut sort_by);
+    decoded
+}
+
+/// Same as `order_aggregate_datums_with_rank_inner`, but with an `order_by` slice that
+/// has a constant length, given as a generic parameter.
+fn order_aggregate_datums_with_rank_inner_const_order_by_len<'a, I, const O: usize>(
+    datums: I,
+    order_by: &[ColumnOrder; O],
+) -> Vec<(Datum<'a>, [Datum<'a>; O])>
+where
+    I: IntoIterator<Item = Datum<'a>>,
+{
+    // This inlines the order_by Datum slice, reducing cache misses during sorting, making this
+    // function ~2x faster.
+    let mut decoded: Vec<(Datum, [Datum; O])> = datums
+        .into_iter()
+        .map(|d| {
+            let list = d.unwrap_list();
+            let mut list_it = list.iter();
+            let payload = list_it.next().unwrap();
+
+            // We decode the order_by Datums here instead of the comparison function, because the
+            // comparison function is expected to be called `O(log n)` times on each input row.
+            // The only downside is that the decoded data might be bigger, but I think that's fine,
+            // because:
+            // - if we have a window partition so big that this would create a memory problem, then
+            //   the non-incrementalness of window functions will create a serious CPU problem
+            //   anyway,
+            // - and anyhow various other parts of the window function code already do decoding
+            //   upfront.
+            let mut order_by_datums = [Datum::Dummy; O];
+            for i in 0..O {
+                order_by_datums[i] = list_it
+                    .next()
+                    .expect("must have exactly the same number of Datums as `order_by`");
+            }
+
+            (payload, order_by_datums)
+        })
+        .collect();
+
+    // let mut left_datum_vec = mz_repr::DatumVec::new();
+    // let mut right_datum_vec = mz_repr::DatumVec::new();
+    let mut sort_by =
+        |(payload_left, left_order_by_datums): &(Datum, [Datum; O]),
+         (payload_right, right_order_by_datums): &(Datum, [Datum; O])| {
+            compare_columns_const_order_len(
+                order_by,
+                left_order_by_datums,
+                right_order_by_datums,
+                || payload_left.cmp(payload_right),
+            )
+        };
+    // `sort_unstable_by` is faster than `sort_by`, and an unstable sort is enough here, because if
+    // two elements are equal in our `compare` function, then the elements are actually binary-equal
+    // (because of the `tiebreaker` given to `compare_columns`), so it doesn't matter what order
+    // they end up in.
     decoded.sort_unstable_by(&mut sort_by);
     decoded
 }
