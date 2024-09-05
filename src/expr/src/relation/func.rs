@@ -13,7 +13,7 @@ use std::cmp::{max, min};
 use std::iter::Sum;
 use std::ops::Deref;
 use std::{fmt, iter};
-
+use std::time::Instant;
 use chrono::{DateTime, NaiveDateTime, NaiveTime, Utc};
 use dec::OrderedDecimal;
 use itertools::Itertools;
@@ -36,7 +36,7 @@ use proptest::strategy::{BoxedStrategy, Strategy, Union};
 use proptest_derive::Arbitrary;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
-
+use tracing::warn;
 use crate::explain::{HumanizedExpr, HumanizerMode};
 use crate::relation::proto_aggregate_func::{self, ProtoColumnOrders, ProtoFusedValueWindowFunc};
 use crate::relation::proto_table_func::ProtoTabletizedScalar;
@@ -531,6 +531,8 @@ fn order_aggregate_datums_with_rank_inner_const_order_by_len<'a, I, const O: usi
 where
     I: IntoIterator<Item = Datum<'a>>,
 {
+    let start = Instant::now();
+
     // This inlines the order_by Datum slice, reducing cache misses during sorting, making this
     // function ~2x faster.
     let mut decoded: Vec<(Datum, [Datum; O])> = datums
@@ -560,6 +562,9 @@ where
         })
         .collect();
 
+    println!("###### order_aggregate_datums_with_rank decoding: {} ms", start.elapsed().as_millis());
+    let start = Instant::now();
+
     // let mut left_datum_vec = mz_repr::DatumVec::new();
     // let mut right_datum_vec = mz_repr::DatumVec::new();
     let mut sort_by =
@@ -577,6 +582,9 @@ where
     // (because of the `tiebreaker` given to `compare_columns`), so it doesn't matter what order
     // they end up in.
     decoded.sort_unstable_by(&mut sort_by);
+
+    println!("###### order_aggregate_datums_with_rank sort_unstable_by: {} ms", start.elapsed().as_millis());
+
     decoded
 }
 
@@ -781,8 +789,15 @@ fn lag_lead<'a, I>(
 where
     I: IntoIterator<Item = Datum<'a>>,
 {
+    warn!("## lag_lead start");
+    let start = Instant::now();
+    let total_start = Instant::now();
+
     // Sort the datums according to the ORDER BY expressions and return the (OriginalRow, EncodedArgs) record
     let datums = order_aggregate_datums(datums, order_by);
+
+    println!("#### lag_lead order_aggregate_datums: {} ms", start.elapsed().as_millis());
+    let start = Instant::now();
 
     // Take the (OriginalRow, EncodedArgs) records and unwrap them into separate datums.
     // EncodedArgs = (InputValue, Offset, DefaultValue) for Lag/Lead
@@ -798,7 +813,13 @@ where
         })
         .unzip();
 
+    println!("#### lag_lead unwrapping: {} ms", start.elapsed().as_millis());
+    let start = Instant::now();
+
     let result = lag_lead_inner(unwrapped_args, lag_lead_type, ignore_nulls);
+
+    println!("#### lag_lead lag_lead_inner: {} ms", start.elapsed().as_millis());
+    let start = Instant::now();
 
     let temp_storage = RowArena::with_capacity(result.len());
     let result = result
@@ -813,9 +834,15 @@ where
             })
         });
 
-    callers_temp_storage.make_datum(|packer| {
+    let r = callers_temp_storage.make_datum(|packer| {
         packer.push_list(result);
-    })
+    });
+
+    println!("#### lag_lead finish: {} ms", start.elapsed().as_millis());
+    println!("## lag_lead total: {} ms", total_start.elapsed().as_millis());
+    warn!("## lag_lead end");
+
+    r
 }
 
 /// lag/lead's arguments are in a record. This function unwraps this record.
