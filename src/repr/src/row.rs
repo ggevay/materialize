@@ -1571,9 +1571,9 @@ where
         Datum::List(list) => {
             let tag = match list.data.len() {
                 0..=255 => Tag::ListTiny,
-                256..=65535 => Tag::ListShort,
-                65536..=4294967295 => Tag::ListLong,
-                _ => Tag::ListHuge,
+                256..=65535 => {panic!("short"); Tag::ListShort},
+                65536..=4294967295 => {panic!("long"); Tag::ListLong},
+                _ => {panic!("huge"); Tag::ListHuge},
             };
             data.push(tag.into());
             push_lengthed_bytes(data, list.data, tag);
@@ -1894,70 +1894,84 @@ impl RowPacker<'_> {
     pub fn push_list_with<F, R>(&mut self, f: F) -> R
     where
         F: FnOnce(&mut RowPacker) -> R,
+    // {
+    //     // First, assume that the list will fit in 255 bytes, and thus the length will fit in
+    //     // 1 byte. If not, we'll fix it up later.
+    //     let start = self.row.data.len();
+    //     self.row.data.push(Tag::ListTiny.into());
+    //     // Write a dummy len, will fix it up later.
+    //     self.row.data.push(0);
+    //
+    //     let out = f(self);
+    //
+    //     let len = self.row.data.len() - start - 1 - 1;
+    //     // We now know the real len.
+    //     if len <= 255 {
+    //         // If the len fits in 1 byte, we just need to fix up the len.
+    //         self.row.data[start + 1] = len.to_le_bytes()[0];
+    //     } else {
+    //         // Otherwise, we need to
+    //         // 1. fix up the tag,
+    //         // 2. move the actual data a bit (for which we also need to make room at the end),
+    //         // 3. fix up the len.
+    //         //
+    //         // Note: We move this code path into its own function, so that the common case can be
+    //         // inlined.
+    //         long_list(self, start, len);
+    //     }
+    //
+    //     #[cold]
+    //     fn long_list(this: &mut RowPacker, start: usize, len: usize) {
+    //         match len {
+    //             0..=255 => {
+    //                 unreachable!()
+    //             }
+    //             256..=65535 => {
+    //                 const LEN_LEN: usize = 2;
+    //                 this.row.data[start] = Tag::ListShort.into();
+    //                 this.row.data.extend_from_slice(&[0; LEN_LEN - 1]);
+    //                 this.row
+    //                     .data
+    //                     .copy_within(start + 1 + 1..start + 1 + 1 + len, start + 1 + LEN_LEN);
+    //                 this.row.data[start + 1..start + 1 + LEN_LEN]
+    //                     .copy_from_slice(&len.to_le_bytes()[0..LEN_LEN]);
+    //             }
+    //             65536..=4294967295 => {
+    //                 const LEN_LEN: usize = 4;
+    //                 this.row.data[start] = Tag::ListLong.into();
+    //                 this.row.data.extend_from_slice(&[0; LEN_LEN - 1]);
+    //                 this.row
+    //                     .data
+    //                     .copy_within(start + 1 + 1..start + 1 + 1 + len, start + 1 + LEN_LEN);
+    //                 this.row.data[start + 1..start + 1 + LEN_LEN]
+    //                     .copy_from_slice(&len.to_le_bytes()[0..LEN_LEN]);
+    //             }
+    //             _ => {
+    //                 const LEN_LEN: usize = 8;
+    //                 this.row.data[start] = Tag::ListHuge.into();
+    //                 this.row.data.extend_from_slice(&[0; LEN_LEN - 1]);
+    //                 this.row
+    //                     .data
+    //                     .copy_within(start + 1 + 1..start + 1 + 1 + len, start + 1 + LEN_LEN);
+    //                 this.row.data[start + 1..start + 1 + LEN_LEN]
+    //                     .copy_from_slice(&len.to_le_bytes()[0..LEN_LEN]);
+    //             }
+    //         };
+    //     }
+    //
+    //     out
+    // }
     {
-        // First, assume that the list will fit in 255 bytes, and thus the length will fit in
-        // 1 byte. If not, we'll fix it up later.
+        self.row.data.push(Tag::ListHuge.into());
         let start = self.row.data.len();
-        self.row.data.push(Tag::ListTiny.into());
-        // Write a dummy len, will fix it up later.
-        self.row.data.push(0);
+        // write a dummy len, will fix it up later
+        self.row.data.extend_from_slice(&[0; size_of::<u64>()]);
 
         let out = f(self);
 
-        let len = self.row.data.len() - start - 1 - 1;
-        // We now know the real len.
-        if len <= 255 {
-            // If the len fits in 1 byte, we just need to fix up the len.
-            self.row.data[start + 1] = len.to_le_bytes()[0];
-        } else {
-            // Otherwise, we need to
-            // 1. fix up the tag,
-            // 2. move the actual data a bit (for which we also need to make room at the end),
-            // 3. fix up the len.
-            //
-            // Note: We move this code path into its own function, so that the common case can be
-            // inlined.
-            long_list(self, start, len);
-        }
-
-        #[cold]
-        fn long_list(this: &mut RowPacker, start: usize, len: usize) {
-            match len {
-                0..=255 => {
-                    unreachable!()
-                }
-                256..=65535 => {
-                    const LEN_LEN: usize = 2;
-                    this.row.data[start] = Tag::ListShort.into();
-                    this.row.data.extend_from_slice(&[0; LEN_LEN - 1]);
-                    this.row
-                        .data
-                        .copy_within(start + 1 + 1..start + 1 + 1 + len, start + 1 + LEN_LEN);
-                    this.row.data[start + 1..start + 1 + LEN_LEN]
-                        .copy_from_slice(&len.to_le_bytes()[0..LEN_LEN]);
-                }
-                65536..=4294967295 => {
-                    const LEN_LEN: usize = 4;
-                    this.row.data[start] = Tag::ListLong.into();
-                    this.row.data.extend_from_slice(&[0; LEN_LEN - 1]);
-                    this.row
-                        .data
-                        .copy_within(start + 1 + 1..start + 1 + 1 + len, start + 1 + LEN_LEN);
-                    this.row.data[start + 1..start + 1 + LEN_LEN]
-                        .copy_from_slice(&len.to_le_bytes()[0..LEN_LEN]);
-                }
-                _ => {
-                    const LEN_LEN: usize = 8;
-                    this.row.data[start] = Tag::ListHuge.into();
-                    this.row.data.extend_from_slice(&[0; LEN_LEN - 1]);
-                    this.row
-                        .data
-                        .copy_within(start + 1 + 1..start + 1 + 1 + len, start + 1 + LEN_LEN);
-                    this.row.data[start + 1..start + 1 + LEN_LEN]
-                        .copy_from_slice(&len.to_le_bytes()[0..LEN_LEN]);
-                }
-            };
-        }
+        let len = u64::cast_from(self.row.data.len() - start - size_of::<u64>());
+        // fix up the len
+        self.row.data[start..start + size_of::<u64>()].copy_from_slice(&len.to_le_bytes());
 
         out
     }
