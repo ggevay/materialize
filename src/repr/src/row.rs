@@ -1569,14 +1569,17 @@ where
             push_lengthed_bytes(data, string.as_bytes(), tag);
         }
         Datum::List(list) => {
-            let tag = match list.data.len() {
-                0..=255 => Tag::ListTiny,
-                256..=65535 => {panic!("short"); Tag::ListShort},
-                65536..=4294967295 => {panic!("long"); Tag::ListLong},
-                _ => {panic!("huge"); Tag::ListHuge},
-            };
-            data.push(tag.into());
-            push_lengthed_bytes(data, list.data, tag);
+            // let tag = match list.data.len() {
+            //     0..=255 => Tag::ListTiny,
+            //     256..=65535 => {panic!("short"); Tag::ListShort},
+            //     65536..=4294967295 => {panic!("long"); Tag::ListLong},
+            //     _ => {panic!("huge"); Tag::ListHuge},
+            // };
+            // data.push(tag.into());
+            // push_lengthed_bytes(data, list.data, tag);
+
+            data.push(Tag::ListHuge.into());
+            push_untagged_bytes(data, list.data);
         }
         Datum::Uuid(u) => {
             data.push(Tag::Uuid.into());
