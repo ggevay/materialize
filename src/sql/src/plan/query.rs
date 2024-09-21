@@ -2313,10 +2313,10 @@ fn plan_view_select(
         relation_expr = relation_expr.filter(vec![expr]);
     }
 
-    // Step 7. Gather window functions from SELECT and ORDER BY, and plan them.
+    // Step 7. Gather window functions from SELECT, ORDER BY, and QUALIFY, and plan them.
     // (This includes window aggregations.)
     //
-    // Note that window functions can be present only in SELECT and ORDER BY (including
+    // Note that window functions can be present only in SELECT, ORDER BY, or QUALIFY (including
     // DISTINCT ON), because they are executed after grouped aggregations and HAVING.
     //
     // Also note that window functions in the ORDER BY can't refer to columns introduced in the
@@ -2348,7 +2348,23 @@ fn plan_view_select(
         group_scope.items.push(ScopeItem::from_expr(window_func));
     }
 
-    // Step 8. Handle SELECT clause.
+    // Step 8. Handle QUALIFY clause. (very similar to HAVING)
+    if let Some(ref qualify) = s.qualify {
+        let ecx = &ExprContext {
+            qcx,
+            name: "QUALIFY clause",
+            scope: &group_scope,
+            relation_type: &qcx.relation_type(&relation_expr),
+            allow_aggregates: true,
+            allow_subqueries: true,
+            allow_parameters: true,
+            allow_windows: false, // We already planned window functions above.
+        };
+        let expr = plan_expr(ecx, qualify)?.type_as(ecx, &ScalarType::Bool)?;
+        relation_expr = relation_expr.filter(vec![expr]);
+    }
+
+    // Step 9. Handle SELECT clause.
     let output_columns = {
         let mut new_exprs = vec![];
         let mut new_type = qcx.relation_type(&relation_expr);
@@ -2398,7 +2414,7 @@ fn plan_view_select(
     };
     let mut project_key: Vec<_> = output_columns.iter().map(|(i, _name)| *i).collect();
 
-    // Step 9. Handle intrusive ORDER BY and DISTINCT.
+    // Step 10. Handle intrusive ORDER BY and DISTINCT.
     let order_by = {
         let relation_type = qcx.relation_type(&relation_expr);
         let (mut order_by, mut map_exprs) = plan_order_by_exprs(

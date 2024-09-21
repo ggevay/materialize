@@ -7039,6 +7039,12 @@ impl<'a> Parser<'a> {
             None
         };
 
+        let qualify = if self.parse_keyword(QUALIFY) {
+            Some(self.parse_expr()?)
+        } else {
+            None
+        };
+
         let options = if self.parse_keyword(OPTIONS) {
             self.expect_token(&Token::LParen)?;
             let options = self.parse_comma_separated(Self::parse_select_option)?;
@@ -7055,6 +7061,7 @@ impl<'a> Parser<'a> {
             selection,
             group_by,
             having,
+            qualify,
             options,
         })
     }

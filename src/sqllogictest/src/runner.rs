@@ -2394,6 +2394,7 @@ fn generate_view_sql(
                 selection: None,
                 group_by: vec![],
                 having: None,
+                qualify: None,
                 options: vec![],
             })),
             order_by: view_order_by,
