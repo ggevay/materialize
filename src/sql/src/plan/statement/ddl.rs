@@ -2875,6 +2875,7 @@ fn continual_task_query<'a>(
                 projection: vec![ast::SelectItem::Wildcard],
                 group_by: Vec::new(),
                 having: None,
+                qualify: None,
                 options: Vec::new(),
             };
             let query = ast::Query {
