@@ -1165,6 +1165,10 @@ pub enum AggregateFunc {
     StringAgg {
         order_by: Vec<ColumnOrder>,
     },
+    ////// todo: comment
+    FusedWindowAgg {
+        funcs: Vec<AggregateFunc>,
+    },
     /// Accumulates any number of `Datum::Dummy`s into `Datum::Dummy`.
     ///
     /// Useful for removing an expensive aggregation while maintaining the shape
@@ -1240,6 +1244,7 @@ impl AggregateFunc {
                 mz_expr::AggregateFunc::ListConcat { order_by }
             }
             AggregateFunc::StringAgg { order_by } => mz_expr::AggregateFunc::StringAgg { order_by },
+            AggregateFunc::FusedWindowAgg { funcs } => todo!(),
             AggregateFunc::Dummy => mz_expr::AggregateFunc::Dummy,
         }
     }
@@ -1301,6 +1306,9 @@ impl AggregateFunc {
             | AggregateFunc::JsonbObjectAgg { .. }
             | AggregateFunc::MapAgg { .. }
             | AggregateFunc::StringAgg { .. } => Datum::Null,
+            //////// todo: comment  This is used only in planning, but this is planned only as part
+            // of a window aggregation, where this function is not used.
+            AggregateFunc::FusedWindowAgg { .. } => panic!("FusedWindowAgg doesn't have an identity_datum"),
         }
     }
 
@@ -1374,6 +1382,17 @@ impl AggregateFunc {
             | AggregateFunc::SumFloat64
             | AggregateFunc::SumNumeric
             | AggregateFunc::Dummy => input_type.scalar_type,
+            AggregateFunc::FusedWindowAgg { funcs } => {
+                let input_types = input_type.scalar_type.unwrap_record_element_column_type();
+                ScalarType::Record {
+                    fields: funcs
+                        .iter()
+                        .zip_eq(input_types)
+                        .map(|(f, t)| (ColumnName::from(""), f.output_type(t.clone())))
+                        .collect(),
+                    custom_id: None,
+                }
+            },
         };
         // max/min/sum return null on empty sets
         let nullable = !matches!(self, AggregateFunc::Count);

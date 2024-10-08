@@ -1795,11 +1795,6 @@ pub enum AggregateFunc {
         order_by: Vec<ColumnOrder>,
         window_frame: WindowFrame,
     },
-    WindowAggregate {
-        wrapped_aggregate: Box<AggregateFunc>,
-        order_by: Vec<ColumnOrder>,
-        window_frame: WindowFrame,
-    },
     /// Several value window functions fused into one function, to amortize overheads.
     FusedValueWindowFunc {
         funcs: Vec<AggregateFunc>,
@@ -1807,6 +1802,16 @@ pub enum AggregateFunc {
         /// eliminate this limitation.)
         order_by: Vec<ColumnOrder>,
     },
+    WindowAggregate {
+        wrapped_aggregate: Box<AggregateFunc>,
+        order_by: Vec<ColumnOrder>,
+        window_frame: WindowFrame,
+    },
+    // FusedWindowAggregate {
+    //     wrapped_aggregates: Vec<AggregateFunc>,
+    //     order_by: Vec<ColumnOrder>,
+    //     window_frame: WindowFrame,
+    // },
     /// Accumulates any number of `Datum::Dummy`s into `Datum::Dummy`.
     ///
     /// Useful for removing an expensive aggregation while maintaining the shape
