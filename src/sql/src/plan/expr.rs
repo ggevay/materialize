@@ -21,7 +21,7 @@ use mz_expr::virtual_syntax::{AlgExcept, Except, IR};
 use mz_expr::visit::{Visit, VisitChildren};
 use mz_expr::{func, CollectionPlan, Id, LetRecLimit, RowSetFinishing};
 // these happen to be unchanged at the moment, but there might be additions later
-use mz_expr::AggregateFunc::WindowAggregate;
+use mz_expr::AggregateFunc::{FusedWindowAggregate, WindowAggregate};
 pub use mz_expr::{
     BinaryFunc, ColumnOrder, TableFunc, UnaryFunc, UnmaterializableFunc, VariadicFunc, WindowFrame,
 };
@@ -740,14 +740,25 @@ impl AggregateWindowExpr {
     }
 
     pub fn into_expr(self) -> (Box<HirScalarExpr>, mz_expr::AggregateFunc) {
-        (
-            self.aggregate_expr.expr,
-            WindowAggregate {
-                wrapped_aggregate: Box::new(self.aggregate_expr.func.into_expr()),
-                order_by: self.order_by,
-                window_frame: self.window_frame,
-            },
-        )
+        if let AggregateFunc::FusedWindowAgg {funcs} = &self.aggregate_expr.func {
+            (
+                self.aggregate_expr.expr,
+                FusedWindowAggregate {
+                    wrapped_aggregates: funcs.iter().map(|f| f.clone().into_expr()).collect(),
+                    order_by: self.order_by,
+                    window_frame: self.window_frame,
+                }
+            )
+        } else {
+            (
+                self.aggregate_expr.expr,
+                WindowAggregate {
+                    wrapped_aggregate: Box::new(self.aggregate_expr.func.into_expr()),
+                    order_by: self.order_by,
+                    window_frame: self.window_frame,
+                },
+            )
+        }
     }
 }
 

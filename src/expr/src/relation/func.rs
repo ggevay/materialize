@@ -39,7 +39,7 @@ use regex::Regex;
 use serde::{Deserialize, Serialize};
 
 use crate::explain::{HumanizedExpr, HumanizerMode};
-use crate::relation::proto_aggregate_func::{self, ProtoColumnOrders, ProtoFusedValueWindowFunc};
+use crate::relation::proto_aggregate_func::{self, ProtoColumnOrders, ProtoFusedValueWindowFunc, ProtoFusedWindowAggregate};
 use crate::relation::proto_table_func::ProtoTabletizedScalar;
 use crate::relation::{
     compare_columns, proto_table_func, ColumnOrder, ProtoAggregateFunc, ProtoTableFunc,
@@ -1807,11 +1807,11 @@ pub enum AggregateFunc {
         order_by: Vec<ColumnOrder>,
         window_frame: WindowFrame,
     },
-    // FusedWindowAggregate {
-    //     wrapped_aggregates: Vec<AggregateFunc>,
-    //     order_by: Vec<ColumnOrder>,
-    //     window_frame: WindowFrame,
-    // },
+    FusedWindowAggregate {
+        wrapped_aggregates: Vec<AggregateFunc>,
+        order_by: Vec<ColumnOrder>,
+        window_frame: WindowFrame,
+    },
     /// Accumulates any number of `Datum::Dummy`s into `Datum::Dummy`.
     ///
     /// Useful for removing an expensive aggregation while maintaining the shape
@@ -2069,6 +2069,17 @@ impl RustType<ProtoAggregateFunc> for AggregateFunc {
                         order_by: Some(order_by.into_proto()),
                     })
                 }
+                AggregateFunc::FusedWindowAggregate {
+                    wrapped_aggregates,
+                    order_by,
+                    window_frame,
+                } => {
+                    Kind::FusedWindowAggregate(ProtoFusedWindowAggregate {
+                        wrapped_aggregates: wrapped_aggregates.into_proto(),
+                        order_by: Some(order_by.into_proto()),
+                        window_frame: Some(window_frame.into_proto()),
+                    })
+                }
                 AggregateFunc::Dummy => Kind::Dummy(()),
             }),
         }
@@ -2206,6 +2217,11 @@ impl RustType<ProtoAggregateFunc> for AggregateFunc {
                     .order_by
                     .into_rust_if_some("ProtoFusedValueWindowFunc::order_by")?,
             },
+            Kind::FusedWindowAggregate(fwa) => AggregateFunc::FusedWindowAggregate {
+                wrapped_aggregates: fwa.wrapped_aggregates.into_rust()?,
+                order_by: fwa.order_by.into_rust_if_some("ProtoFusedWindowAggregate::order_by")?,
+                window_frame: fwa.window_frame.into_rust_if_some("ProtoFusedWindowAggregate::window_frame")?,
+            },
             Kind::Dummy(()) => AggregateFunc::Dummy,
         })
     }
@@ -2312,6 +2328,11 @@ impl AggregateFunc {
             AggregateFunc::FusedValueWindowFunc { funcs, order_by } => {
                 fused_value_window_func(datums, temp_storage, funcs, order_by)
             }
+            AggregateFunc::FusedWindowAggregate {
+                wrapped_aggregates,
+                order_by,
+                window_frame,
+            } => todo!(),
             AggregateFunc::Dummy => Datum::Dummy,
         }
     }
@@ -2394,6 +2415,13 @@ impl AggregateFunc {
                 window_frame,
             )
             .collect_vec(),
+            AggregateFunc::FusedWindowAggregate {
+                wrapped_aggregates,
+                order_by,
+                window_frame,
+            } => {
+                todo!()
+            }
             _ => unreachable!("asserted above that `can_fuse_with_unnest_list`"),
         }
         .into_iter()
@@ -2420,14 +2448,15 @@ impl AggregateFunc {
             AggregateFunc::Dummy => Datum::Dummy,
             AggregateFunc::ArrayConcat { .. } => Datum::empty_array(),
             AggregateFunc::ListConcat { .. } => Datum::empty_list(),
-            AggregateFunc::RowNumber { .. } => Datum::empty_list(),
-            AggregateFunc::Rank { .. } => Datum::empty_list(),
-            AggregateFunc::DenseRank { .. } => Datum::empty_list(),
-            AggregateFunc::LagLead { .. } => Datum::empty_list(),
-            AggregateFunc::FirstValue { .. } => Datum::empty_list(),
-            AggregateFunc::LastValue { .. } => Datum::empty_list(),
-            AggregateFunc::WindowAggregate { .. } => Datum::empty_list(),
-            AggregateFunc::FusedValueWindowFunc { .. } => Datum::empty_list(),
+            AggregateFunc::RowNumber { .. }
+            | AggregateFunc::Rank { .. }
+            | AggregateFunc::DenseRank { .. }
+            | AggregateFunc::LagLead { .. }
+            | AggregateFunc::FirstValue { .. }
+            | AggregateFunc::LastValue { .. }
+            | AggregateFunc::WindowAggregate { .. }
+            | AggregateFunc::FusedValueWindowFunc { .. }
+            | AggregateFunc::FusedWindowAggregate { .. } => Datum::empty_list(),
             AggregateFunc::MaxNumeric
             | AggregateFunc::MaxInt16
             | AggregateFunc::MaxInt32
@@ -2488,7 +2517,8 @@ impl AggregateFunc {
             | AggregateFunc::FirstValue { .. }
             | AggregateFunc::LastValue { .. }
             | AggregateFunc::WindowAggregate { .. }
-            | AggregateFunc::FusedValueWindowFunc { .. } => true,
+            | AggregateFunc::FusedValueWindowFunc { .. }
+            | AggregateFunc::FusedWindowAggregate { .. } => true,
             AggregateFunc::ArrayConcat { .. }
             | AggregateFunc::ListConcat { .. }
             | AggregateFunc::Any
@@ -2667,6 +2697,38 @@ impl AggregateFunc {
                     element_type: Box::new(ScalarType::Record {
                         fields: [
                             (ColumnName::from("?window_agg?"), wrapped_aggr_out_type),
+                            (ColumnName::from("?orig_row?"), original_row_type),
+                        ].into(),
+                        custom_id: None,
+                    }),
+                    custom_id: None,
+                }
+            }
+            AggregateFunc::FusedWindowAggregate {
+                wrapped_aggregates, ..
+            } => {
+                // The input type for a fused window aggregate is ((OriginalRow, Args), OrderByExprs...)
+                // where `Args` is a record.
+                let fields = input_type.scalar_type.unwrap_record_element_type();
+                let original_row_type = fields[0].unwrap_record_element_type()[0]
+                    .clone()
+                    .nullable(false);
+                let args_type = fields[0].unwrap_record_element_type()[1];
+                let arg_types = args_type.unwrap_record_element_type();
+                let out_fields = arg_types.iter().zip(wrapped_aggregates).map(|(arg_type, wrapped_agg)| {
+                    (
+                        ColumnName::from(wrapped_agg.name()),
+                        wrapped_agg.output_type((**arg_type).clone().nullable(true)),
+                    )
+                }).collect_vec();
+
+                ScalarType::List {
+                    element_type: Box::new(ScalarType::Record {
+                        fields: [
+                            (ColumnName::from("?fused_window_agg?"), ScalarType::Record {
+                                fields: out_fields.into(),
+                                custom_id: None,
+                            }.nullable(false)),
                             (ColumnName::from("?orig_row?"), original_row_type),
                         ].into(),
                         custom_id: None,
@@ -3140,6 +3202,7 @@ impl AggregateFunc {
             Self::LastValue { .. } => "last_value",
             Self::WindowAggregate { .. } => "window_agg",
             Self::FusedValueWindowFunc { .. } => "fused_value_window_func",
+            Self::FusedWindowAggregate { .. } => "fused_window_agg",
             Self::Dummy => "dummy",
         }
     }

@@ -2785,6 +2785,14 @@ impl AggregateExpr {
                 }
             }
 
+            AggregateFunc::FusedWindowAggregate {
+                wrapped_aggregates,
+                order_by,
+                window_frame,
+            } => {
+                todo!()
+            }
+
             // The input type is ((OriginalRow, (Args1, Args2, ...)), OrderByExprs...)
             AggregateFunc::FusedValueWindowFunc {
                 funcs,
