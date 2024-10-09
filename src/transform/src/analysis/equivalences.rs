@@ -341,6 +341,7 @@ impl EquivalenceClasses {
     ///
     /// Informally this means simplifying constraints, removing redundant constraints, and unifying equivalence classes.
     pub fn minimize(&mut self, columns: &Option<Vec<ColumnType>>) {
+        println!("### minimize");
         // Repeatedly, we reduce each of the classes themselves, then unify the classes.
         // This should strictly reduce complexity, and reach a fixed point.
         // Ideally it is *confluent*, arriving at the same fixed point no matter the order of operations.
@@ -361,6 +362,8 @@ impl EquivalenceClasses {
 
     /// A single iteration of minimization, which we expect to repeat but benefit from factoring out.
     fn minimize_once(&mut self, columns: &Option<Vec<ColumnType>>) -> bool {
+        println!("###### minimize_once. self.classes.len: {}", self.classes.len());
+
         // We are complete unless we experience an expression simplification, or an equivalence class unification.
         let mut stable = true;
 
@@ -369,6 +372,7 @@ impl EquivalenceClasses {
         // This is optional in that `columns` may not be provided (`reduce` requires type information).
         if let Some(columns) = columns {
             for class in self.classes.iter_mut() {
+                println!("######### class.len: {}", class.len());
                 for expr in class.iter_mut() {
                     let prev_expr = expr.clone();
                     expr.reduce_safely(columns);

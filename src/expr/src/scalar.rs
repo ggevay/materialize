@@ -1480,6 +1480,7 @@ impl MirScalarExpr {
     /// information present in `column_types`, and it should only apply reductions
     /// that are safe in all contexts.
     pub fn reduce_safely(&mut self, column_types: &[ColumnType]) {
+        println!("######### reduce_safely");
         let mut column_types = column_types.to_vec();
         for column in column_types.iter_mut() {
             column.nullable = true;
