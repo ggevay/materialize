@@ -165,6 +165,7 @@ impl Coordinator {
     {
         return_if_err!(stage.validity().check(self.catalog()), ctx);
         loop {
+            println!("### sequence_staged loop");
             let mut cancel_enabled = stage.cancel_enabled();
             if let Some(session) = ctx.session() {
                 if cancel_enabled {
@@ -176,6 +177,7 @@ impl Coordinator {
                     {
                         let was_canceled = *prev_rx.borrow();
                         if was_canceled {
+                            println!("### sequence_staged ctx.retire(Err(AdapterError::Canceled));");
                             ctx.retire(Err(AdapterError::Canceled));
                             return;
                         }
@@ -256,6 +258,7 @@ impl Coordinator {
                     f(ctx, next);
                 }
                 _ = rx, if cancel_enabled => {
+                    println!("### handle_spawn  ctx.retire(Err(AdapterError::Canceled));");
                     ctx.retire(Err(AdapterError::Canceled));
                 }
             }

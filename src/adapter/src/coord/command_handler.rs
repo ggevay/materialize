@@ -1213,6 +1213,7 @@ impl Coordinator {
         }
 
         if let Some(ctx) = maybe_ctx {
+            println!("### handle_privileged_cancel  if let Some(ctx) = maybe_ctx");
             ctx.retire(Err(AdapterError::Canceled));
         }
 
@@ -1222,6 +1223,7 @@ impl Coordinator {
         self.cancel_cluster_reconfigurations_for_conn(&conn_id)
             .await;
         if let Some((tx, _rx)) = self.staged_cancellation.get_mut(&conn_id) {
+            println!("### handle_privileged_cancel  if let Some((tx, _rx)) = self.staged_cancellation.get_mut(&conn_id)");
             let _ = tx.send(true);
         }
     }
