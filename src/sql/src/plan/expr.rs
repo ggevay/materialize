@@ -1255,7 +1255,9 @@ impl AggregateFunc {
                 mz_expr::AggregateFunc::ListConcat { order_by }
             }
             AggregateFunc::StringAgg { order_by } => mz_expr::AggregateFunc::StringAgg { order_by },
-            AggregateFunc::FusedWindowAgg { funcs } => todo!(),
+            // `AggregateFunc::FusedWindowAgg` should be specially handled in
+            // `AggregateWindowExpr::into_expr`.
+            AggregateFunc::FusedWindowAgg { funcs: _ } => panic!("into_expr called on FusedWindowAgg"),
             AggregateFunc::Dummy => mz_expr::AggregateFunc::Dummy,
         }
     }
