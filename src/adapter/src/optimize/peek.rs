@@ -273,20 +273,6 @@ impl<'s> Optimize<LocalMirPlan<Resolved<'s>>> for Optimizer {
             |s| prep_scalar_expr(s, style),
         )?;
 
-        // TODO: Instead of conditioning here we should really
-        // reconsider how to render multi-plan peek dataflows. The main
-        // difficulty here is rendering the optional finishing bit.
-        if self.config.mode != OptimizeMode::Explain {
-            df_desc.export_index(
-                self.index_id,
-                IndexDesc {
-                    on_id: self.select_id,
-                    key,
-                },
-                typ.clone(),
-            );
-        }
-
         // Set the `as_of` and `until` timestamps for the dataflow.
         df_desc.set_as_of(timestamp_ctx.antichain());
 
@@ -338,6 +324,22 @@ impl<'s> Optimize<LocalMirPlan<Resolved<'s>>> for Optimizer {
 
         // Run global optimization.
         mz_transform::optimize_dataflow(&mut df_desc, &mut transform_ctx, use_fast_path_optimizer)?;
+
+        // TODO: Instead of conditioning here we should really
+        // reconsider how to render multi-plan peek dataflows. The main
+        // difficulty here is rendering the optional finishing bit.
+        if self.config.mode != OptimizeMode::Explain {
+            // (This will add a trivial item to `objects_to_build`, which doesn't need to be
+            // optimized.)
+            df_desc.export_index(
+                self.index_id,
+                IndexDesc {
+                    on_id: self.select_id,
+                    key,
+                },
+                typ.clone(),
+            );
+        }
 
         if self.config.mode == OptimizeMode::Explain {
             // Collect the list of indexes used by the dataflow at this point.

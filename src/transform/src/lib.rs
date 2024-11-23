@@ -64,6 +64,7 @@ pub mod threshold_elision;
 pub mod typecheck;
 pub mod union_cancel;
 pub mod will_distinct;
+pub mod assert_no_arrange_by;
 
 use crate::dataflow::DataflowMetainfo;
 use crate::typecheck::SharedContext;
@@ -648,6 +649,7 @@ impl Optimizer {
                     .disallow_new_globals()
                     .strict_join_equivalences(),
             ),
+            Box::new(assert_no_arrange_by::AssertNoArrangeBy),
             // Considerations for the relationship between JoinImplementation and other transforms:
             // - there should be a run of LiteralConstraints before JoinImplementation lifts away
             //   the Filters from the Gets;

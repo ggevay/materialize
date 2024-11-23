@@ -157,11 +157,15 @@ impl Optimize<Index> for Optimizer {
         df_builder.import_into_dataflow(&index.on, &mut df_desc, &self.config.features)?;
         df_builder.maybe_reoptimize_imported_views(&mut df_desc, &self.config)?;
 
-        let index_desc = IndexDesc {
-            on_id: index.on,
-            key: index.keys.clone(),
-        };
-        df_desc.export_index(self.exported_index_id, index_desc, on_desc.typ().clone());
+        // //////////
+        // let index_desc = IndexDesc {
+        //     on_id: index.on,
+        //     key: index.keys.clone(),
+        // };
+        // df_desc.export_index(self.exported_index_id, index_desc, on_desc.typ().clone());
+        // //////////
+
+        println!("###### Before optimize_dataflow: {:?}", df_desc.objects_to_build);
 
         // Prepare expressions in the assembled dataflow.
         let style = ExprPrepStyle::Index;
@@ -181,6 +185,18 @@ impl Optimize<Index> for Optimizer {
         );
         // Run global optimization.
         mz_transform::optimize_dataflow(&mut df_desc, &mut transform_ctx, false)?;
+
+        println!("###### After optimize_dataflow: {:?}", df_desc.objects_to_build);
+
+        // Export the index.
+        // (This will add a trivial item to `objects_to_build`, which doesn't need to be optimized.)
+        let index_desc = IndexDesc {
+            on_id: index.on,
+            key: index.keys.clone(),
+        };
+        df_desc.export_index(self.exported_index_id, index_desc, on_desc.typ().clone());
+
+        println!("###### After export_index: {:?}", df_desc.objects_to_build);
 
         if self.config.mode == OptimizeMode::Explain {
             // Collect the list of indexes used by the dataflow at this point.
