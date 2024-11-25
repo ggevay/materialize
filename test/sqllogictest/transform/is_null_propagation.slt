@@ -66,13 +66,23 @@ Explained Query:
               Project (#0) // { arity: 1 }
                 Filter (#0 = bigint_to_double(#1)) // { arity: 2 }
                   Get l2 // { arity: 2 }
-              Negate // { arity: 1 }
-                Project (#0) // { arity: 1 }
-                  Filter (#0 = 0) // { arity: 2 }
-                    Get l2 // { arity: 2 }
-              Filter (#0 = 0) // { arity: 1 }
-                Get l1 // { arity: 1 }
+              CrossJoin type=differential // { arity: 1 }
+                implementation
+                  %1:l3[×]Uef » %0[×]ef
+                ArrangeBy keys=[[]] // { arity: 1 }
+                  Union // { arity: 1 }
+                    Negate // { arity: 1 }
+                      Project (#0) // { arity: 1 }
+                        Filter (#0 = 0) // { arity: 2 }
+                          Get l2 // { arity: 2 }
+                    Get l3 // { arity: 1 }
+                ArrangeBy keys=[[]] // { arity: 0 }
+                  Project () // { arity: 0 }
+                    Get l3 // { arity: 1 }
   With
+    cte l3 =
+      Filter (#0 = 0) // { arity: 1 }
+        Get l1 // { arity: 1 }
     cte l2 =
       Reduce group_by=[#0] aggregates=[count(*)] // { arity: 2 }
         Project (#0) // { arity: 1 }

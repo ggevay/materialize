@@ -70,6 +70,7 @@ use crate::typecheck::SharedContext;
 pub use dataflow::optimize_dataflow;
 use mz_ore::{soft_assert_or_log, soft_panic_or_log};
 use crate::normalize_lets::NormalizeLets;
+use crate::predicate_pushdown::PredicatePushdown;
 
 /// Compute the conjunction of a variadic number of expressions.
 #[macro_export]
@@ -542,6 +543,7 @@ pub fn fold_constants_and_normalize_lets_fixpoint() -> Fixpoint { //////////////
                 limit: Some(FOLD_CONSTANTS_LIMIT),
             }),
             Box::new(NormalizeLets::new(false)),
+            Box::new(normalize_ops::NormalizeOps), ////////////
         ],
     }
 }
