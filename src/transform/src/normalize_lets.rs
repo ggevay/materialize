@@ -797,10 +797,8 @@ mod inlining {
                         } else {
                             &expr
                         };
-                        match stripped_value {
-                            MirRelationExpr::Get { .. } | MirRelationExpr::Constant { .. } => true,
-                            _ => false,
-                        }
+                        matches!(stripped_value, MirRelationExpr::Get { .. })
+                            || stripped_value.as_const().is_some()
                     };
 
                     if clone_binding {
