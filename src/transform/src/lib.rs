@@ -69,6 +69,7 @@ use crate::dataflow::DataflowMetainfo;
 use crate::typecheck::SharedContext;
 pub use dataflow::optimize_dataflow;
 use mz_ore::{soft_assert_or_log, soft_panic_or_log};
+use crate::normalize_lets::NormalizeLets;
 
 /// Compute the conjunction of a variadic number of expressions.
 #[macro_export]
@@ -497,9 +498,7 @@ impl Default for FuseAndCollapse {
                 // Some optimizations fight against this, and we want to be sure to end as a
                 // `MirRelationExpr::Constant` if that is the case, so that subsequent use can
                 // clearly see this.
-                Box::new(fold_constants::FoldConstants {
-                    limit: Some(FOLD_CONSTANTS_LIMIT),
-                }),
+                Box::new(fold_constants_and_normalize_lets_fixpoint()),
                 Box::new(canonicalization::ReduceScalars),
             ],
         }
@@ -531,6 +530,19 @@ pub fn fuse_and_collapse() -> Fixpoint {
         name: "fuse_and_collapse",
         limit: 100,
         transforms: FuseAndCollapse::default().transforms,
+    }
+}
+
+pub fn fold_constants_and_normalize_lets_fixpoint() -> Fixpoint { //////////////////// todo: maybe merge with `normalize`?
+    Fixpoint {
+        name: "fold_constants_and_normalize_lets",
+        limit: 100,
+        transforms: vec![
+            Box::new(fold_constants::FoldConstants {
+                limit: Some(FOLD_CONSTANTS_LIMIT),
+            }),
+            Box::new(NormalizeLets::new(false)),
+        ],
     }
 }
 
@@ -680,9 +692,7 @@ impl Optimizer {
                 limit: 100,
                 transforms: vec![
                     Box::new(column_knowledge::ColumnKnowledge::default()),
-                    Box::new(fold_constants::FoldConstants {
-                        limit: Some(FOLD_CONSTANTS_LIMIT),
-                    }),
+                    Box::new(fold_constants_and_normalize_lets_fixpoint()),
                     Box::new(canonicalization::ReduceScalars),
                     Box::new(demand::Demand::default()),
                     Box::new(literal_lifting::LiteralLifting::default()),
@@ -697,9 +707,7 @@ impl Optimizer {
             Box::new(canonicalize_mfp::CanonicalizeMfp),
             // Identifies common relation subexpressions.
             Box::new(cse::relation_cse::RelationCSE::new(false)),
-            Box::new(fold_constants::FoldConstants {
-                limit: Some(FOLD_CONSTANTS_LIMIT),
-            }),
+            Box::new(fold_constants_and_normalize_lets_fixpoint()),
             Box::new(canonicalization::ReduceScalars),
             // Remove threshold operators which have no effect.
             // Must be done at the very end of the physical pass, because before
@@ -758,9 +766,7 @@ impl Optimizer {
                     // The last RelationCSE before JoinImplementation should be with
                     // inline_mfp = true.
                     Box::new(cse::relation_cse::RelationCSE::new(true)),
-                    Box::new(fold_constants::FoldConstants {
-                        limit: Some(FOLD_CONSTANTS_LIMIT),
-                    }),
+                    Box::new(fold_constants_and_normalize_lets_fixpoint()),
                     Box::new(canonicalization::ReduceScalars),
                 ],
             }),
