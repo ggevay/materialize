@@ -18,13 +18,14 @@
 use std::collections::BTreeMap;
 use std::fmt::Formatter;
 
-use mz_expr::{Id, MirRelationExpr, MirScalarExpr};
 use mz_ore::str::{bracketed, separated};
 use mz_repr::{ColumnType, Datum};
 
 use crate::analysis::{Analysis, Lattice};
 use crate::analysis::{Arity, RelationType};
 use crate::analysis::{Derived, DerivedBuilder};
+use crate::{Id, MirScalarExpr};
+use crate::MirRelationExpr;
 
 /// Pulls up and pushes down predicate information represented as equivalences
 #[derive(Debug, Default)]
@@ -350,14 +351,15 @@ impl std::fmt::Display for EquivalenceClasses {
 }
 
 impl EquivalenceClasses {
+
     /// Comparator function for the complexity of scalar expressions. Simpler expressions are
     /// smaller. Can be used when we need to decide which of several equivalent expressions to use.
     pub fn mir_scalar_expr_complexity(
-        e1: &MirScalarExpr,
-        e2: &MirScalarExpr,
+        e1: &crate::MirScalarExpr,
+        e2: &crate::MirScalarExpr,
     ) -> std::cmp::Ordering {
         use std::cmp::Ordering::*;
-        use MirScalarExpr::*;
+        use crate::MirScalarExpr::*;
         match (e1, e2) {
             (Literal(_, _), Literal(_, _)) => e1.cmp(e2),
             (Literal(_, _), _) => Less,
@@ -568,7 +570,7 @@ impl EquivalenceClasses {
             if Self::class_contains_literal(class, |e| e == &Ok(Datum::False)) {
                 for e in class.iter() {
                     if let MirScalarExpr::CallUnary {
-                        func: mz_expr::UnaryFunc::IsNull(_),
+                        func: crate::UnaryFunc::IsNull(_),
                         expr,
                     } = e
                     {
@@ -620,15 +622,15 @@ impl EquivalenceClasses {
             for expr in class.iter() {
                 // Record-forming expressions can equate their accessors and their members.
                 if let MirScalarExpr::CallVariadic {
-                    func: mz_expr::VariadicFunc::RecordCreate { .. },
+                    func: crate::VariadicFunc::RecordCreate { .. },
                     exprs,
                 } = expr
                 {
                     for (index, e) in exprs.iter().enumerate() {
                         new_equivalences.push(vec![
                             e.clone(),
-                            expr.clone().call_unary(mz_expr::UnaryFunc::RecordGet(
-                                mz_expr::func::RecordGet(index),
+                            expr.clone().call_unary(crate::UnaryFunc::RecordGet(
+                                crate::func::RecordGet(index),
                             )),
                         ]);
                     }
@@ -671,7 +673,7 @@ impl EquivalenceClasses {
                     // This substitution replaces a complex expression with several smaller expressions, and cannot
                     // cycle if we follow that practice.
                     if let MirScalarExpr::CallBinary {
-                        func: mz_expr::BinaryFunc::Eq,
+                        func: crate::BinaryFunc::Eq,
                         expr1,
                         expr2,
                     } = expr
@@ -687,7 +689,7 @@ impl EquivalenceClasses {
                 // Remove the more complex form of the expression.
                 class.retain(|expr| {
                     if let MirScalarExpr::CallBinary {
-                        func: mz_expr::BinaryFunc::Eq,
+                        func: crate::BinaryFunc::Eq,
                         ..
                     } = expr
                     {
@@ -699,7 +701,7 @@ impl EquivalenceClasses {
                 for expr in class.iter() {
                     // If TRUE == NOT(X) then FALSE == X is a simpler form.
                     if let MirScalarExpr::CallUnary {
-                        func: mz_expr::UnaryFunc::Not(_),
+                        func: crate::UnaryFunc::Not(_),
                         expr: e,
                     } = expr
                     {
@@ -708,7 +710,7 @@ impl EquivalenceClasses {
                 }
                 class.retain(|expr| {
                     if let MirScalarExpr::CallUnary {
-                        func: mz_expr::UnaryFunc::Not(_),
+                        func: crate::UnaryFunc::Not(_),
                         ..
                     } = expr
                     {
@@ -722,7 +724,7 @@ impl EquivalenceClasses {
                 for expr in class.iter() {
                     // If FALSE == NOT(X) then TRUE == X is a simpler form.
                     if let MirScalarExpr::CallUnary {
-                        func: mz_expr::UnaryFunc::Not(_),
+                        func: crate::UnaryFunc::Not(_),
                         expr: e,
                     } = expr
                     {
@@ -731,7 +733,7 @@ impl EquivalenceClasses {
                 }
                 class.retain(|expr| {
                     if let MirScalarExpr::CallUnary {
-                        func: mz_expr::UnaryFunc::Not(_),
+                        func: crate::UnaryFunc::Not(_),
                         ..
                     } = expr
                     {
@@ -927,7 +929,7 @@ impl EquivalenceClasses {
     /// if the data are not sorted with literals at the front.
     fn class_contains_literal<P>(class: &[MirScalarExpr], mut predicate: P) -> bool
     where
-        P: FnMut(&Result<Datum, &mz_expr::EvalError>) -> bool,
+        P: FnMut(&Result<Datum, &crate::EvalError>) -> bool,
     {
         class
             .iter()
@@ -1054,7 +1056,7 @@ impl<T: Clone + Ord> UnionFind<T> for BTreeMap<T, T> {
     }
 }
 
-use mz_expr::AggregateFunc;
+use crate::AggregateFunc;
 /// True iff the aggregate function returns an input datum.
 fn aggregate_is_input(aggregate: &AggregateFunc) -> bool {
     match aggregate {

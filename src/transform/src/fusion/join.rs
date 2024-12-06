@@ -27,7 +27,7 @@ use mz_expr::visit::Visit;
 use mz_expr::{BinaryFunc, VariadicFunc};
 use mz_expr::{MapFilterProject, MirRelationExpr, MirScalarExpr};
 
-use crate::analysis::equivalences::EquivalenceClasses;
+use mz_expr::analysis::equivalences::EquivalenceClasses;
 use crate::canonicalize_mfp::CanonicalizeMfp;
 use crate::predicate_pushdown::PredicatePushdown;
 use crate::{TransformCtx, TransformError};

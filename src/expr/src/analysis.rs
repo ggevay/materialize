@@ -12,7 +12,8 @@
 pub mod equivalences;
 pub mod monotonic;
 
-use mz_expr::MirRelationExpr;
+use crate::MirRelationExpr;
+use crate::MirScalarExpr;
 
 pub use arity::Arity;
 pub use cardinality::Cardinality;
@@ -80,8 +81,8 @@ pub mod common {
     use std::any::{Any, TypeId};
     use std::collections::BTreeMap;
 
-    use mz_expr::LocalId;
-    use mz_expr::MirRelationExpr;
+    use crate::LocalId;
+    use crate::MirRelationExpr;
     use mz_ore::assert_none;
     use mz_repr::optimize::OptimizerFeatures;
 
@@ -487,7 +488,7 @@ pub mod common {
 pub mod subtree {
 
     use super::{Analysis, Derived};
-    use mz_expr::MirRelationExpr;
+    use crate::MirRelationExpr;
 
     /// Analysis that determines the size in child expressions of relation expressions.
     #[derive(Debug)]
@@ -521,7 +522,7 @@ pub mod subtree {
 mod arity {
 
     use super::{Analysis, Derived};
-    use mz_expr::MirRelationExpr;
+    use crate::MirRelationExpr;
 
     /// Analysis that determines the number of columns of relation expressions.
     #[derive(Debug)]
@@ -551,7 +552,7 @@ mod arity {
 mod types {
 
     use super::{Analysis, Derived, Lattice};
-    use mz_expr::MirRelationExpr;
+    use crate::MirRelationExpr;
     use mz_repr::ColumnType;
 
     /// Analysis that determines the type of relation expressions.
@@ -586,7 +587,7 @@ mod types {
             // we'll want to combine what we know (iteratively) with the stated `Get::typ`.
             match expr {
                 MirRelationExpr::Get {
-                    id: mz_expr::Id::Local(i),
+                    id: crate::Id::Local(i),
                     typ,
                     ..
                 } => {
@@ -667,7 +668,7 @@ mod unique_keys {
 
     use super::arity::Arity;
     use super::{Analysis, Derived, DerivedBuilder, Lattice};
-    use mz_expr::MirRelationExpr;
+    use crate::MirRelationExpr;
 
     /// Analysis that determines the unique keys of relation expressions.
     ///
@@ -701,7 +702,7 @@ mod unique_keys {
 
             match expr {
                 MirRelationExpr::Get {
-                    id: mz_expr::Id::Local(i),
+                    id: crate::Id::Local(i),
                     typ,
                     ..
                 } => {
@@ -784,7 +785,7 @@ mod non_negative {
 
     use super::{Analysis, Derived, Lattice};
     use crate::analysis::common_lattice::BoolLattice;
-    use mz_expr::{Id, MirRelationExpr};
+    use crate::MirRelationExpr;
 
     /// Analysis that determines if all accumulations at all times are non-negative.
     ///
@@ -808,14 +809,14 @@ mod non_negative {
                     .map(|r| r.iter().all(|(_, diff)| diff >= &0))
                     .unwrap_or(true),
                 MirRelationExpr::Get { id, .. } => match id {
-                    Id::Local(id) => {
+                    crate::Id::Local(id) => {
                         let index = *depends
                             .bindings()
                             .get(id)
                             .expect("Dependency info not found");
                         *results.get(index).unwrap_or(&false)
                     }
-                    Id::Global(_) => true,
+                    crate::Id::Global(_) => true,
                 },
                 // Negate must be false unless input is "non-positive".
                 MirRelationExpr::Negate { .. } => false,
@@ -940,7 +941,6 @@ mod column_names {
     use std::ops::Range;
 
     use super::Analysis;
-    use mz_expr::{AggregateFunc, Id, MirRelationExpr, MirScalarExpr};
     use mz_repr::explain::ExprHumanizer;
     use mz_repr::GlobalId;
 
@@ -950,7 +950,7 @@ mod column_names {
         /// A column with name inferred to be equal to a GlobalId schema column.
         Global(GlobalId, usize),
         /// An anonymous expression named after the top-level function name.
-        Aggregate(AggregateFunc, Box<ColumnName>),
+        Aggregate(crate::AggregateFunc, Box<ColumnName>),
         /// An column with an unknown name.
         Unknown,
     }
@@ -992,10 +992,10 @@ mod column_names {
         }
 
         /// fallback schema consisting of ordinal column names: #0, #1, ...
-        fn extend_with_scalars(column_names: &mut Vec<ColumnName>, scalars: &Vec<MirScalarExpr>) {
+        fn extend_with_scalars(column_names: &mut Vec<ColumnName>, scalars: &Vec<crate::MirScalarExpr>) {
             for scalar in scalars {
                 column_names.push(match scalar {
-                    MirScalarExpr::Column(c) => column_names[*c].clone(),
+                    crate::MirScalarExpr::Column(c) => column_names[*c].clone(),
                     _ => ColumnName::Unknown,
                 });
             }
@@ -1007,12 +1007,12 @@ mod column_names {
 
         fn derive(
             &self,
-            expr: &MirRelationExpr,
+            expr: &crate::MirRelationExpr,
             index: usize,
             results: &[Self::Value],
             depends: &crate::analysis::Derived,
         ) -> Self::Value {
-            use MirRelationExpr::*;
+            use crate::MirRelationExpr::*;
 
             match expr {
                 Constant { rows: _, typ } => {
@@ -1020,7 +1020,7 @@ mod column_names {
                     ColumnNames::anonymous(0..typ.arity()).collect()
                 }
                 Get {
-                    id: Id::Global(id),
+                    id: crate::Id::Global(id),
                     typ,
                     access_strategy: _,
                 } => {
@@ -1032,7 +1032,7 @@ mod column_names {
                         .collect()
                 }
                 Get {
-                    id: Id::Local(id),
+                    id: crate::Id::Local(id),
                     typ,
                     access_strategy: _,
                 } => {
@@ -1203,8 +1203,8 @@ mod explain {
 
     use std::collections::BTreeMap;
 
-    use mz_expr::explain::ExplainContext;
-    use mz_expr::MirRelationExpr;
+    use crate::explain::ExplainContext;
+    use crate::MirRelationExpr;
     use mz_ore::stack::RecursionLimitError;
     use mz_repr::explain::{Analyses, AnnotatedPlan};
 
@@ -1361,10 +1361,6 @@ mod explain {
 mod cardinality {
     use std::collections::{BTreeMap, BTreeSet};
 
-    use mz_expr::{
-        BinaryFunc, Id, JoinImplementation, MirRelationExpr, MirScalarExpr, TableFunc, UnaryFunc,
-        VariadicFunc,
-    };
     use mz_ore::cast::{CastFrom, CastLossy, TryCastFrom};
     use mz_repr::GlobalId;
 
@@ -1541,6 +1537,9 @@ mod cardinality {
     /// But see also expr/src/scalar.rs for `FilterCharacteristics::worst_case_scaling_factor()` for a more nuanced take.
     pub const WORST_CASE_SELECTIVITY: OrderedFloat<f64> = OrderedFloat(0.1);
 
+    use crate::TableFunc;
+    use crate::{MirScalarExpr, UnaryFunc, BinaryFunc, VariadicFunc};
+
     // This section defines how we estimate cardinality for each syntactic construct.
     //
     // We split it up into functions to make it all a bit more tractable to work with.
@@ -1682,7 +1681,7 @@ mod cardinality {
         fn join(
             &self,
             equivalences: &Vec<Vec<MirScalarExpr>>,
-            _implementation: &JoinImplementation,
+            _implementation: &crate::JoinImplementation,
             unique_columns: BTreeMap<usize, usize>,
             mut inputs: Vec<CardinalityEstimate>,
         ) -> CardinalityEstimate {
@@ -1804,12 +1803,12 @@ mod cardinality {
 
         fn derive(
             &self,
-            expr: &MirRelationExpr,
+            expr: &crate::MirRelationExpr,
             index: usize,
             results: &[Self::Value],
             depends: &crate::analysis::Derived,
         ) -> Self::Value {
-            use MirRelationExpr::*;
+            use crate::MirRelationExpr::*;
 
             let sizes = depends.as_view().results::<SubtreeSize>();
             let arity = depends.as_view().results::<Arity>();
@@ -1820,13 +1819,13 @@ mod cardinality {
                     CardinalityEstimate::from(rows.as_ref().map_or_else(|_| 0, |v| v.len()))
                 }
                 Get { id, .. } => match id {
-                    Id::Local(id) => depends
+                    crate::Id::Local(id) => depends
                         .bindings()
                         .get(id)
                         .and_then(|id| results.get(*id))
                         .copied()
                         .unwrap_or(CardinalityEstimate::Unknown),
-                    Id::Global(id) => self
+                    crate::Id::Global(id) => self
                         .stats
                         .get(id)
                         .copied()

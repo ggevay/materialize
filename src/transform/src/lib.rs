@@ -57,7 +57,6 @@ use crate::typecheck::{SharedContext, Typecheck};
 use crate::union_cancel::UnionBranchCancellation;
 use crate::will_distinct::WillDistinct;
 
-pub mod analysis;
 pub mod canonicalization;
 pub mod canonicalize_mfp;
 pub mod column_knowledge;

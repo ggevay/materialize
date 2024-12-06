@@ -40,8 +40,8 @@ use mz_repr::{Datum, GlobalId, Row};
 use mz_sql::catalog::CatalogRole;
 use mz_sql::rbac;
 use mz_sql::session::metadata::SessionMetadata;
-use mz_transform::analysis::monotonic::Monotonic;
-use mz_transform::analysis::DerivedBuilder;
+use mz_expr::analysis::monotonic::Monotonic;
+use mz_expr::analysis::DerivedBuilder;
 
 use crate::catalog::CatalogState;
 use crate::coord::id_bundle::CollectionIdBundle;
@@ -238,7 +238,7 @@ impl<'a> DataflowBuilder<'a> {
 
     /// Imports the view with the specified ID and expression into the provided
     /// dataflow description. [`OptimizerFeatures`] is used while running
-    /// expression [`mz_transform::analysis::Analysis`].
+    /// expression [`mz_expr::analysis::Analysis`].
     ///
     /// You should generally prefer calling
     /// [`DataflowBuilder::import_into_dataflow`], which can handle objects of

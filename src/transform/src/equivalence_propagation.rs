@@ -33,8 +33,8 @@ use std::collections::BTreeMap;
 use mz_expr::{Id, MirRelationExpr, MirScalarExpr};
 use mz_repr::Datum;
 
-use crate::analysis::equivalences::{EquivalenceClasses, Equivalences, ExpressionReducer};
-use crate::analysis::{Arity, DerivedView, RelationType};
+use mz_expr::analysis::equivalences::{EquivalenceClasses, Equivalences, ExpressionReducer};
+use mz_expr::analysis::{Arity, DerivedView, RelationType};
 
 use crate::{TransformCtx, TransformError};
 
@@ -54,7 +54,7 @@ impl crate::Transform for EquivalencePropagation {
         ctx: &mut TransformCtx,
     ) -> Result<(), TransformError> {
         // Perform bottom-up equivalence class analysis.
-        use crate::analysis::DerivedBuilder;
+        use mz_expr::analysis::DerivedBuilder;
         let mut builder = DerivedBuilder::new(ctx.features);
         builder.require(Equivalences);
         let derived = builder.visit(relation);

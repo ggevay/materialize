@@ -28,7 +28,7 @@ use mz_ore::stack::{CheckedRecursion, RecursionGuard};
 use mz_ore::{soft_assert_or_log, soft_panic_or_log};
 use mz_repr::optimize::OptimizerFeatures;
 
-use crate::analysis::{Cardinality, DerivedBuilder};
+use mz_expr::analysis::{Cardinality, DerivedBuilder};
 use crate::join_implementation::index_map::IndexMap;
 use crate::predicate_pushdown::PredicatePushdown;
 use crate::{StatisticsOracle, TransformCtx, TransformError};

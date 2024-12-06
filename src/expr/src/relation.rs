@@ -42,7 +42,7 @@ use proptest::strategy::{Strategy, Union};
 use proptest_derive::Arbitrary;
 use serde::{Deserialize, Serialize};
 use timely::container::columnation::{Columnation, CopyRegion};
-
+use mz_repr::optimize::OptimizerFeatures;
 use crate::explain::{HumanizedExpr, HumanizerMode};
 use crate::relation::func::{AggregateFunc, LagLeadType, TableFunc};
 use crate::row::{RowCollection, SortedRowCollectionIter};
@@ -52,6 +52,8 @@ use crate::{
     func as scalar_func, EvalError, FilterCharacteristics, Id, LocalId, MirScalarExpr, UnaryFunc,
     VariadicFunc,
 };
+use crate::analysis::DerivedBuilder;
+use crate::analysis::equivalences::Equivalences;
 
 pub mod canonicalize;
 pub mod func;
@@ -566,7 +568,33 @@ impl MirRelationExpr {
             },
         );
         assert_eq!(type_stack.len(), 1);
-        type_stack.pop().unwrap()
+        let mut typ = type_stack.pop().unwrap();
+
+
+        use crate::analysis::DerivedBuilder;
+        let features = OptimizerFeatures::default();
+        let mut builder = DerivedBuilder::new(&features);
+        builder.require(Equivalences);
+        let derived = builder.visit(self);
+        let derived = derived.as_view();
+        let expr_equivalences = derived
+            .value::<Equivalences>()
+            .expect("Equivalences required");
+        if let Some(expr_equivalences) = expr_equivalences {
+            for eq_class in expr_equivalences.classes.iter() {
+                if eq_class[0].is_literal_false() {
+                    for expr in eq_class.iter() {
+                        if let MirScalarExpr::CallUnary {func: UnaryFunc::IsNull(crate::func::IsNull), expr} = expr {
+                            if let MirScalarExpr::Column(column) = **expr {
+                                typ.column_types[column].nullable = false;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        typ
     }
 
     /// Reports the schema of the relation given the schema of the input relations.

@@ -11,7 +11,7 @@
 
 use mz_expr::MirRelationExpr;
 
-use crate::analysis::{DerivedView, NonNegative};
+use mz_expr::analysis::{DerivedView, NonNegative};
 
 use crate::{TransformCtx, TransformError};
 
@@ -38,7 +38,7 @@ impl crate::Transform for WillDistinct {
         ctx: &mut TransformCtx,
     ) -> Result<(), TransformError> {
         // Perform bottom-up equivalence class analysis.
-        use crate::analysis::DerivedBuilder;
+        use mz_expr::analysis::DerivedBuilder;
         let mut builder = DerivedBuilder::new(ctx.features);
         builder.require(NonNegative);
         let derived = builder.visit(relation);

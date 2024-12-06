@@ -14,8 +14,10 @@
 
 use std::collections::BTreeSet;
 
-use mz_expr::{Id, MirRelationExpr};
 use mz_repr::GlobalId;
+
+use crate::MirRelationExpr;
+use crate::MirScalarExpr;
 
 use crate::analysis::common_lattice::BoolLattice;
 use crate::analysis::{Analysis, Derived, Lattice};
@@ -57,7 +59,7 @@ impl Analysis for Monotonic {
         results: &[Self::Value],
         depends: &Derived,
     ) -> Self::Value {
-        use Id::*;
+        use crate::Id::*;
         match expr {
             MirRelationExpr::Get { id: Global(id), .. } => self.global_monotonic_ids.contains(id),
             MirRelationExpr::Get { id: Local(id), .. } => {

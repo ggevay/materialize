@@ -406,7 +406,7 @@ where
 }
 
 /// Propagates information about monotonic inputs through operators,
-/// using [`mz_repr::optimize::OptimizerFeatures`] from `ctx` for [`crate::analysis::Analysis`].
+/// using [`mz_repr::optimize::OptimizerFeatures`] from `ctx` for [`mz_expr::analysis::Analysis`].
 #[mz_ore::instrument(
     target = "optimizer",
     level = "debug",

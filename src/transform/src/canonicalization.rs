@@ -24,7 +24,7 @@ pub use topk_elision::TopKElision;
 
 use mz_expr::MirRelationExpr;
 
-use crate::analysis::{DerivedBuilder, RelationType};
+use mz_expr::analysis::{DerivedBuilder, RelationType};
 use crate::TransformCtx;
 
 /// A transform that visits each AST node and reduces scalar expressions.

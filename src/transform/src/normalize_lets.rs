@@ -258,7 +258,7 @@ mod support {
         features: &OptimizerFeatures,
     ) -> Result<(), crate::TransformError> {
         // Assemble type information once for the whole expression.
-        use crate::analysis::{DerivedBuilder, RelationType, UniqueKeys};
+        use mz_expr::analysis::{DerivedBuilder, RelationType, UniqueKeys};
         let mut builder = DerivedBuilder::new(features);
         builder.require(RelationType);
         builder.require(UniqueKeys);
