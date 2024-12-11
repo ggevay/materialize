@@ -489,14 +489,20 @@ pub struct FuseAndCollapse {
 
 impl Default for FuseAndCollapse {
     fn default() -> Self {
+        FuseAndCollapse::new(true)
+    }
+}
+
+impl FuseAndCollapse {
+    fn new(lift_projections: bool) -> Self {
         Self {
             // TODO: The relative orders of the transforms have not been
             // determined except where there are comments.
             // TODO (database-issues#2036): All the transforms here except for `ProjectionLifting`
             //  and `RedundantJoin` can be implemented as free functions.
-            transforms: vec![
+            transforms: transforms![
                 Box::new(canonicalization::ProjectionExtraction),
-                Box::new(movement::ProjectionLifting::default()),
+                Box::new(movement::ProjectionLifting::default()); if lift_projections,
                 Box::new(fusion::Fusion),
                 Box::new(canonicalization::FlatMapToMap),
                 Box::new(fusion::join::Join),
@@ -765,6 +771,7 @@ impl Optimizer {
                 name: "fixpoint_logical_cleanup_pass_01",
                 limit: 100,
                 transforms: vec![
+                    Box::new(FuseAndCollapse::new(false)),
                     Box::new(CanonicalizeMfp),
                     // Remove threshold operators which have no effect.
                     Box::new(ThresholdElision),
