@@ -205,6 +205,8 @@ pub trait Transform: fmt::Debug {
         args: &mut TransformCtx,
     ) -> Result<(), TransformError> {
         let hash_before = args.last_hash.unwrap_or_else(|| relation.hash_to_u64());
+        
+        let relation_before = relation.clone();
 
         // actually run the transform, recording the time taken
         let start = std::time::Instant::now();
@@ -212,6 +214,21 @@ pub trait Transform: fmt::Debug {
         let duration = start.elapsed();
 
         let hash_after = relation.hash_to_u64();
+
+
+        if (relation_before == *relation) != (hash_before == hash_after) {
+            println!();
+            println!("relation_before:\n{:?}", relation_before);
+            println!();
+            println!("relation:\n{:?}", relation);
+            println!();
+            println!("hash_before: {}, hash_after: {}", hash_before, hash_after);
+            println!("transform: {}", self.name());
+        }
+
+        assert_eq!(relation_before == *relation, hash_before == hash_after);
+
+        println!("!!!!!! {} modifying last_hash from {:?} to {:?}", self.name(), args.last_hash, Some(hash_after));
         args.last_hash = Some(hash_after);
         if let Some(metrics) = args.metrics {
             let transform_name = self.name();

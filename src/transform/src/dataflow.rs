@@ -48,8 +48,13 @@ pub fn optimize_dataflow(
     transform_ctx: &mut TransformCtx,
     fast_path_optimizer: bool,
 ) -> Result<(), TransformError> {
+
+    println!("###### before inline_views {:?}", transform_ctx.last_hash);
+
     // Inline views that are used in only one other view.
     inline_views(dataflow)?;
+
+    println!("###### after inline_views {:?}", transform_ctx.last_hash);
 
     if fast_path_optimizer {
         optimize_dataflow_relations(
