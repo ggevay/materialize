@@ -538,6 +538,7 @@ impl Catalog {
 
             let mut updates: Vec<_> = tx.get_and_commit_op_updates();
             updates.extend(temporary_item_updates);
+            println!("###### transact_inner 1. call to apply_updates with\n{:#?}\n", updates);
             let op_builtin_table_updates = state.apply_updates(updates)?;
             let op_builtin_table_updates =
                 state.resolve_builtin_table_updates(op_builtin_table_updates);
@@ -556,6 +557,7 @@ impl Catalog {
             }
 
             let updates = tx.get_and_commit_op_updates();
+            println!("###### transact_inner 2. call to apply_updates with\n{:#?}\n", updates);
             let op_builtin_table_updates = state.apply_updates(updates)?;
             let op_builtin_table_updates =
                 state.resolve_builtin_table_updates(op_builtin_table_updates);

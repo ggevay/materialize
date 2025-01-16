@@ -1227,6 +1227,7 @@ impl CatalogState {
                     Some(_) | None => {
                         let optimizer_features = optimizer_config.features.clone();
                         // TODO(aalexandrov): ideally this should be a materialized_view::Optimizer.
+                        println!("\n++++++++++++++++++++++++++++++++ parse_item_inner MV\n");
                         let mut optimizer = optimize::view::Optimizer::new(optimizer_config, None);
 
                         let raw_expr = materialized_view.expr;

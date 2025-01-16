@@ -950,6 +950,9 @@ impl CatalogState {
         retractions: &mut InProgressRetractions,
         local_expression_cache: &mut LocalExpressionCache,
     ) -> Result<(), CatalogError> {
+
+        println!("\n============================================================ apply_item_update({}, {:?})\n", item.name, diff);
+
         match diff {
             StateDiff::Addition => {
                 let key = item.key();
@@ -980,6 +983,7 @@ impl CatalogState {
                         // This makes it difficult to use the `UpdateFrom` trait, but the structure
                         // is still the same as the trait.
                         if retraction.create_sql() != create_sql {
+                            println!("\n--------------------- reparsing:\n{}\n!=\n{}", retraction.create_sql(), create_sql);
                             let item = self
                                 .deserialize_item(
                                     global_id,
@@ -991,6 +995,8 @@ impl CatalogState {
                                     panic!("{e:?}: invalid persisted SQL: {create_sql}")
                                 });
                             retraction.item = item;
+                        } else {
+                            println!("\n--------------------- !!! NOT !!! reparsing:\n{}\n==\n{}", retraction.create_sql(), create_sql);
                         }
                         retraction.id = id;
                         retraction.oid = oid;
