@@ -189,6 +189,7 @@ impl HirRelationExpr {
                 transform_hir::split_subquery_predicates(&mut other)?;
                 transform_hir::try_simplify_quantified_comparisons(&mut other)?;
                 transform_hir::fuse_window_functions(&mut other, &context)?;
+                transform_hir::collect_subquery_metrics(&mut other, &context)?;
                 MirRelationExpr::constant(vec![vec![]], RelationType::new(vec![])).let_in(
                     &mut id_gen,
                     |id_gen, get_outer| {

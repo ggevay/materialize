@@ -20,9 +20,15 @@ use prometheus::{HistogramVec, IntCounterVec};
 /// Optimizer metrics.
 #[derive(Debug, Clone)]
 pub struct OptimizerMetrics {
+    //e2e
     e2e_optimization_time_seconds: HistogramVec,
     e2e_optimization_time_seconds_log_threshold: Duration,
+
+    // HIR-to-MIR lowering
     outer_join_lowering_cases: IntCounterVec,
+    subquery_cases: IntCounterVec,
+
+    // MIR
     transform_hits: IntCounterVec,
     transform_total: IntCounterVec,
     /// Local storage of transform times; these are emitted as part of the
@@ -46,6 +52,11 @@ impl OptimizerMetrics {
             outer_join_lowering_cases: registry.register(metric!(
                 name: "outer_join_lowering_cases",
                 help: "How many times the different outer join lowering cases happened.",
+                var_labels: ["case"],
+            )),
+            subquery_cases: registry.register(metric!(
+                name: "subquery_cases",
+                help: "How many times the different subquery cases happened.",
                 var_labels: ["case"],
             )),
             transform_hits: registry.register(metric!(
@@ -94,6 +105,10 @@ impl OptimizerMetrics {
         self.outer_join_lowering_cases
             .with_label_values(&[case])
             .inc()
+    }
+
+    pub fn inc_subquery(&self, case: &str) {
+        self.subquery_cases.with_label_values(&[case]).inc()
     }
 
     pub fn inc_transform(&self, hit: bool, transform: &str) {

@@ -9,21 +9,25 @@
 
 //! Transformations of SQL IR, before decorrelation.
 
+use std::collections::btree_map::Entry::{Occupied, Vacant};
 use std::collections::{BTreeMap, BTreeSet};
+use std::num::NonZeroUsize;
 use std::sync::LazyLock;
 use std::{iter, mem};
 
 use itertools::Itertools;
-use mz_expr::visit::Visit;
-use mz_expr::WindowFrame;
+use mz_expr::visit::{Visit, VisitChildren};
 use mz_expr::{ColumnOrder, UnaryFunc, VariadicFunc};
+use mz_expr::{Id, LocalId, WindowFrame};
 use mz_ore::stack::RecursionLimitError;
+use mz_ore::{soft_assert_eq_or_log, soft_assert_or_log};
 use mz_repr::{ColumnName, ColumnType, RelationType, ScalarType};
 
 use crate::plan::hir::{
     AbstractExpr, AggregateFunc, AggregateWindowExpr, ColumnRef, HirRelationExpr, HirScalarExpr,
     ValueWindowExpr, ValueWindowFunc, WindowExpr,
 };
+use crate::plan::lowering::Context;
 use crate::plan::{AggregateExpr, WindowExprType};
 
 /// Rewrites predicates that contain subqueries so that the subqueries
@@ -395,7 +399,7 @@ impl HirScalarExpr {
 /// columns in the group.)
 pub fn fuse_window_functions(
     root: &mut HirRelationExpr,
-    _context: &crate::plan::lowering::Context,
+    _context: &Context,
 ) -> Result<(), RecursionLimitError> {
     /// Those options of a window function call that are relevant for fusion.
     #[derive(PartialEq, Eq)]
@@ -742,4 +746,218 @@ pub fn fuse_window_functions(
         }
         Ok(())
     })
+}
+
+/// /////////// todo: comments
+#[derive(Default)]
+struct SubqueryProperties {
+    is_correlated: bool,
+    has_external_gets: bool,
+    refers_to_direct_parent_scope: bool,
+}
+
+/// ////////////////////// comment todo
+pub fn collect_subquery_metrics(
+    root: &HirRelationExpr,
+    context: &Context,
+) -> Result<(), RecursionLimitError> {
+    //////////////// todo: update comment: we are meddling with not just the last element.
+    // During the traversal, the last element of this Vec will keep track of traversal state for the
+    // innermost subquery that we are currently in. (Index 0 of the Vec will keep track of state at
+    // the outermost level, that is, outside any subqueries.) We'll push a new element to the Vec
+    // when we enter a subquery, and pop it off when we exit that subquery.
+    //
+    // The `BTreeMap` will keep track of LocalIds defined within the current subquery. It's a
+    // BTreeMap to a NonZeroUsize rather than simply a BTreeSet, because shadowing is allowed in
+    // HIR, so an id might be defined multiple times above us.
+    //
+    // The `bool` will keep track of whether the current subquery has any external Gets:
+    // when we see a Get to a LocalId, we'll check whether that id is in scope within the current
+    // subquery (if we are inside a subquery).
+    type TraversalState = Vec<(BTreeMap<LocalId, NonZeroUsize>, SubqueryProperties)>;
+    let mut state: TraversalState = vec![Default::default()];
+
+    fn add_binding(state: &mut TraversalState, id: &LocalId) {
+        let (local_ids, _) = state
+            .last_mut()
+            .expect("non-empty, because we have an element even for the topmost level");
+        // insert 1 or increment
+        match local_ids.entry(*id) {
+            Vacant(entry) => {
+                entry.insert(NonZeroUsize::new(1).unwrap());
+            }
+            Occupied(entry) => {
+                entry
+                    .into_mut()
+                    .get()
+                    .checked_add(1)
+                    .and_then(NonZeroUsize::new)
+                    .expect("number of Lets shouldn't overflow usize::MAX");
+            }
+        };
+    }
+
+    fn remove_binding(state: &mut TraversalState, id: &LocalId) {
+        let (local_ids, _) = state
+            .last_mut()
+            .expect("non-empty, because we have an element even for the topmost level");
+        // decrement or remove
+        let count = local_ids
+            .get_mut(id)
+            .expect("add_binding and remove_binding should come in pairs");
+        if count.get() > 1 {
+            *count = NonZeroUsize::new(count.get() - 1).expect("the if checked it");
+        } else {
+            local_ids.remove(id);
+        }
+    }
+
+    // We do a custom traversal (the walk_relation-walk_scalar dance).
+    // (Unfortunately, we couldn't use `visit_pre_post`, because if we were to bring an id into
+    // scope in the `pre` when we see a `Let`, then the problem is that we'd consider it to be in
+    // scope while visiting the definition of the `Let` (not just the body). This is problematic,
+    // because shadowing _is_ allowed in HIR, so it might happen that the definition of an id refers
+    // to an id that looks like itself, but actually it's defined outside the `Let`.)
+
+    // We'll need a higher-rank closure to call `try_visit_children`. See de4d33de2ed50e for why the
+    // trait is designed this way.
+    fn make_scalar_child_visitor<'outer>(
+        state: &'outer mut TraversalState,
+        context: &'outer Context,
+    ) -> impl for<'any> FnMut(&'any HirScalarExpr) -> Result<(), RecursionLimitError> + 'outer {
+        move |scalar_expr| walk_scalar(scalar_expr, state, context)
+    }
+
+    fn walk_relation(
+        expr: &HirRelationExpr,
+        state: &mut TraversalState,
+        context: &Context,
+    ) -> Result<(), RecursionLimitError> {
+        match expr {
+            // Manage bindings.
+            HirRelationExpr::Let {
+                name: _,
+                id,
+                value,
+                body,
+            } => {
+                // Walk the definition of `id` before bringing `id` into scope, to avoid shadowing
+                // issues.
+                walk_relation(value, state, context)?;
+                add_binding(state, id);
+                walk_relation(body, state, context)?;
+                remove_binding(state, id);
+            }
+            HirRelationExpr::LetRec {
+                limit: _,
+                bindings,
+                body,
+            } => {
+                for (_, id, value, _) in bindings {
+                    walk_relation(value, state, context)?;
+                    add_binding(state, id);
+                }
+                walk_relation(body, state, context)?;
+                for (_, id, _, _) in bindings {
+                    remove_binding(state, id);
+                }
+            }
+
+            // Detect external Gets.
+            HirRelationExpr::Get {
+                id: Id::Global(..),
+                typ: _,
+            } => {
+                // This is an external Get in all enclosing subqueries.
+                for (_, subquery_properties) in state.iter_mut() {
+                    subquery_properties.has_external_gets = true;
+                }
+            }
+            HirRelationExpr::Get {
+                id: Id::Local(id),
+                typ: _,
+            } => {
+                // Walk state upwards until finding the definition, and mark each subquery on the
+                // way.
+                for (_, subquery_properties) in state
+                    .iter_mut()
+                    .rev()
+                    .take_while(|(local_ids, _)| !local_ids.contains_key(&id))
+                {
+                    subquery_properties.has_external_gets = true;
+                }
+            }
+
+            // Drive the recursion.
+            expr => {
+                expr.try_visit_children(&mut make_scalar_child_visitor(state, context))?;
+                // /////////// TODO: eliminate `_`
+                #[allow(deprecated)]
+                let _ = expr.visit1(0, &mut |child_expr, _| -> Result<(), RecursionLimitError> {
+                    walk_relation(child_expr, state, context)
+                });
+            }
+        }
+        Ok(())
+    }
+
+    fn walk_scalar(
+        expr: &HirScalarExpr,
+        state: &mut TraversalState,
+        context: &Context,
+    ) -> Result<(), RecursionLimitError> {
+        expr.try_visit_pre(&mut |e| {
+            match e {
+                HirScalarExpr::Column(ColumnRef { level, .. }) => {
+                    // Mark `level` enclosing subqueries as correlated.
+                    println!(">>>>>> level: {}", level);
+                    for (_, subquery_properties) in state.iter_mut().rev().take(*level) {
+                        subquery_properties.is_correlated = true;
+                    }
+                    if *level == 1 {
+                        // ///////// todo: only "soft expect"
+                        state.last_mut().expect("reference to outer scope without outer scope")
+                    }
+                }
+                HirScalarExpr::Exists(input) | HirScalarExpr::Select(input) => {
+                    state.push(Default::default());
+                    walk_relation(input, state, context)?;
+                    let (_, subquery_properties) = state.pop().expect("just pushed above");
+                    if let Some(metrics) = context.metrics {
+                        match (
+                            subquery_properties.is_correlated,
+                            subquery_properties.has_external_gets,
+                        ) {
+                            // Why would you write such a query?
+                            (false, false) => metrics.inc_subquery("constant"),
+                            // This is the happy case for
+                            // https://github.com/MaterializeInc/database-issues/issues/6538
+                            (true, false) => metrics.inc_subquery("correlated-no-external-gets"),
+                            // Should be ~easy
+                            (false, true) => metrics.inc_subquery("uncorrelated-has-external-gets"),
+                            // Complex decorrelation needed
+                            (true, true) => metrics.inc_subquery("correlated-has-external-gets"),
+                        }
+                    }
+                }
+                _ => {}
+            }
+            Ok(())
+        })?;
+        Ok(())
+    }
+
+    walk_relation(root, &mut state, context)?;
+
+    println!("\n######\n{:?}\n", root); /////////////////////////
+
+    // soft_assert_eq_or_log!(state.len(), 1, "Internal error in `collect_subquery_metrics`: state stack imbalance");
+    // soft_assert_or_log!(state.last().is_some_and(|(local_ids, _)| {
+    //     local_ids.is_empty()
+    // }), "Internal error in `collect_subquery_metrics`: local_ids not cleaned up");
+    // soft_assert_or_log!(state.last().is_some_and(|(_, subquery_properties)| {
+    //     !subquery_properties.is_correlated
+    // }), "Internal error in `collect_subquery_metrics` OR invalid HIR: col ref to outer scope from top level");
+
+    Ok(())
 }

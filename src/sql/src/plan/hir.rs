@@ -1793,6 +1793,9 @@ impl HirRelationExpr {
         f(self, depth)
     }
 
+    /// WARNING: Be careful that `VisitChildren<HirRelationExpr>::try_visit_children`
+    /// is NOT a drop-in replacement: that also visits relation exprs hidden inside subqueries that
+    /// are direct relation children of direct scalar children of `self` (i.e., subqueries)!
     #[deprecated = "Use `VisitChildren<HirRelationExpr>::try_visit_children` instead."]
     pub fn visit1<'a, F, E>(&'a self, depth: usize, mut f: F) -> Result<(), E>
     where
@@ -1880,6 +1883,9 @@ impl HirRelationExpr {
         f(self, depth)
     }
 
+    /// WARNING: Be careful that `VisitChildren<HirRelationExpr>::try_visit_mut_children`
+    /// is NOT a drop-in replacement: that also visits relation exprs hidden inside subqueries that
+    /// are direct relation children of direct scalar children of `self` (i.e., subqueries)!
     #[deprecated = "Use `VisitChildren<HirRelationExpr>::try_visit_mut_children` instead."]
     pub fn visit1_mut<'a, F, E>(&'a mut self, depth: usize, mut f: F) -> Result<(), E>
     where
