@@ -546,8 +546,8 @@ impl HirRelationExpr {
                     right,
                     on,
                     kind,
-                } if right.is_correlated() => {
-                    // A correlated join is a join in which the right expression has
+                } if right.refers_to_direct_parent_scope() => {
+                    // A lateral join is a join in which the right expression has
                     // access to the columns in the left expression. It turns out
                     // this is *exactly* our branch operator, plus some additional
                     // null handling in the case of left joins. (Right and full
@@ -556,7 +556,7 @@ impl HirRelationExpr {
                     // As with normal joins, the `on` predicate may be correlated,
                     // and we treat it as a filter that follows the branch.
 
-                    assert!(kind.can_be_correlated());
+                    assert!(kind.can_be_lateral());
 
                     let left = left.applied_to(id_gen, get_outer, col_map, cte_map, context)?;
                     left.let_in(id_gen, |id_gen, get_left| {

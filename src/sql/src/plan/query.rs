@@ -3500,7 +3500,7 @@ fn plan_join(
     };
 
     let mut right_qcx = left_qcx.derived_context(left_scope.clone(), left_qcx.relation_type(&left));
-    if !kind.can_be_correlated() {
+    if !kind.can_be_lateral() {
         for item in &mut right_qcx.outer_scopes[0].items {
             // Per PostgreSQL (and apparently SQL:2008), we can't simply remove
             // these items from scope. These items need to *exist* because they

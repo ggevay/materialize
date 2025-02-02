@@ -1071,7 +1071,7 @@ impl fmt::Display for JoinKind {
 }
 
 impl JoinKind {
-    pub fn can_be_correlated(&self) -> bool {
+    pub fn can_be_lateral(&self) -> bool {
         match self {
             JoinKind::Inner | JoinKind::LeftOuter => true,
             JoinKind::RightOuter | JoinKind::FullOuter => false,
@@ -1565,9 +1565,10 @@ impl HirRelationExpr {
         }
     }
 
-    /// Reports whether this expression contains a column reference to its
-    /// direct parent scope.
-    pub fn is_correlated(&self) -> bool {
+    /// Reports whether this expression contains a column reference to its direct parent scope,
+    /// i.e., to the scope that is just above us. (This fn can be used to check for lateral joins,
+    /// but not for correlated subqueries in general.)
+    pub fn refers_to_direct_parent_scope(&self) -> bool {
         let mut correlated = false;
         #[allow(deprecated)]
         self.visit_columns(0, &mut |depth, col| {
@@ -1733,7 +1734,9 @@ impl HirRelationExpr {
         on: HirScalarExpr,
         kind: JoinKind,
     ) -> HirRelationExpr {
-        if self.is_join_identity() && !right.is_correlated() && on == HirScalarExpr::literal_true()
+        if self.is_join_identity()
+            && !right.refers_to_direct_parent_scope()
+            && on == HirScalarExpr::literal_true()
         {
             // The join can be elided, but we need to adjust column references
             // on the right-hand side to account for the removal of the scope

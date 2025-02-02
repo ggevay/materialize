@@ -106,7 +106,7 @@ pub(crate) fn attempt_left_join_magic(
     for (index, (right, on)) in rights.into_iter().rev().enumerate() {
         // Correlated right expressions are handled in a different branch than standard
         // outer join lowering, and I don't know what they mean. Fail conservatively.
-        if right.is_correlated() {
+        if right.refers_to_direct_parent_scope() {
             tracing::debug!(case = 2, index, "attempt_left_join_magic");
             inc_metrics("voj_2");
             return Ok(None);
