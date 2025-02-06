@@ -717,6 +717,8 @@ impl<'a> BuiltinTableAppend<'a> {
     /// Note: When in read-only mode, this will buffer the update and return
     /// immediately.
     pub fn background(self, mut updates: Vec<BuiltinTableUpdate>) {
+        println!("\n###### BuiltinTableAppend::background\n");
+
         if self.coord.controller.read_only() {
             self.coord
                 .buffered_builtin_table_updates
@@ -742,6 +744,10 @@ impl<'a> BuiltinTableAppend<'a> {
     /// returned future will resolve immediately, without the update actually
     /// having been written.
     pub fn defer(self, mut updates: Vec<BuiltinTableUpdate>) -> BuiltinTableAppendNotify {
+        println!("\n###### BuiltinTableAppend::defer\n");
+        // use std::backtrace::Backtrace;
+        // println!("Custom backtrace:\n{}", Backtrace::force_capture());
+
         if self.coord.controller.read_only() {
             self.coord
                 .buffered_builtin_table_updates
@@ -775,6 +781,8 @@ impl<'a> BuiltinTableAppend<'a> {
         self,
         mut updates: Vec<BuiltinTableUpdate>,
     ) -> (BuiltinTableAppendNotify, Option<Timestamp>) {
+        println!("\n###### BuiltinTableAppend::execute\n");
+
         if self.coord.controller.read_only() {
             self.coord
                 .buffered_builtin_table_updates
@@ -815,6 +823,8 @@ impl<'a> BuiltinTableAppend<'a> {
     /// returned future will resolve immediately, without the update actually
     /// having been written.
     pub async fn blocking(self, updates: Vec<BuiltinTableUpdate>) {
+        println!("\n###### BuiltinTableAppend::blocking\n");
+
         let (notify, _) = self.execute(updates).await;
         notify.await;
     }

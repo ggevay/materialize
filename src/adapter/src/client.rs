@@ -215,7 +215,7 @@ impl Client {
         // Before we do ANYTHING, we need to wait for our BuiltinTable writes to complete. We wait
         // for the writes here, as opposed to during the Startup command, because we don't want to
         // block the coordinator on a Builtin Table write.
-        write_notify.await;
+        ///////////write_notify.await;
 
         let session = client.session();
         session.initialize_role_metadata(role_id);

@@ -189,6 +189,8 @@ impl Coordinator {
             return Err(AdapterError::ReadOnly);
         }
 
+        println!("------------- catalog_transact_inner");
+
         event!(Level::TRACE, ops = format!("{:?}", ops));
 
         let mut sources_to_drop = vec![];
