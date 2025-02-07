@@ -12,7 +12,7 @@ use std::str::FromStr;
 use std::sync::Arc;
 
 use http::Uri;
-use itertools::Either;
+use itertools::{Either, Itertools};
 use maplit::btreemap;
 use mz_compute_types::sinks::ComputeSinkConnection;
 use mz_controller_types::ClusterId;
@@ -23,7 +23,7 @@ use mz_repr::explain::{ExprHumanizerExt, TransientItem};
 use mz_repr::optimize::{OptimizerFeatures, OverrideFrom};
 use mz_repr::{Datum, GlobalId, RowArena, Timestamp};
 use mz_sql::ast::{ExplainStage, Statement};
-use mz_sql::catalog::CatalogCluster;
+use mz_sql::catalog::{CatalogCluster, SessionCatalog};
 // Import `plan` module, but only import select elements to avoid merge conflicts on use statements.
 use mz_catalog::memory::objects::CatalogItem;
 use mz_sql::plan::QueryWhen;
@@ -33,7 +33,7 @@ use mz_transform::EmptyStatisticsOracle;
 use tokio::sync::oneshot;
 use tracing::warn;
 use tracing::{Instrument, Span};
-
+use mz_sql::names::{ItemQualifiers, QualifiedItemName, ResolvedDatabaseSpecifier, SchemaSpecifier};
 use crate::active_compute_sink::{ActiveComputeSink, ActiveCopyTo};
 use crate::command::ExecuteResponse;
 use crate::coord::id_bundle::CollectionIdBundle;
@@ -88,7 +88,7 @@ impl Staged for PeekStage {
                 coord.peek_real_time_recency(ctx.session(), stage).await
             }
             PeekStage::TimestampReadHold(stage) => {
-                coord.peek_timestamp_read_hold(ctx.session_mut(), stage)
+                coord.peek_timestamp_read_hold(ctx.session_mut(), stage).await
             }
             PeekStage::Optimize(stage) => coord.peek_optimize(ctx.session(), stage).await,
             PeekStage::Finish(stage) => coord.peek_finish(ctx, stage).await,
@@ -461,7 +461,7 @@ impl Coordinator {
 
     /// Determine a read timestamp and create appropriate read holds.
     #[instrument]
-    fn peek_timestamp_read_hold(
+    async fn peek_timestamp_read_hold(
         &mut self,
         session: &mut Session,
         PeekStageTimestampReadHold {
@@ -485,6 +485,30 @@ impl Coordinator {
             .dataflow_builder(cluster_id)
             .sufficient_collections(source_ids.iter().copied());
 
+
+
+        let schema_id = self.catalog().get_mz_internal_schema_id(); ///////// todo: base on MZ_SESSIONS
+        let name = QualifiedItemName {
+            qualifiers: ItemQualifiers {
+                database_spec: ResolvedDatabaseSpecifier::Ambient,
+                schema_spec: SchemaSpecifier::Id(schema_id),
+            },
+            item: "mz_sessions".to_string(), ///////// todo: get from MZ_SESSIONS
+        };
+
+        let mz_sessions_id = self.catalog().for_session(session).get_item_by_name(&name).expect("aaaaaaaaaaaaaaa").id();
+
+        ///////// todo: how to make a GlobalId from a CatalogItemId?
+        let mz_sessions_id = match mz_sessions_id {
+            mz_repr::CatalogItemId::System(x) => GlobalId::System(x),
+            _ => unreachable!(),
+        };
+
+        if id_bundle.iter().contains(&mz_sessions_id) { ///////// todo: don't iter
+            session.clear_builtin_table_updates().await;
+        }
+
+
         // Although we have added `sources.depends_on()` to the validity already, also add the
         // sufficient collections for safety.
         let item_ids = id_bundle
@@ -502,7 +526,7 @@ impl Coordinator {
             &source_ids,
             real_time_recency_ts,
             (&explain_ctx).into(),
-        )?;
+        ).await?;
 
         let stage = PeekStage::Optimize(PeekStageOptimize {
             validity,
@@ -1132,7 +1156,7 @@ impl Coordinator {
     /// Determines the query timestamp and acquires read holds on dependent sources
     /// if necessary.
     #[instrument]
-    pub(super) fn sequence_peek_timestamp(
+    pub(super) async fn sequence_peek_timestamp(
         &mut self,
         session: &mut Session,
         when: &QueryWhen,

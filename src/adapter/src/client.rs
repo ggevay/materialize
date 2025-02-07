@@ -612,7 +612,7 @@ impl SessionClient {
         // TODO(parkmycar): It would be great if we could push this waiting down a layer, after
         // we've planned a query. This way we could only block if a query depends on a relevant
         // internal table.
-        self.session().clear_builtin_table_updates().await;
+        ////////////        self.session().clear_builtin_table_updates().await;
 
         let response = self
             .send_with_cancel(

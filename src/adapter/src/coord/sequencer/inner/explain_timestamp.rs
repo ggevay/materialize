@@ -332,7 +332,7 @@ impl Coordinator {
             &source_ids,
             real_time_recency_ts,
             RequireLinearization::NotRequired,
-        )?;
+        ).await?;
         let explanation = self.explain_timestamp(session, cluster_id, &id_bundle, determination);
 
         let s = if is_json {
