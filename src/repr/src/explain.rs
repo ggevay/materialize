@@ -643,10 +643,27 @@ where
     T: ScalarOps,
     I: Iterator<Item = T> + Clone;
 
+/// Abstracts certain operations on scalar expressions, needed when EXPLAINing various expression
+/// types, e.g., HIR and MIR. `Self` is an expression type.
 pub trait ScalarOps {
+    /// Matches a column reference (e.g. an `MirScalarExpr::Column` or `HirScalarExpr::Column`) and
+    /// returns the position of the referred column as a `usize`.
     fn match_col_ref(&self) -> Option<usize>;
 
+    /// Returns whether the self is an expression referring to the given column.
     fn references(&self, col_ref: usize) -> bool;
+}
+
+/// Trivial implementation of [`ScalarOps`] for when the column reference is already represented as
+/// a usize.
+impl ScalarOps for usize {
+    fn match_col_ref(&self) -> Option<usize> {
+        Some(*self)
+    }
+
+    fn references(&self, col_ref: usize) -> bool {
+        col_ref == *self
+    }
 }
 
 /// A somewhat ad-hoc way to keep carry a plan with a set

@@ -1173,23 +1173,16 @@ where
     }
 }
 
-impl<'a, M> ScalarOps for HumanizedExpr<'a, MirScalarExpr, M> {
+impl<'a, T, M> ScalarOps for HumanizedExpr<'a, T, M>
+where
+    T: ScalarOps,
+{
     fn match_col_ref(&self) -> Option<usize> {
         self.expr.match_col_ref()
     }
 
     fn references(&self, col_ref: usize) -> bool {
         self.expr.references(col_ref)
-    }
-}
-
-impl<'a, M> ScalarOps for HumanizedExpr<'a, usize, M> {
-    fn match_col_ref(&self) -> Option<usize> {
-        Some(*self.expr)
-    }
-
-    fn references(&self, col_ref: usize) -> bool {
-        col_ref == *self.expr
     }
 }
 
