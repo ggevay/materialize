@@ -82,7 +82,7 @@ where
         let PushdownInfo { pushdown } = self.expr;
 
         if !pushdown.is_empty() {
-            let pushdown = pushdown.iter().map(|e| self.mode.expr(*e, self.cols));
+            let pushdown = pushdown.iter().map(|e| self.child(*e));
             let pushdown = separated(" AND ", pushdown);
             writeln!(f, "{}pushdown=({})", ctx.as_mut(), pushdown)?;
         }
