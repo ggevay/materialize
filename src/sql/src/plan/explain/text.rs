@@ -20,13 +20,13 @@
 
 use itertools::Itertools;
 use std::fmt;
-
-use mz_expr::explain::{fmt_text_constant_rows, HumanizedExplain, HumanizerMode};
+use std::iter::Map;
+use mz_expr::explain::{fmt_text_constant_rows, HumanizedExplain, HumanizedExpr, HumanizerMode};
 use mz_expr::virtual_syntax::{AlgExcept, Except};
 use mz_expr::{Id, WindowFrame};
 use mz_ore::str::{separated, IndentLike};
 use mz_repr::explain::text::DisplayText;
-use mz_repr::explain::{CompactScalarSeq, Indices, PlanRenderingContext};
+use mz_repr::explain::{CompactScalars, Indices, PlanRenderingContext, ScalarOps};
 
 use crate::plan::{AggregateExpr, Hir, HirRelationExpr, HirScalarExpr, JoinKind, WindowExprType};
 
@@ -77,6 +77,8 @@ impl HirRelationExpr {
         use HirRelationExpr::*;
 
         let mode = HumanizedExplain::new(ctx.config.redacted);
+        let humanize = |expr: &HirScalarExpr| {HumanizedHirExpr(HumanizedExpr{expr, cols: None, mode: mode.clone()})};
+        let humanize_seq = |exprs: &[HirScalarExpr]| {exprs.iter().map(move |expr| humanize(expr))};
 
         match &self {
             Constant { rows, .. } => {
@@ -168,16 +170,16 @@ impl HirRelationExpr {
                 ctx.indented(|ctx| input.fmt_text(f, ctx))?;
             }
             Map { scalars, input } => {
-                let scalars = CompactScalarSeq(scalars);
+                let scalars = CompactScalars(humanize_seq(scalars));
                 writeln!(f, "{}Map ({})", ctx.indent, scalars)?;
                 ctx.indented(|ctx| input.fmt_text(f, ctx))?;
             }
             CallTable { func, exprs } => {
-                let exprs = CompactScalarSeq(exprs);
+                let exprs = CompactScalars(humanize_seq(exprs));
                 writeln!(f, "{}CallTable {}({})", ctx.indent, func, exprs)?;
             }
             Filter { predicates, input } => {
-                let predicates = separated(" AND ", predicates);
+                let predicates = separated(" AND ", humanize_seq(predicates));
                 writeln!(f, "{}Filter {}", ctx.indent, predicates)?;
                 ctx.indented(|ctx| input.fmt_text(f, ctx))?;
             }
@@ -190,7 +192,7 @@ impl HirRelationExpr {
                 if on.is_literal_true() && kind == &JoinKind::Inner {
                     write!(f, "{}CrossJoin", ctx.indent)?;
                 } else {
-                    write!(f, "{}{}Join {}", ctx.indent, kind, on)?;
+                    write!(f, "{}{}Join {}", ctx.indent, kind, humanize(on))?;
                 }
                 writeln!(f)?;
                 ctx.indented(|ctx| {
@@ -243,7 +245,7 @@ impl HirRelationExpr {
                     write!(f, " order_by=[{}]", order_by)?;
                 }
                 if let Some(limit) = limit {
-                    write!(f, " limit={}", limit)?;
+                    write!(f, " limit={}", humanize(limit))?;
                 }
                 if offset > &0 {
                     write!(f, " offset={}", offset)?
@@ -278,11 +280,222 @@ impl HirRelationExpr {
     }
 }
 
-impl fmt::Display for HirScalarExpr {
+// impl fmt::Display for HirScalarExpr {
+//     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+//         use HirRelationExpr::Get;
+//         use HirScalarExpr::*;
+//         match self {
+//             Column(i) => write!(
+//                 f,
+//                 "#{}{}",
+//                 (0..i.level).map(|_| '^').collect::<String>(),
+//                 i.column
+//             ),
+//             Parameter(i) => write!(f, "${}", i),
+//             Literal(row, _) => write!(f, "{}", row.unpack_first()),
+//             CallUnmaterializable(func) => write!(f, "{}()", func),
+//             CallUnary { func, expr } => {
+//                 if let mz_expr::UnaryFunc::Not(_) = *func {
+//                     if let CallUnary { func, expr } = expr.as_ref() {
+//                         if let Some(is) = func.is() {
+//                             return write!(f, "({}) IS NOT {}", expr, is);
+//                         }
+//                     }
+//                 }
+//                 if let Some(is) = func.is() {
+//                     write!(f, "({}) IS {}", expr, is)
+//                 } else {
+//                     write!(f, "{}({})", func, expr)
+//                 }
+//             }
+//             CallBinary { func, expr1, expr2 } => {
+//                 if func.is_infix_op() {
+//                     write!(f, "({} {} {})", expr1, func, expr2)
+//                 } else {
+//                     write!(f, "{}({}, {})", func, expr1, expr2)
+//                 }
+//             }
+//             CallVariadic { func, exprs } => {
+//                 use mz_expr::VariadicFunc::*;
+//                 match func {
+//                     ArrayCreate { .. } => {
+//                         let exprs = separated(", ", exprs);
+//                         write!(f, "array[{}]", exprs)
+//                     }
+//                     ListCreate { .. } => {
+//                         let exprs = separated(", ", exprs);
+//                         write!(f, "list[{}]", exprs)
+//                     }
+//                     RecordCreate { .. } => {
+//                         let exprs = separated(", ", exprs);
+//                         write!(f, "row({})", exprs)
+//                     }
+//                     func if func.is_infix_op() && exprs.len() > 1 => {
+//                         let func = format!(" {} ", func);
+//                         let exprs = separated(&func, exprs);
+//                         write!(f, "({})", exprs)
+//                     }
+//                     func => {
+//                         let exprs = separated(", ", exprs);
+//                         write!(f, "{}({})", func, exprs)
+//                     }
+//                 }
+//             }
+//             If { cond, then, els } => {
+//                 write!(f, "case when {} then {} else {} end", cond, then, els)
+//             }
+//             Windowing(expr) => {
+//                 // First, print
+//                 // - the window function name
+//                 // - the arguments.
+//                 // Also, dig out some info from the `func`.
+//                 let (column_orders, ignore_nulls, window_frame) = match &expr.func {
+//                     WindowExprType::Scalar(scalar_window_expr) => {
+//                         write!(f, "{}()", scalar_window_expr.func)?;
+//                         (&scalar_window_expr.order_by, false, None)
+//                     }
+//                     WindowExprType::Value(value_window_expr) => {
+//                         write!(f, "{}({})", value_window_expr.func, value_window_expr.args)?;
+//                         (
+//                             &value_window_expr.order_by,
+//                             value_window_expr.ignore_nulls,
+//                             Some(&value_window_expr.window_frame),
+//                         )
+//                     }
+//                     WindowExprType::Aggregate(aggregate_window_expr) => {
+//                         write!(f, "{}", aggregate_window_expr.aggregate_expr)?;
+//                         (
+//                             &aggregate_window_expr.order_by,
+//                             false,
+//                             Some(&aggregate_window_expr.window_frame),
+//                         )
+//                     }
+//                 };
+//
+//                 // Reconstruct the ORDER BY (see comment on `WindowExpr.order_by`).
+//                 // We assume that the `column_order.column`s refer to each of the expressions in
+//                 // `expr.order_by` in order. This is a consequence of how `plan_function_order_by`
+//                 // works.
+//                 assert!(column_orders
+//                     .iter()
+//                     .enumerate()
+//                     .all(|(i, column_order)| i == column_order.column));
+//                 let order_by = column_orders
+//                     .iter()
+//                     .zip_eq(expr.order_by.iter())
+//                     .map(|(column_order, expr)| {
+//                         ColumnOrderWithExpr {
+//                             expr: expr.clone(),
+//                             desc: column_order.desc,
+//                             nulls_last: column_order.nulls_last,
+//                         }
+//                         // (We can ignore column_order.column because of the above assert.)
+//                     })
+//                     .collect_vec();
+//
+//                 // Print IGNORE NULLS if present.
+//                 if ignore_nulls {
+//                     write!(f, " ignore nulls")?;
+//                 }
+//
+//                 // Print the OVER clause.
+//                 // This is close to the SQL syntax, but we are adding some [] to make it easier to
+//                 // read.
+//                 write!(f, " over (")?;
+//                 if !expr.partition_by.is_empty() {
+//                     write!(
+//                         f,
+//                         "partition by [{}] ",
+//                         separated(", ", expr.partition_by.iter())
+//                     )?;
+//                 }
+//                 write!(f, "order by [{}]", separated(", ", order_by.iter()))?;
+//                 if let Some(window_frame) = window_frame {
+//                     if *window_frame != WindowFrame::default() {
+//                         write!(f, " {}", window_frame)?;
+//                     }
+//                 }
+//                 write!(f, ")")?;
+//
+//                 Ok(())
+//             }
+//             Exists(expr) => match expr.as_ref() {
+//                 Get { id, .. } => write!(f, "exists(Get {})", id), // TODO: optional humanizer
+//                 _ => write!(f, "exists(???)"),
+//             },
+//             Select(expr) => match expr.as_ref() {
+//                 Get { id, .. } => write!(f, "select(Get {})", id), // TODO: optional humanizer
+//                 _ => write!(f, "select(???)"),
+//             },
+//         }
+//     }
+// }
+
+
+pub struct HumanizedHirExpr<'a, T, M = HumanizedExplain>(HumanizedExpr<'a, T, M>);
+
+impl<'a, T, M: HumanizerMode> HumanizedHirExpr<'a, T, M> {
+    /// Wrap the given child `expr` into a [`HumanizedHirExpr`] using the same
+    /// `cols` and `mode` as `self`.
+    pub fn child<U>(&self, expr: &'a U) -> HumanizedHirExpr<'a, U, M> {
+        HumanizedHirExpr(self.0.child(expr))
+    }
+
+    pub fn wrapper_fns<I2>(mode: &M) -> (
+        impl for<'b> Fn(&'b T) -> HumanizedHirExpr<'b, T, M> + use<'_, T, M, I2>,
+        //impl for<'b> Fn(&'b [T]) -> Map<std::slice::Iter<'b, T>, fn(&'b HirScalarExpr) -> HumanizedHirExpr<'b, HirScalarExpr, M>>, //////impl Iterator<Item = HumanizedHirExpr<'b, T, M>> + Clone,
+        impl for<'b> Fn(&'b [T]) -> I2, //////impl Iterator<Item = HumanizedHirExpr<'b, T, M>> + Clone,
+    )
+    // where
+    //     I: Iterator<Item = HirScalarExpr>,
+    where
+        I2: impl Iterator<Item = HumanizedHirExpr<'a, T, M>>,
+    {
+
+        // let humanize = |expr: &HirScalarExpr| {HumanizedHirExpr(HumanizedExpr{expr, cols: None, mode: mode.clone()})};
+        // let humanize_seq = |exprs: &[HirScalarExpr]| {exprs.iter().map(move |expr| humanize(expr))};
+
+        //let humanize = |expr| {HumanizedHirExpr(HumanizedExpr{expr, cols: None, mode: mode.clone()})};
+        //let humanize_seq = |exprs: &[HirScalarExpr]| {exprs.iter().map(move |expr| humanize(expr))};
+
+//        (humanize,)
+
+
+        (
+            |expr| {HumanizedHirExpr(HumanizedExpr{expr, cols: None, mode: mode.clone()})},
+            |exprs| {
+                let xx = mode.clone();
+                exprs.iter().map(move |expr| HumanizedHirExpr(HumanizedExpr{expr, cols: None, mode: xx.clone() }))
+            },
+        )
+    }
+}
+
+impl<'a, T, M> ScalarOps for HumanizedHirExpr<'a, T, M>
+where
+    T: ScalarOps,
+{
+    fn match_col_ref(&self) -> Option<usize> {
+        self.0.match_col_ref()
+    }
+
+    fn references(&self, col_ref: usize) -> bool {
+        self.0.references(col_ref)
+    }
+}
+
+impl<'a, M> fmt::Display for HumanizedHirExpr<'a, HirScalarExpr, M>
+where
+    M: HumanizerMode,
+{
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         use HirRelationExpr::Get;
         use HirScalarExpr::*;
-        match self {
+
+        let humanize = |expr: &HirScalarExpr| {HumanizedHirExpr(HumanizedExpr{expr, cols: None, mode: self.0.mode.clone()})};
+        let humanize_seq = |exprs: &[HirScalarExpr]| {exprs.iter().map(move |expr| humanize(expr))};
+
+        match self.0.expr {
             Column(i) => write!(
                 f,
                 "#{}{}",
@@ -296,10 +509,11 @@ impl fmt::Display for HirScalarExpr {
                 if let mz_expr::UnaryFunc::Not(_) = *func {
                     if let CallUnary { func, expr } = expr.as_ref() {
                         if let Some(is) = func.is() {
-                            return write!(f, "({}) IS NOT {}", expr, is);
+                            return write!(f, "({}) IS NOT {}", humanize(expr), is);
                         }
                     }
                 }
+                let expr = humanize(expr);
                 if let Some(is) = func.is() {
                     write!(f, "({}) IS {}", expr, is)
                 } else {
@@ -307,6 +521,8 @@ impl fmt::Display for HirScalarExpr {
                 }
             }
             CallBinary { func, expr1, expr2 } => {
+                let expr1 = humanize(expr1);
+                let expr2 = humanize(expr2);
                 if func.is_infix_op() {
                     write!(f, "({} {} {})", expr1, func, expr2)
                 } else {
@@ -314,6 +530,7 @@ impl fmt::Display for HirScalarExpr {
                 }
             }
             CallVariadic { func, exprs } => {
+                let exprs = humanize_seq(exprs);
                 use mz_expr::VariadicFunc::*;
                 match func {
                     ArrayCreate { .. } => {
@@ -340,7 +557,7 @@ impl fmt::Display for HirScalarExpr {
                 }
             }
             If { cond, then, els } => {
-                write!(f, "case when {} then {} else {} end", cond, then, els)
+                write!(f, "case when {} then {} else {} end", humanize(cond), humanize(then), humanize(els))
             }
             Windowing(expr) => {
                 // First, print
@@ -353,7 +570,7 @@ impl fmt::Display for HirScalarExpr {
                         (&scalar_window_expr.order_by, false, None)
                     }
                     WindowExprType::Value(value_window_expr) => {
-                        write!(f, "{}({})", value_window_expr.func, value_window_expr.args)?;
+                        write!(f, "{}({})", value_window_expr.func, humanize(&*value_window_expr.args))?;
                         (
                             &value_window_expr.order_by,
                             value_window_expr.ignore_nulls,
@@ -404,7 +621,7 @@ impl fmt::Display for HirScalarExpr {
                     write!(
                         f,
                         "partition by [{}] ",
-                        separated(", ", expr.partition_by.iter())
+                        separated(", ", humanize_seq(&expr.partition_by[..]))
                     )?;
                 }
                 write!(f, "order by [{}]", separated(", ", order_by.iter()))?;
@@ -440,13 +657,14 @@ struct ColumnOrderWithExpr {
     pub nulls_last: bool,
 }
 
+////////////////////// todo: humanize
 impl fmt::Display for ColumnOrderWithExpr {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         // If you modify this, then please also attend to Display for ColumnOrder!
         write!(
             f,
             "{} {} {}",
-            self.expr,
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",////////self.expr,
             if self.desc { "desc" } else { "asc" },
             if self.nulls_last {
                 "nulls_last"
@@ -457,6 +675,7 @@ impl fmt::Display for ColumnOrderWithExpr {
     }
 }
 
+////////////////////// todo: humanize
 impl fmt::Display for AggregateExpr {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         if self.is_count_asterisk() {
@@ -470,7 +689,7 @@ impl fmt::Display for AggregateExpr {
         let distinct = if self.distinct { "distinct " } else { "" };
 
         write!(f, "{}({}", func, distinct)?;
-        self.expr.fmt(f)?;
+        //////////////////////////////self.expr.fmt(f)?;
         write!(f, ")")
     }
 }
