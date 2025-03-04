@@ -89,8 +89,8 @@ pub fn datadriven_testcase(tc: &datadriven::TestCase) -> String {
                     }
                     if parsed != stmt {
                         panic!(
-                            "reparse comparison failed:\n{:?}\n!=\n{:?}\n{printed}\n",
-                            stmt, parsed
+                            "reparse comparison failed:\n{:?}\n!=\n{:?}\n### original SQL:\n{input}\n### printed:\n{printed}\n### reparsed to_ast_string:\n{}",
+                            stmt, parsed, parsed.to_ast_string()
                         );
                     }
                 }
