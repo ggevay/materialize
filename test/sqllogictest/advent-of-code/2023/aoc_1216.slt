@@ -134,7 +134,7 @@ SELECT * FROM part1, part2;
 15  613
 
 query T multiline
-EXPLAIN OPTIMIZED PLAN WITH(humanized expressions, arity, join implementations) AS VERBOSE TEXT FOR
+EXPLAIN PHYSICAL PLAN WITH(humanized expressions, arity, join implementations) AS VERBOSE TEXT FOR
 WITH MUTUALLY RECURSIVE
 
     lines(r INT, line TEXT) AS (
@@ -226,20 +226,30 @@ SELECT * FROM part1, part2;
 Explained Query:
   With Mutually Recursive
     cte l0 =
-      Project (#0, #2, #3) // { arity: 3 }
-        Map (substr(#1, #2, 1)) // { arity: 4 }
-          FlatMap generate_series(1, char_length(#1), 1) // { arity: 3 }
-            Project (#1, #2) // { arity: 2 }
-              Map (array_index(regexp_split_to_array["\n", case_insensitive=false](#0{input}), integer_to_bigint(#1))) // { arity: 3 }
-                FlatMap generate_series(1, (regexp_split_to_array["\n", case_insensitive=false](#0{input}) array_length 1), 1) // { arity: 2 }
-                  ReadStorage materialize.public.input // { arity: 1 }
+      FlatMap generate_series(1, char_length(#1), 1)
+        mfp_after
+          project=(#0, #2, #3)
+          map=(substr(#1, #2, 1))
+        FlatMap generate_series(1, (regexp_split_to_array["\n", case_insensitive=false](#0) array_length 1), 1)
+          mfp_after
+            project=(#1, #2)
+            map=(array_index(regexp_split_to_array["\n", case_insensitive=false](#0), integer_to_bigint(#1)))
+          Get::PassArrangements materialize.public.input
+            raw=true
     cte l1 =
-      ArrangeBy keys=[[#0, #1]] // { arity: 3 }
-        Filter (#2) IS NOT NULL // { arity: 3 }
-          Get l0 // { arity: 3 }
+      ArrangeBy
+        raw=true
+        arrangements[0]={ key=[#0, #1], permutation=id, thinning=(#2) }
+        types=[integer, integer, text]
+        Get::Collection l0
+          filter=((#2) IS NOT NULL)
+          raw=true
     cte l2 =
-      ArrangeBy keys=[[#0, #1]] // { arity: 5 }
-        Constant // { arity: 5 }
+      ArrangeBy
+        raw=true
+        arrangements[0]={ key=[#0, #1], permutation=id, thinning=(#2..=#4) }
+        types=[text, text, integer, integer, text]
+        Constant
           total_rows (diffs absed): 24
           first_rows:
             - ("d", "-", 0, -1, "l")
@@ -263,191 +273,409 @@ Explained Query:
             - ("r", "-", 0, 1, "r")
             - ("r", ".", 0, 1, "r")
     cte l3 =
-      Distinct project=[#0..=#2] // { arity: 3 }
-        Union // { arity: 3 }
-          Project (#11, #12, #10) // { arity: 3 }
-            Map ((#0 + #8), (#1 + #9)) // { arity: 13 }
-              Join on=(#0 = #3 AND #1 = #4 AND #2 = #6 AND #5 = #7) type=differential // { arity: 11 }
-                implementation
-                  %0:l3[#0, #1]KK » %1:l1[#0, #1]KK » %2:l2[#0, #1]KK
-                ArrangeBy keys=[[#0, #1]] // { arity: 3 }
-                  Get l3 // { arity: 3 }
-                Get l1 // { arity: 3 }
-                Get l2 // { arity: 5 }
-          Constant // { arity: 3 }
-            - (1, 1, "r")
+      ArrangeBy
+        input_key=[#0..=#2]
+        raw=true
+        Reduce::Distinct
+          val_plan
+            project=()
+          key_plan=id
+          Union
+            Join::Linear
+              linear_stage[1]
+                closure
+                  project=(#7, #8, #6)
+                  map=((#2 + #4), (#3 + #5))
+                lookup={ relation=2, key=[#0, #1] }
+                stream={ key=[#2, #3], thinning=(#0, #1) }
+              linear_stage[0]
+                lookup={ relation=1, key=[#0, #1] }
+                stream={ key=[#0, #1], thinning=(#2) }
+              source={ relation=0, key=[#0, #1] }
+              ArrangeBy
+                raw=true
+                arrangements[0]={ key=[#0, #1], permutation=id, thinning=(#2) }
+                types=[integer, integer, text]
+                Get::PassArrangements l3
+                  raw=true
+              Get::PassArrangements l1
+                raw=true
+                arrangements[0]={ key=[#0, #1], permutation=id, thinning=(#2) }
+                types=[integer, integer, text]
+              Get::PassArrangements l2
+                raw=true
+                arrangements[0]={ key=[#0, #1], permutation=id, thinning=(#2..=#4) }
+                types=[text, text, integer, integer, text]
+            Constant
+              - (1, 1, "r")
     cte l4 =
-      Project (#0, #1) // { arity: 2 }
-        Get l0 // { arity: 3 }
+      Get::Collection l0
+        project=(#0, #1)
+        raw=true
     cte l5 =
-      Reduce aggregates=[count(*)] // { arity: 1 }
-        Project () // { arity: 0 }
-          Join on=(#0 = #2 AND #1 = #3) type=differential // { arity: 4 }
-            implementation
-              %0[#0, #1]UKKA » %1[#0, #1]UKKA
-            ArrangeBy keys=[[#0, #1]] // { arity: 2 }
-              Distinct project=[#0, #1] // { arity: 2 }
-                Project (#0, #1) // { arity: 2 }
-                  Get l3 // { arity: 3 }
-            ArrangeBy keys=[[#0, #1]] // { arity: 2 }
-              Distinct project=[#0, #1] // { arity: 2 }
-                Get l4 // { arity: 2 }
+      ArrangeBy
+        input_key=[]
+        raw=true
+        Reduce::Accumulable
+          simple_aggrs[0]=(0, 0, count(*))
+          val_plan
+            project=(#0)
+            map=(true)
+          key_plan=id
+          Join::Linear
+            linear_stage[0]
+              closure
+                project=()
+              lookup={ relation=1, key=[#0, #1] }
+              stream={ key=[#0, #1], thinning=() }
+            source={ relation=0, key=[#0, #1] }
+            Reduce::Distinct
+              val_plan
+                project=()
+              key_plan=id
+              Get::Arrangement l3
+                project=(#0, #1)
+                key=#0..=#2
+                raw=true
+                arrangements[0]={ key=[#0..=#2], permutation=id, thinning=() }
+            Reduce::Distinct
+              val_plan
+                project=()
+              key_plan=id
+              Get::PassArrangements l4
+                raw=true
     cte l6 =
-      Project (#1) // { arity: 1 }
-        Get l0 // { arity: 3 }
+      Get::Collection l0
+        project=(#1)
+        raw=true
     cte l7 =
-      Reduce aggregates=[min(#0)] // { arity: 1 }
-        Get l6 // { arity: 1 }
+      ArrangeBy
+        input_key=[]
+        raw=true
+        Reduce::Hierarchical
+          aggr_funcs=[min]
+          skips=[0]
+          buckets=[268435456, 16777216, 1048576, 65536, 4096, 256, 16]
+          val_plan=id
+          key_plan
+            project=()
+          Get::PassArrangements l6
+            raw=true
     cte l8 =
-      Union // { arity: 1 }
-        Get l7 // { arity: 1 }
-        Map (null) // { arity: 1 }
-          Union // { arity: 0 }
-            Negate // { arity: 0 }
-              Project () // { arity: 0 }
-                Get l7 // { arity: 1 }
-            Constant // { arity: 0 }
+      Union
+        Get::PassArrangements l7
+          raw=true
+          arrangements[0]={ key=[], permutation=id, thinning=(#0) }
+        Mfp
+          project=(#0)
+          map=(null)
+          Union consolidate_output=true
+            Negate
+              Get::Arrangement l7
+                project=()
+                key=
+                raw=true
+                arrangements[0]={ key=[], permutation=id, thinning=(#0) }
+            Constant
               - ()
     cte l9 =
-      Reduce aggregates=[max(#0)] // { arity: 1 }
-        Get l6 // { arity: 1 }
+      ArrangeBy
+        input_key=[]
+        raw=true
+        Reduce::Hierarchical
+          aggr_funcs=[max]
+          skips=[0]
+          buckets=[268435456, 16777216, 1048576, 65536, 4096, 256, 16]
+          val_plan=id
+          key_plan
+            project=()
+          Get::PassArrangements l6
+            raw=true
     cte l10 =
-      Union // { arity: 1 }
-        Get l9 // { arity: 1 }
-        Map (null) // { arity: 1 }
-          Union // { arity: 0 }
-            Negate // { arity: 0 }
-              Project () // { arity: 0 }
-                Get l9 // { arity: 1 }
-            Constant // { arity: 0 }
+      Union
+        Get::PassArrangements l9
+          raw=true
+          arrangements[0]={ key=[], permutation=id, thinning=(#0) }
+        Mfp
+          project=(#0)
+          map=(null)
+          Union consolidate_output=true
+            Negate
+              Get::Arrangement l9
+                project=()
+                key=
+                raw=true
+                arrangements[0]={ key=[], permutation=id, thinning=(#0) }
+            Constant
               - ()
     cte l11 =
-      Project (#0) // { arity: 1 }
-        Get l0 // { arity: 3 }
+      Get::Collection l0
+        project=(#0)
+        raw=true
     cte l12 =
-      Reduce aggregates=[min(#0)] // { arity: 1 }
-        Get l11 // { arity: 1 }
+      ArrangeBy
+        input_key=[]
+        raw=true
+        Reduce::Hierarchical
+          aggr_funcs=[min]
+          skips=[0]
+          buckets=[268435456, 16777216, 1048576, 65536, 4096, 256, 16]
+          val_plan=id
+          key_plan
+            project=()
+          Get::PassArrangements l11
+            raw=true
     cte l13 =
-      Union // { arity: 1 }
-        Get l12 // { arity: 1 }
-        Map (null) // { arity: 1 }
-          Union // { arity: 0 }
-            Negate // { arity: 0 }
-              Project () // { arity: 0 }
-                Get l12 // { arity: 1 }
-            Constant // { arity: 0 }
+      Union
+        Get::PassArrangements l12
+          raw=true
+          arrangements[0]={ key=[], permutation=id, thinning=(#0) }
+        Mfp
+          project=(#0)
+          map=(null)
+          Union consolidate_output=true
+            Negate
+              Get::Arrangement l12
+                project=()
+                key=
+                raw=true
+                arrangements[0]={ key=[], permutation=id, thinning=(#0) }
+            Constant
               - ()
     cte l14 =
-      CrossJoin type=differential // { arity: 3 }
-        implementation
-          %1[×]U » %0:l4[×]
-        ArrangeBy keys=[[]] // { arity: 2 }
-          Get l4 // { arity: 2 }
-        ArrangeBy keys=[[]] // { arity: 1 }
-          Union // { arity: 1 }
-            Get l10 // { arity: 1 }
-            Map (null) // { arity: 1 }
-              Union // { arity: 0 }
-                Negate // { arity: 0 }
-                  Project () // { arity: 0 }
-                    Get l10 // { arity: 1 }
-                Constant // { arity: 0 }
+      Join::Linear
+        linear_stage[0]
+          closure
+            project=(#1, #2, #0)
+          lookup={ relation=0, key=[] }
+          stream={ key=[], thinning=(#0) }
+        source={ relation=1, key=[] }
+        ArrangeBy
+          raw=true
+          arrangements[0]={ key=[], permutation=id, thinning=(#0, #1) }
+          types=[integer, integer]
+          Get::PassArrangements l4
+            raw=true
+        ArrangeBy
+          raw=true
+          arrangements[0]={ key=[], permutation=id, thinning=(#0) }
+          types=[integer?]
+          Union
+            Get::PassArrangements l10
+              raw=true
+            Mfp
+              project=(#0)
+              map=(null)
+              Union consolidate_output=true
+                Negate
+                  Get::Collection l10
+                    project=()
+                    raw=true
+                Constant
                   - ()
     cte l15 =
-      Distinct project=[#0{min}..=#3] // { arity: 4 }
-        Union // { arity: 4 }
-          Project (#0, #1{min}, #3, #2) // { arity: 4 }
-            Map (("r" || integer_to_text(#0)), "r") // { arity: 4 }
-              CrossJoin type=differential // { arity: 2 }
-                implementation
-                  %1[×]U » %0:l11[×]
-                ArrangeBy keys=[[]] // { arity: 1 }
-                  Get l11 // { arity: 1 }
-                ArrangeBy keys=[[]] // { arity: 1 }
-                  Union // { arity: 1 }
-                    Get l8 // { arity: 1 }
-                    Map (null) // { arity: 1 }
-                      Union // { arity: 0 }
-                        Negate // { arity: 0 }
-                          Project () // { arity: 0 }
-                            Get l8 // { arity: 1 }
-                        Constant // { arity: 0 }
-                          - ()
-          Project (#0, #2{max}, #4, #3) // { arity: 4 }
-            Map (("l" || integer_to_text(#0)), "l") // { arity: 5 }
-              Get l14 // { arity: 3 }
-          Project (#1{min}, #0, #3, #2) // { arity: 4 }
-            Map (("d" || integer_to_text(#0)), "d") // { arity: 4 }
-              CrossJoin type=differential // { arity: 2 }
-                implementation
-                  %1[×]U » %0:l6[×]
-                ArrangeBy keys=[[]] // { arity: 1 }
-                  Get l6 // { arity: 1 }
-                ArrangeBy keys=[[]] // { arity: 1 }
-                  Union // { arity: 1 }
-                    Get l13 // { arity: 1 }
-                    Map (null) // { arity: 1 }
-                      Union // { arity: 0 }
-                        Negate // { arity: 0 }
-                          Project () // { arity: 0 }
-                            Get l13 // { arity: 1 }
-                        Constant // { arity: 0 }
-                          - ()
-          Project (#2{max}, #1, #4, #3) // { arity: 4 }
-            Map (("u" || integer_to_text(#1)), "u") // { arity: 5 }
-              Get l14 // { arity: 3 }
-          Project (#12, #13, #11, #3) // { arity: 4 }
-            Map ((#0 + #9), (#1 + #10)) // { arity: 14 }
-              Join on=(#0 = #4 AND #1 = #5 AND #2 = #7 AND #6 = #8) type=differential // { arity: 12 }
-                implementation
-                  %0:l15[#0, #1]KK » %1:l1[#0, #1]KK » %2:l2[#0, #1]KK
-                ArrangeBy keys=[[#0{min}, #1{min}]] // { arity: 4 }
-                  Filter (#0{min}) IS NOT NULL AND (#1{min}) IS NOT NULL // { arity: 4 }
-                    Get l15 // { arity: 4 }
-                Get l1 // { arity: 3 }
-                Get l2 // { arity: 5 }
-  Return // { arity: 2 }
+      ArrangeBy
+        input_key=[#0..=#3]
+        raw=true
+        Reduce::Distinct
+          val_plan
+            project=()
+          key_plan=id
+          Union
+            Join::Linear
+              final_closure
+                project=(#0, #1, #3, #2)
+                map=("r")
+              linear_stage[0]
+                closure
+                  project=(#1, #0, #2)
+                  map=(("r" || integer_to_text(#1)))
+                lookup={ relation=0, key=[] }
+                stream={ key=[], thinning=(#0) }
+              source={ relation=1, key=[] }
+              ArrangeBy
+                raw=true
+                arrangements[0]={ key=[], permutation=id, thinning=(#0) }
+                types=[integer]
+                Get::PassArrangements l11
+                  raw=true
+              ArrangeBy
+                raw=true
+                arrangements[0]={ key=[], permutation=id, thinning=(#0) }
+                types=[integer?]
+                Union
+                  Get::PassArrangements l8
+                    raw=true
+                  Mfp
+                    project=(#0)
+                    map=(null)
+                    Union consolidate_output=true
+                      Negate
+                        Get::Collection l8
+                          project=()
+                          raw=true
+                      Constant
+                        - ()
+            Get::Collection l14
+              project=(#0, #2, #4, #3)
+              map=(("l" || integer_to_text(#0)), "l")
+              raw=true
+            Join::Linear
+              final_closure
+                project=(#1, #0, #3, #2)
+                map=("d")
+              linear_stage[0]
+                closure
+                  project=(#1, #0, #2)
+                  map=(("d" || integer_to_text(#1)))
+                lookup={ relation=0, key=[] }
+                stream={ key=[], thinning=(#0) }
+              source={ relation=1, key=[] }
+              ArrangeBy
+                raw=true
+                arrangements[0]={ key=[], permutation=id, thinning=(#0) }
+                types=[integer]
+                Get::PassArrangements l6
+                  raw=true
+              ArrangeBy
+                raw=true
+                arrangements[0]={ key=[], permutation=id, thinning=(#0) }
+                types=[integer?]
+                Union
+                  Get::PassArrangements l13
+                    raw=true
+                  Mfp
+                    project=(#0)
+                    map=(null)
+                    Union consolidate_output=true
+                      Negate
+                        Get::Collection l13
+                          project=()
+                          raw=true
+                      Constant
+                        - ()
+            Get::Collection l14
+              project=(#2, #1, #4, #3)
+              map=(("u" || integer_to_text(#1)), "u")
+              raw=true
+            Join::Linear
+              linear_stage[1]
+                closure
+                  project=(#8, #9, #7, #4)
+                  map=((#2 + #5), (#3 + #6))
+                lookup={ relation=2, key=[#0, #1] }
+                stream={ key=[#2, #4], thinning=(#0, #1, #3) }
+              linear_stage[0]
+                lookup={ relation=1, key=[#0, #1] }
+                stream={ key=[#0, #1], thinning=(#2, #3) }
+              source={ relation=0, key=[#0, #1] }
+              ArrangeBy
+                raw=true
+                arrangements[0]={ key=[#0, #1], permutation=id, thinning=(#2, #3) }
+                types=[integer, integer, text, text]
+                Get::Collection l15
+                  filter=((#0) IS NOT NULL AND (#1) IS NOT NULL)
+                  raw=true
+              Get::PassArrangements l1
+                raw=true
+                arrangements[0]={ key=[#0, #1], permutation=id, thinning=(#2) }
+                types=[integer, integer, text]
+              Get::PassArrangements l2
+                raw=true
+                arrangements[0]={ key=[#0, #1], permutation=id, thinning=(#2..=#4) }
+                types=[text, text, integer, integer, text]
+  Return
     With
       cte l16 =
-        Reduce aggregates=[max(#0{count})] // { arity: 1 }
-          Project (#1{count}) // { arity: 1 }
-            Reduce group_by=[#0] aggregates=[count(*)] // { arity: 2 }
-              Project (#2) // { arity: 1 }
-                Join on=(#0{min} = #3 AND #1{min} = #4) type=differential // { arity: 5 }
-                  implementation
-                    %1[#0, #1]UKKA » %0[#0, #1]KK
-                  ArrangeBy keys=[[#0{min}, #1{min}]] // { arity: 3 }
-                    Distinct project=[#0{min}..=#2] // { arity: 3 }
-                      Project (#0{min}, #1{min}, #3) // { arity: 3 }
-                        Filter (#0{min}) IS NOT NULL AND (#1{min}) IS NOT NULL // { arity: 4 }
-                          Get l15 // { arity: 4 }
-                  ArrangeBy keys=[[#0, #1]] // { arity: 2 }
-                    Distinct project=[#0, #1] // { arity: 2 }
-                      Project (#0, #1) // { arity: 2 }
-                        Get l0 // { arity: 3 }
-    Return // { arity: 2 }
-      CrossJoin type=differential // { arity: 2 }
-        implementation
-          %0[×]U » %1[×]U
-        ArrangeBy keys=[[]] // { arity: 1 }
-          Union // { arity: 1 }
-            Get l5 // { arity: 1 }
-            Map (0) // { arity: 1 }
-              Union // { arity: 0 }
-                Negate // { arity: 0 }
-                  Project () // { arity: 0 }
-                    Get l5 // { arity: 1 }
-                Constant // { arity: 0 }
+        Reduce::Hierarchical
+          aggr_funcs=[max]
+          skips=[0]
+          monotonic
+          val_plan=id
+          key_plan
+            project=()
+          Mfp
+            project=(#1)
+            input_key=#0
+            Reduce::Accumulable
+              simple_aggrs[0]=(0, 0, count(*))
+              val_plan
+                project=(#1)
+                map=(true)
+              key_plan=id
+              Join::Linear
+                linear_stage[0]
+                  closure
+                    project=(#2)
+                  lookup={ relation=0, key=[#0, #1] }
+                  stream={ key=[#0, #1], thinning=() }
+                source={ relation=1, key=[#0, #1] }
+                ArrangeBy
+                  input_key=[#0..=#2]
+                  raw=false
+                  arrangements[0]={ key=[#0, #1], permutation=id, thinning=(#2) }
+                  arrangements[1]={ key=[#0..=#2], permutation=id, thinning=() }
+                  types=[integer, integer, text]
+                  Reduce::Distinct
+                    val_plan
+                      project=()
+                    key_plan=id
+                    Get::Collection l15
+                      project=(#0, #1, #3)
+                      filter=((#0) IS NOT NULL AND (#1) IS NOT NULL)
+                      raw=true
+                Reduce::Distinct
+                  val_plan
+                    project=()
+                  key_plan=id
+                  Get::Collection l0
+                    project=(#0, #1)
+                    raw=true
+    Return
+      Join::Linear
+        linear_stage[0]
+          lookup={ relation=1, key=[] }
+          stream={ key=[], thinning=(#0) }
+        source={ relation=0, key=[] }
+        ArrangeBy
+          raw=true
+          arrangements[0]={ key=[], permutation=id, thinning=(#0) }
+          types=[bigint]
+          Union
+            Get::PassArrangements l5
+              raw=true
+            Mfp
+              project=(#0)
+              map=(0)
+              Union consolidate_output=true
+                Negate
+                  Get::Collection l5
+                    project=()
+                    raw=true
+                Constant
                   - ()
-        ArrangeBy keys=[[]] // { arity: 1 }
-          Union // { arity: 1 }
-            Get l16 // { arity: 1 }
-            Map (null) // { arity: 1 }
-              Union // { arity: 0 }
-                Negate // { arity: 0 }
-                  Project () // { arity: 0 }
-                    Get l16 // { arity: 1 }
-                Constant // { arity: 0 }
+        ArrangeBy
+          raw=true
+          arrangements[0]={ key=[], permutation=id, thinning=(#0) }
+          types=[bigint?]
+          Union
+            ArrangeBy
+              input_key=[]
+              raw=true
+              Get::PassArrangements l16
+                raw=false
+                arrangements[0]={ key=[], permutation=id, thinning=(#0) }
+            Mfp
+              project=(#0)
+              map=(null)
+              Union consolidate_output=true
+                Negate
+                  Get::Arrangement l16
+                    project=()
+                    key=
+                    raw=false
+                    arrangements[0]={ key=[], permutation=id, thinning=(#0) }
+                Constant
                   - ()
 
 Source materialize.public.input

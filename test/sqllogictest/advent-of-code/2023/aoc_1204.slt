@@ -64,7 +64,7 @@ FROM winning_points;
 184
 
 query T multiline
-EXPLAIN OPTIMIZED PLAN WITH(humanized expressions, arity, join implementations) AS VERBOSE TEXT FOR
+EXPLAIN PHYSICAL PLAN WITH(humanized expressions, arity, join implementations) AS VERBOSE TEXT FOR
 WITH parsed AS (
   SELECT regexp_split_to_table(input, '\n') AS line FROM aoc_1204
 ),
@@ -98,30 +98,71 @@ FROM winning_points;
 Explained Query:
   With
     cte l0 =
-      Reduce aggregates=[sum(roundf64(expf64(#0{sum})))] // { arity: 1 }
-        Project (#1{sum}) // { arity: 1 }
-          Reduce group_by=[record_get[0](record_get[1](#0))] aggregates=[sum(lnf64(bigint_to_double(case when (1 = record_get[0](#0)) then record_get[0](#0) else 2 end)))] // { arity: 2 }
-            Project (#1) // { arity: 1 }
-              FlatMap unnest_list(#0{row_number}) // { arity: 2 }
-                Project (#1{row_number}) // { arity: 1 }
-                  Reduce group_by=[#0] aggregates=[row_number[order_by=[]](row(list[row(#0, #1, #2{count})]))] // { arity: 2 }
-                    Filter (#2{count} > 1) // { arity: 3 }
-                      Reduce group_by=[#0, #1] aggregates=[count(*)] // { arity: 3 }
-                        Project (#0, #2) // { arity: 2 }
-                          FlatMap unnest_array(array_remove(#1, "")) // { arity: 3 }
-                            Project (#2, #3) // { arity: 2 }
-                              Map (split_string(#1, ":", 1), regexp_split_to_array["\s", case_insensitive=false](ltrim(rtrim(replace(split_string(#1, ":", 2), "|", ""))))) // { arity: 4 }
-                                FlatMap unnest_array(regexp_split_to_array["\n", case_insensitive=false](#0{input})) // { arity: 2 }
-                                  ReadStorage materialize.public.aoc_1204 // { arity: 1 }
-  Return // { arity: 1 }
-    Union // { arity: 1 }
-      Get l0 // { arity: 1 }
-      Map (null) // { arity: 1 }
-        Union // { arity: 0 }
-          Negate // { arity: 0 }
-            Project () // { arity: 0 }
-              Get l0 // { arity: 1 }
-          Constant // { arity: 0 }
+      Reduce::Accumulable
+        simple_aggrs[0]=(0, 0, sum(roundf64(expf64(#0))))
+        val_plan
+          project=(#1)
+          map=(roundf64(expf64(#0)))
+        key_plan
+          project=()
+        Mfp
+          project=(#1)
+          input_key=#0
+          Reduce::Accumulable
+            simple_aggrs[0]=(0, 0, sum(lnf64(bigint_to_double(case when (1 = record_get[0](#0)) then record_get[0](#0) else 2 end))))
+            val_plan
+              project=(#1)
+              map=(lnf64(bigint_to_double(case when (1 = record_get[0](#0)) then record_get[0](#0) else 2 end)))
+            key_plan
+              project=(#1)
+              map=(record_get[0](record_get[1](#0)))
+            Mfp
+              project=(#1)
+              input_key=#0
+              Reduce::Basic
+                aggr=(0, row_number[order_by=[]](row(list[row(#0, #1, #2)])), fused_unnest_list=true)
+                val_plan
+                  project=(#3)
+                  map=(row(list[row(#0, #1, #2)]))
+                key_plan
+                  project=(#0)
+                input_key=#0, #1
+                Reduce::Accumulable
+                  simple_aggrs[0]=(0, 0, count(*))
+                  val_plan
+                    project=(#2)
+                    map=(true)
+                  key_plan=id
+                  mfp_after
+                    filter=((#2 > 1))
+                  FlatMap unnest_array(array_remove(#1, ""))
+                    mfp_after
+                      project=(#0, #2)
+                    FlatMap unnest_array(regexp_split_to_array["\n", case_insensitive=false](#0))
+                      mfp_after
+                        project=(#2, #3)
+                        map=(split_string(#1, ":", 1), regexp_split_to_array["\s", case_insensitive=false](ltrim(rtrim(replace(split_string(#1, ":", 2), "|", "")))))
+                      Get::PassArrangements materialize.public.aoc_1204
+                        raw=true
+  Return
+    Union
+      ArrangeBy
+        input_key=[]
+        raw=true
+        Get::PassArrangements l0
+          raw=false
+          arrangements[0]={ key=[], permutation=id, thinning=(#0) }
+      Mfp
+        project=(#0)
+        map=(null)
+        Union consolidate_output=true
+          Negate
+            Get::Arrangement l0
+              project=()
+              key=
+              raw=false
+              arrangements[0]={ key=[], permutation=id, thinning=(#0) }
+          Constant
             - ()
 
 Source materialize.public.aoc_1204
@@ -207,7 +248,7 @@ FROM
 978
 
 query T multiline
-EXPLAIN OPTIMIZED PLAN WITH(humanized expressions, arity, join implementations) AS VERBOSE TEXT FOR
+EXPLAIN PHYSICAL PLAN WITH(humanized expressions, arity, join implementations) AS VERBOSE TEXT FOR
 WITH MUTUALLY RECURSIVE
 lines(line string) AS (
     SELECT
@@ -284,97 +325,185 @@ FROM
 Explained Query:
   With Mutually Recursive
     cte l0 =
-      Project (#3, #4) // { arity: 2 }
-        Map (regexp_match["Card +(\d+): (.*)", case_insensitive=false](#1), text_to_integer(array_index(#2, 1)), regexp_split_to_array[" \| ", case_insensitive=false](array_index(#2, 2))) // { arity: 5 }
-          FlatMap unnest_array(regexp_split_to_array["\n", case_insensitive=false](#0{input})) // { arity: 2 }
-            ReadStorage materialize.public.aoc_1204 // { arity: 1 }
+      FlatMap unnest_array(regexp_split_to_array["\n", case_insensitive=false](#0))
+        mfp_after
+          project=(#3, #4)
+          map=(regexp_match["Card +(\d+): (.*)", case_insensitive=false](#1), text_to_integer(array_index(#2, 1)), regexp_split_to_array[" \| ", case_insensitive=false](array_index(#2, 2)))
+        Get::PassArrangements materialize.public.aoc_1204
+          raw=true
     cte l1 =
-      Project (#0, #3) // { arity: 2 }
-        Map (text_to_integer(#2)) // { arity: 4 }
-          FlatMap unnest_array(regexp_split_to_array["\s+", case_insensitive=false](btrim(array_index(#1, 2)))) // { arity: 3 }
-            Get l0 // { arity: 2 }
+      FlatMap unnest_array(regexp_split_to_array["\s+", case_insensitive=false](btrim(array_index(#1, 2))))
+        mfp_after
+          project=(#0, #3)
+          map=(text_to_integer(#2))
+        Get::PassArrangements l0
+          raw=true
     cte l2 =
-      ArrangeBy keys=[[#0, #1]] // { arity: 2 }
-        Filter (#0) IS NOT NULL AND (#1) IS NOT NULL // { arity: 2 }
-          Get l1 // { arity: 2 }
+      ArrangeBy
+        raw=true
+        arrangements[0]={ key=[#0, #1], permutation=id, thinning=() }
+        types=[integer, integer]
+        Get::Collection l1
+          filter=((#0) IS NOT NULL AND (#1) IS NOT NULL)
+          raw=true
     cte l3 =
-      Project (#0, #1) // { arity: 2 }
-        Join on=(#0 = #2 AND #1 = #3) type=differential // { arity: 4 }
-          implementation
-            %0:l2[#0, #1]KK » %1[#0, #1]KK
-          Get l2 // { arity: 2 }
-          ArrangeBy keys=[[#0, #1]] // { arity: 2 }
-            Project (#0, #3) // { arity: 2 }
-              Filter (#2) IS NOT NULL // { arity: 4 }
-                Map (text_to_integer(#2)) // { arity: 4 }
-                  FlatMap unnest_array(regexp_split_to_array["\s+", case_insensitive=false](btrim(array_index(#1, 1)))) // { arity: 3 }
-                    Filter (#0) IS NOT NULL // { arity: 2 }
-                      Get l0 // { arity: 2 }
+      Join::Linear
+        linear_stage[0]
+          lookup={ relation=1, key=[#0, #1] }
+          stream={ key=[#0, #1], thinning=() }
+        source={ relation=0, key=[#0, #1] }
+        Get::PassArrangements l2
+          raw=true
+          arrangements[0]={ key=[#0, #1], permutation=id, thinning=() }
+          types=[integer, integer]
+        ArrangeBy
+          raw=true
+          arrangements[0]={ key=[#0, #1], permutation=id, thinning=() }
+          types=[integer, integer?]
+          FlatMap unnest_array(regexp_split_to_array["\s+", case_insensitive=false](btrim(array_index(#1, 1))))
+            mfp_after
+              project=(#0, #3)
+              filter=((#2) IS NOT NULL)
+              map=(text_to_integer(#2))
+            Get::Collection l0
+              filter=((#0) IS NOT NULL)
+              raw=true
     cte l4 =
-      Distinct project=[#0, #1] // { arity: 2 }
-        Union // { arity: 2 }
-          Project (#0, #2) // { arity: 2 }
-            FlatMap generate_series((#0 + 1), (#0 + #1), 1) // { arity: 3 }
-              Project (#0, #2) // { arity: 2 }
-                Map (bigint_to_integer(#1{count})) // { arity: 3 }
-                  Reduce group_by=[#0] aggregates=[count(#1)] // { arity: 2 }
-                    Union // { arity: 2 }
-                      Map (null) // { arity: 2 }
-                        Union // { arity: 1 }
-                          Negate // { arity: 1 }
-                            Project (#0) // { arity: 1 }
-                              Join on=(#0 = #2 AND #1 = #3) type=differential // { arity: 4 }
-                                implementation
-                                  %1[#0, #1]UKKA » %0:l2[#0, #1]KK
-                                Get l2 // { arity: 2 }
-                                ArrangeBy keys=[[#0, #1]] // { arity: 2 }
-                                  Distinct project=[#0, #1] // { arity: 2 }
-                                    Get l3 // { arity: 2 }
-                          Project (#0) // { arity: 1 }
-                            Get l1 // { arity: 2 }
-                      Get l3 // { arity: 2 }
-          Project (#2, #0) // { arity: 2 }
-            Map (0) // { arity: 3 }
-              Get l1 // { arity: 2 }
+      ArrangeBy
+        input_key=[#0, #1]
+        raw=true
+        Reduce::Distinct
+          val_plan
+            project=()
+          key_plan=id
+          Union
+            FlatMap generate_series((#0 + 1), (#0 + #1), 1)
+              mfp_after
+                project=(#0, #2)
+              Mfp
+                project=(#0, #2)
+                map=(bigint_to_integer(#1))
+                input_key=#0
+                Reduce::Accumulable
+                  simple_aggrs[0]=(0, 0, count(#1))
+                  val_plan
+                    project=(#1)
+                  key_plan
+                    project=(#0)
+                  Union
+                    Mfp
+                      project=(#0, #1)
+                      map=(null)
+                      Union consolidate_output=true
+                        Negate
+                          Join::Linear
+                            linear_stage[0]
+                              closure
+                                project=(#0)
+                              lookup={ relation=0, key=[#0, #1] }
+                              stream={ key=[#0, #1], thinning=() }
+                            source={ relation=1, key=[#0, #1] }
+                            Get::PassArrangements l2
+                              raw=true
+                              arrangements[0]={ key=[#0, #1], permutation=id, thinning=() }
+                              types=[integer, integer]
+                            Reduce::Distinct
+                              val_plan
+                                project=()
+                              key_plan=id
+                              Get::PassArrangements l3
+                                raw=true
+                        Get::Collection l1
+                          project=(#0)
+                          raw=true
+                    Get::PassArrangements l3
+                      raw=true
+            Get::Collection l1
+              project=(#2, #0)
+              map=(0)
+              raw=true
     cte l5 =
-      Project (#1, #3) // { arity: 2 }
-        Join on=(#0 = #2) type=differential // { arity: 4 }
-          implementation
-            %1:l6[#0]UK » %0:l4[#0]K
-          ArrangeBy keys=[[#0]] // { arity: 2 }
-            Filter (#0) IS NOT NULL // { arity: 2 }
-              Get l4 // { arity: 2 }
-          ArrangeBy keys=[[#0]] // { arity: 2 }
-            Filter (#0) IS NOT NULL // { arity: 2 }
-              Get l6 // { arity: 2 }
+      Join::Linear
+        linear_stage[0]
+          closure
+            project=(#2, #1)
+          lookup={ relation=0, key=[#0] }
+          stream={ key=[#0], thinning=(#1) }
+        source={ relation=1, key=[#0] }
+        ArrangeBy
+          raw=true
+          arrangements[0]={ key=[#0], permutation=id, thinning=(#1) }
+          types=[integer, integer?]
+          Get::Arrangement l4
+            filter=((#0) IS NOT NULL)
+            key=#0, #1
+            raw=true
+            arrangements[0]={ key=[#0, #1], permutation=id, thinning=() }
+        ArrangeBy
+          raw=true
+          arrangements[0]={ key=[#0], permutation=id, thinning=(#1) }
+          types=[integer, integer]
+          Get::Collection l6
+            filter=((#0) IS NOT NULL)
+            raw=true
     cte l6 =
-      Project (#0, #2) // { arity: 2 }
-        Map (bigint_to_integer(#1{sum})) // { arity: 3 }
-          Reduce group_by=[#0] aggregates=[sum(coalesce(#1, 1))] // { arity: 2 }
-            Union // { arity: 2 }
-              Map (null) // { arity: 2 }
-                Union // { arity: 1 }
-                  Negate // { arity: 1 }
-                    Project (#0) // { arity: 1 }
-                      Get l5 // { arity: 2 }
-                  Project (#1) // { arity: 1 }
-                    Get l4 // { arity: 2 }
-              Get l5 // { arity: 2 }
-  Return // { arity: 1 }
+      Mfp
+        project=(#0, #2)
+        map=(bigint_to_integer(#1))
+        input_key=#0
+        Reduce::Accumulable
+          simple_aggrs[0]=(0, 0, sum(coalesce(#1, 1)))
+          val_plan
+            project=(#2)
+            map=(coalesce(#1, 1))
+          key_plan
+            project=(#0)
+          Union
+            Mfp
+              project=(#0, #1)
+              map=(null)
+              Union consolidate_output=true
+                Negate
+                  Get::Collection l5
+                    project=(#0)
+                    raw=true
+                Get::Arrangement l4
+                  project=(#1)
+                  key=#0, #1
+                  raw=true
+                  arrangements[0]={ key=[#0, #1], permutation=id, thinning=() }
+            Get::PassArrangements l5
+              raw=true
+  Return
     With
       cte l7 =
-        Reduce aggregates=[sum(#0)] // { arity: 1 }
-          Project (#1) // { arity: 1 }
-            Get l6 // { arity: 2 }
-    Return // { arity: 1 }
-      Union // { arity: 1 }
-        Get l7 // { arity: 1 }
-        Map (null) // { arity: 1 }
-          Union // { arity: 0 }
-            Negate // { arity: 0 }
-              Project () // { arity: 0 }
-                Get l7 // { arity: 1 }
-            Constant // { arity: 0 }
+        Reduce::Accumulable
+          simple_aggrs[0]=(0, 0, sum(#0))
+          val_plan=id
+          key_plan
+            project=()
+          Get::Collection l6
+            project=(#1)
+            raw=true
+    Return
+      Union
+        ArrangeBy
+          input_key=[]
+          raw=true
+          Get::PassArrangements l7
+            raw=false
+            arrangements[0]={ key=[], permutation=id, thinning=(#0) }
+        Mfp
+          project=(#0)
+          map=(null)
+          Union consolidate_output=true
+            Negate
+              Get::Arrangement l7
+                project=()
+                key=
+                raw=false
+                arrangements[0]={ key=[], permutation=id, thinning=(#0) }
+            Constant
               - ()
 
 Source materialize.public.aoc_1204
@@ -450,7 +579,7 @@ select * from part1, part2;
 23  314
 
 query T multiline
-EXPLAIN OPTIMIZED PLAN WITH(humanized expressions, arity, join implementations) AS VERBOSE TEXT FOR
+EXPLAIN PHYSICAL PLAN WITH(humanized expressions, arity, join implementations) AS VERBOSE TEXT FOR
 WITH MUTUALLY RECURSIVE
     -- PART 0
     -- Parse the input as lines of text with line numbers.
@@ -517,138 +646,319 @@ select * from part1, part2;
 Explained Query:
   With Mutually Recursive
     cte l0 =
-      Project (#3..=#5) // { arity: 3 }
-        Map (regexp_split_to_array["(:|\|)", case_insensitive=false](#1), text_to_integer(array_index(regexp_match["[0-9]+", case_insensitive=false](btrim(array_index(#2, 1))), 1)), regexp_split_to_array[" ", case_insensitive=false](btrim(array_index(#2, 2))), regexp_split_to_array[" ", case_insensitive=false](btrim(array_index(#2, 3)))) // { arity: 6 }
-          FlatMap unnest_array(regexp_split_to_array["\n", case_insensitive=false](#0{input})) // { arity: 2 }
-            ReadStorage materialize.public.aoc_1204 // { arity: 1 }
+      FlatMap unnest_array(regexp_split_to_array["\n", case_insensitive=false](#0))
+        mfp_after
+          project=(#3..=#5)
+          map=(regexp_split_to_array["(:|\|)", case_insensitive=false](#1), text_to_integer(array_index(regexp_match["[0-9]+", case_insensitive=false](btrim(array_index(#2, 1))), 1)), regexp_split_to_array[" ", case_insensitive=false](btrim(array_index(#2, 2))), regexp_split_to_array[" ", case_insensitive=false](btrim(array_index(#2, 3))))
+        Get::PassArrangements materialize.public.aoc_1204
+          raw=true
     cte l1 =
-      Distinct project=[#0..=#2] // { arity: 3 }
-        Get l0 // { arity: 3 }
+      ArrangeBy
+        input_key=[#0..=#2]
+        raw=true
+        Reduce::Distinct
+          val_plan
+            project=()
+          key_plan=id
+          Get::PassArrangements l0
+            raw=true
     cte l2 =
-      Distinct project=[#0, #1] // { arity: 2 }
-        Project (#1, #2) // { arity: 2 }
-          Get l1 // { arity: 3 }
+      ArrangeBy
+        input_key=[#0, #1]
+        raw=true
+        Reduce::Distinct
+          val_plan
+            project=()
+          key_plan=id
+          Get::Arrangement l1
+            project=(#1, #2)
+            key=#0..=#2
+            raw=true
+            arrangements[0]={ key=[#0..=#2], permutation=id, thinning=() }
     cte l3 =
-      Filter (#2 != "") // { arity: 3 }
-        FlatMap unnest_array(#0) // { arity: 3 }
-          Get l2 // { arity: 2 }
+      FlatMap unnest_array(#0)
+        mfp_after
+          filter=((#2 != ""))
+        input_key=#0, #1
+        Get::PassArrangements l2
+          raw=true
+          arrangements[0]={ key=[#0, #1], permutation=id, thinning=() }
     cte l4 =
-      Reduce group_by=[#0, #1] aggregates=[count(*)] // { arity: 3 }
-        Project (#0, #1) // { arity: 2 }
-          Distinct project=[#0..=#2] // { arity: 3 }
-            Union // { arity: 3 }
-              Get l3 // { arity: 3 }
-              Negate // { arity: 3 }
-                Threshold // { arity: 3 }
-                  Union // { arity: 3 }
-                    Get l3 // { arity: 3 }
-                    Negate // { arity: 3 }
-                      Filter (#2 != "") // { arity: 3 }
-                        FlatMap unnest_array(#1) // { arity: 3 }
-                          Get l2 // { arity: 2 }
+      ArrangeBy
+        input_key=[#0, #1]
+        raw=true
+        Reduce::Accumulable
+          simple_aggrs[0]=(0, 0, count(*))
+          val_plan
+            project=(#2)
+            map=(true)
+          key_plan=id
+          Mfp
+            project=(#0, #1)
+            input_key=#0..=#2
+            Reduce::Distinct
+              val_plan
+                project=()
+              key_plan=id
+              Union consolidate_output=true
+                Get::PassArrangements l3
+                  raw=true
+                Negate
+                  ArrangeBy
+                    input_key=[#0..=#2]
+                    raw=true
+                    Threshold::Basic ensure_arrangement={ key=[#0..=#2], permutation=id, thinning=() }
+                      ArrangeBy
+                        raw=false
+                        arrangements[0]={ key=[#0..=#2], permutation=id, thinning=() }
+                        types=[text[]?, text[]?, text]
+                        Union consolidate_output=true
+                          Get::PassArrangements l3
+                            raw=true
+                          Negate
+                            FlatMap unnest_array(#1)
+                              mfp_after
+                                filter=((#2 != ""))
+                              input_key=#0, #1
+                              Get::PassArrangements l2
+                                raw=true
+                                arrangements[0]={ key=[#0, #1], permutation=id, thinning=() }
     cte l5 =
-      ArrangeBy keys=[[#0, #1]] // { arity: 2 }
-        Get l2 // { arity: 2 }
+      Get::PassArrangements l2
+        raw=true
+        arrangements[0]={ key=[#0, #1], permutation=id, thinning=() }
     cte l6 =
-      Union // { arity: 3 }
-        Get l4 // { arity: 3 }
-        Project (#0, #1, #4) // { arity: 3 }
-          Map (0) // { arity: 5 }
-            Join on=(#0 = #2 AND #1 = #3) type=differential // { arity: 4 }
-              implementation
-                %1:l5[#0, #1]UKK » %0[#0, #1]KK
-              ArrangeBy keys=[[#0, #1]] // { arity: 2 }
-                Union // { arity: 2 }
-                  Negate // { arity: 2 }
-                    Project (#0, #1) // { arity: 2 }
-                      Get l4 // { arity: 3 }
-                  Get l2 // { arity: 2 }
-              Get l5 // { arity: 2 }
+      Union
+        Get::PassArrangements l4
+          raw=true
+          arrangements[0]={ key=[#0, #1], permutation=id, thinning=(#2) }
+        Join::Linear
+          final_closure
+            project=(#0..=#2)
+            map=(0)
+          linear_stage[0]
+            lookup={ relation=0, key=[#0, #1] }
+            stream={ key=[#0, #1], thinning=() }
+          source={ relation=1, key=[#0, #1] }
+          ArrangeBy
+            raw=true
+            arrangements[0]={ key=[#0, #1], permutation=id, thinning=() }
+            types=[text[]?, text[]?]
+            Union consolidate_output=true
+              Negate
+                Get::Arrangement l4
+                  project=(#0, #1)
+                  key=#0, #1
+                  raw=true
+                  arrangements[0]={ key=[#0, #1], permutation=id, thinning=(#2) }
+              Get::PassArrangements l2
+                raw=true
+                arrangements[0]={ key=[#0, #1], permutation=id, thinning=() }
+          Get::PassArrangements l5
+            raw=true
+            arrangements[0]={ key=[#0, #1], permutation=id, thinning=() }
+            types=[text[]?, text[]?]
     cte l7 =
-      Union // { arity: 3 }
-        Get l6 // { arity: 3 }
-        Map (error("more than one record produced in subquery")) // { arity: 3 }
-          Project (#0, #1) // { arity: 2 }
-            Filter (#2{count} > 1) // { arity: 3 }
-              Reduce group_by=[#0, #1] aggregates=[count(*)] // { arity: 3 }
-                Project (#0, #1) // { arity: 2 }
-                  Get l6 // { arity: 3 }
+      Union
+        Get::PassArrangements l6
+          raw=true
+        Mfp
+          project=(#0, #1, #3)
+          map=(error("more than one record produced in subquery"))
+          input_key=#0, #1
+          Reduce::Accumulable
+            simple_aggrs[0]=(0, 0, count(*))
+            val_plan
+              project=(#2)
+              map=(true)
+            key_plan=id
+            mfp_after
+              filter=((#2 > 1))
+            Get::Collection l6
+              project=(#0, #1)
+              raw=true
     cte l8 =
-      Project (#0, #8{count}) // { arity: 2 }
-        Join on=(#0 = #3 AND #1 = #4 = #6 AND #2 = #5 = #7) type=delta // { arity: 9 }
-          implementation
-            %0:l0 » %1:l1[#0..=#2]UKKK » %2[#0, #1]KK
-            %1:l1 » %0:l0[#0..=#2]KKK » %2[#0, #1]KK
-            %2 » %0:l0[#1, #2]KK » %1:l1[#0..=#2]UKKK
-          ArrangeBy keys=[[#0..=#2], [#1, #2]] // { arity: 3 }
-            Get l0 // { arity: 3 }
-          ArrangeBy keys=[[#0..=#2]] // { arity: 3 }
-            Get l1 // { arity: 3 }
-          ArrangeBy keys=[[#0, #1]] // { arity: 3 }
-            Union // { arity: 3 }
-              Get l7 // { arity: 3 }
-              Project (#0, #1, #4) // { arity: 3 }
-                Map (null) // { arity: 5 }
-                  Join on=(#0 = #2 AND #1 = #3) type=differential // { arity: 4 }
-                    implementation
-                      %1:l5[#0, #1]UKK » %0[#0, #1]KK
-                    ArrangeBy keys=[[#0, #1]] // { arity: 2 }
-                      Union // { arity: 2 }
-                        Negate // { arity: 2 }
-                          Distinct project=[#0, #1] // { arity: 2 }
-                            Project (#0, #1) // { arity: 2 }
-                              Get l7 // { arity: 3 }
-                        Get l2 // { arity: 2 }
-                    Get l5 // { arity: 2 }
+      Join::Delta
+        plan_path[0]
+          delta_stage[1]
+            closure
+              project=(#2, #3)
+            lookup={ relation=2, key=[#0, #1] }
+            stream={ key=[#1, #2], thinning=(#0) }
+          delta_stage[0]
+            lookup={ relation=1, key=[#0..=#2] }
+            stream={ key=[#0..=#2], thinning=() }
+          source={ relation=0, key=[#0..=#2] }
+        plan_path[1]
+          delta_stage[1]
+            closure
+              project=(#2, #3)
+            lookup={ relation=2, key=[#0, #1] }
+            stream={ key=[#1, #2], thinning=(#0) }
+          delta_stage[0]
+            lookup={ relation=0, key=[#0..=#2] }
+            stream={ key=[#0..=#2], thinning=() }
+          source={ relation=1, key=[#0..=#2] }
+        plan_path[2]
+          delta_stage[1]
+            closure
+              project=(#0, #3)
+            lookup={ relation=1, key=[#0..=#2] }
+            stream={ key=[#0..=#2], thinning=(#3) }
+          delta_stage[0]
+            closure
+              project=(#3, #0..=#2)
+            lookup={ relation=0, key=[#1, #2] }
+            stream={ key=[#0, #1], thinning=(#2) }
+          source={ relation=2, key=[#0, #1] }
+        ArrangeBy
+          raw=true
+          arrangements[0]={ key=[#0..=#2], permutation=id, thinning=() }
+          arrangements[1]={ key=[#1, #2], permutation={#0: #2, #1: #0, #2: #1}, thinning=(#0) }
+          types=[integer?, text[]?, text[]?]
+          Get::PassArrangements l0
+            raw=true
+        Get::PassArrangements l1
+          raw=true
+          arrangements[0]={ key=[#0..=#2], permutation=id, thinning=() }
+        ArrangeBy
+          raw=true
+          arrangements[0]={ key=[#0, #1], permutation=id, thinning=(#2) }
+          types=[text[]?, text[]?, bigint?]
+          Union
+            Get::PassArrangements l7
+              raw=true
+            Join::Linear
+              final_closure
+                project=(#0..=#2)
+                map=(null)
+              linear_stage[0]
+                lookup={ relation=0, key=[#0, #1] }
+                stream={ key=[#0, #1], thinning=() }
+              source={ relation=1, key=[#0, #1] }
+              ArrangeBy
+                raw=true
+                arrangements[0]={ key=[#0, #1], permutation=id, thinning=() }
+                types=[text[]?, text[]?]
+                Union consolidate_output=true
+                  Negate
+                    ArrangeBy
+                      input_key=[#0, #1]
+                      raw=true
+                      Reduce::Distinct
+                        val_plan
+                          project=()
+                        key_plan=id
+                        Get::Collection l7
+                          project=(#0, #1)
+                          raw=true
+                  Get::PassArrangements l2
+                    raw=true
+                    arrangements[0]={ key=[#0, #1], permutation=id, thinning=() }
+              Get::PassArrangements l5
+                raw=true
+                arrangements[0]={ key=[#0, #1], permutation=id, thinning=() }
+                types=[text[]?, text[]?]
     cte l9 =
-      Reduce aggregates=[sum(power(2, bigint_to_double((#0{count} - 1))))] // { arity: 1 }
-        Project (#1{count}) // { arity: 1 }
-          Filter (#1{count} > 0) // { arity: 2 }
-            Get l8 // { arity: 2 }
+      ArrangeBy
+        input_key=[]
+        raw=true
+        Reduce::Accumulable
+          simple_aggrs[0]=(0, 0, sum(power(2, bigint_to_double((#0 - 1)))))
+          val_plan
+            project=(#1)
+            map=(power(2, bigint_to_double((#0 - 1))))
+          key_plan
+            project=()
+          Get::Collection l8
+            project=(#1)
+            filter=((#1 > 0))
+            raw=true
     cte l10 =
-      Union // { arity: 2 }
-        Get l8 // { arity: 2 }
-        Project (#2, #3{count}) // { arity: 2 }
-          Filter (integer_to_bigint(#2) = (integer_to_bigint(#0) + #4)) // { arity: 5 }
-            FlatMap generate_series(1, #1, 1) // { arity: 5 }
-              CrossJoin type=differential // { arity: 4 }
-                implementation
-                  %0:l10[×] » %1:l8[×]
-                ArrangeBy keys=[[]] // { arity: 2 }
-                  Get l10 // { arity: 2 }
-                ArrangeBy keys=[[]] // { arity: 2 }
-                  Get l8 // { arity: 2 }
-  Return // { arity: 2 }
+      Union
+        Get::PassArrangements l8
+          raw=true
+        FlatMap generate_series(1, #1, 1)
+          mfp_after
+            project=(#2, #3)
+            filter=((integer_to_bigint(#2) = (integer_to_bigint(#0) + #4)))
+          Join::Linear
+            linear_stage[0]
+              lookup={ relation=1, key=[] }
+              stream={ key=[], thinning=(#0, #1) }
+            source={ relation=0, key=[] }
+            ArrangeBy
+              raw=true
+              arrangements[0]={ key=[], permutation=id, thinning=(#0, #1) }
+              types=[integer?, bigint?]
+              Get::PassArrangements l10
+                raw=true
+            ArrangeBy
+              raw=true
+              arrangements[0]={ key=[], permutation=id, thinning=(#0, #1) }
+              types=[integer?, bigint?]
+              Get::PassArrangements l8
+                raw=true
+  Return
     With
       cte l11 =
-        Reduce aggregates=[count(*)] // { arity: 1 }
-          Project () // { arity: 0 }
-            Get l10 // { arity: 2 }
-    Return // { arity: 2 }
-      CrossJoin type=differential // { arity: 2 }
-        implementation
-          %0[×]U » %1[×]U
-        ArrangeBy keys=[[]] // { arity: 1 }
-          Project (#1) // { arity: 1 }
-            Map (double_to_numeric(#0{sum})) // { arity: 2 }
-              Union // { arity: 1 }
-                Get l9 // { arity: 1 }
-                Map (null) // { arity: 1 }
-                  Union // { arity: 0 }
-                    Negate // { arity: 0 }
-                      Project () // { arity: 0 }
-                        Get l9 // { arity: 1 }
-                    Constant // { arity: 0 }
-                      - ()
-        ArrangeBy keys=[[]] // { arity: 1 }
-          Union // { arity: 1 }
-            Get l11 // { arity: 1 }
-            Map (0) // { arity: 1 }
-              Union // { arity: 0 }
-                Negate // { arity: 0 }
-                  Project () // { arity: 0 }
-                    Get l11 // { arity: 1 }
-                Constant // { arity: 0 }
+        Reduce::Accumulable
+          simple_aggrs[0]=(0, 0, count(*))
+          val_plan
+            project=(#0)
+            map=(true)
+          key_plan=id
+          Get::Collection l10
+            project=()
+            raw=true
+    Return
+      Join::Linear
+        linear_stage[0]
+          lookup={ relation=1, key=[] }
+          stream={ key=[], thinning=(#0) }
+        source={ relation=0, key=[] }
+        ArrangeBy
+          raw=true
+          arrangements[0]={ key=[], permutation=id, thinning=(#0) }
+          types=[numeric?]
+          Mfp
+            project=(#1)
+            map=(double_to_numeric(#0))
+            Union
+              Get::PassArrangements l9
+                raw=true
+              Mfp
+                project=(#0)
+                map=(null)
+                Union consolidate_output=true
+                  Negate
+                    Get::Collection l9
+                      project=()
+                      raw=true
+                  Constant
+                    - ()
+        ArrangeBy
+          raw=true
+          arrangements[0]={ key=[], permutation=id, thinning=(#0) }
+          types=[bigint]
+          Union
+            ArrangeBy
+              input_key=[]
+              raw=true
+              Get::PassArrangements l11
+                raw=false
+                arrangements[0]={ key=[], permutation=id, thinning=(#0) }
+            Mfp
+              project=(#0)
+              map=(0)
+              Union consolidate_output=true
+                Negate
+                  Get::Arrangement l11
+                    project=()
+                    key=
+                    raw=false
+                    arrangements[0]={ key=[], permutation=id, thinning=(#0) }
+                Constant
                   - ()
 
 Source materialize.public.aoc_1204

@@ -38,7 +38,7 @@ FROM (
 278
 
 query T multiline
-EXPLAIN OPTIMIZED PLAN WITH(humanized expressions, arity, join implementations) AS VERBOSE TEXT FOR
+EXPLAIN PHYSICAL PLAN WITH(humanized expressions, arity, join implementations) AS VERBOSE TEXT FOR
 SELECT SUM(LEFT(r, 1)::int * 10 + RIGHT(r, 1)::int) AS part1
 FROM (
 	SELECT regexp_replace(input, '[^\d]', '', 'g') AS r
@@ -48,17 +48,34 @@ FROM (
 Explained Query:
   With
     cte l0 =
-      Reduce aggregates=[sum(((text_to_integer(left(regexp_replace["[^\d]", case_insensitive=false, limit=0](#0{input}, ""), 1)) * 10) + text_to_integer(right(regexp_replace["[^\d]", case_insensitive=false, limit=0](#0{input}, ""), 1))))] // { arity: 1 }
-        ReadStorage materialize.public.aoc_1201 // { arity: 1 }
-  Return // { arity: 1 }
-    Union // { arity: 1 }
-      Get l0 // { arity: 1 }
-      Map (null) // { arity: 1 }
-        Union // { arity: 0 }
-          Negate // { arity: 0 }
-            Project () // { arity: 0 }
-              Get l0 // { arity: 1 }
-          Constant // { arity: 0 }
+      Reduce::Accumulable
+        simple_aggrs[0]=(0, 0, sum(((text_to_integer(left(regexp_replace["[^\d]", case_insensitive=false, limit=0](#0, ""), 1)) * 10) + text_to_integer(right(regexp_replace["[^\d]", case_insensitive=false, limit=0](#0, ""), 1)))))
+        val_plan
+          project=(#2)
+          map=(regexp_replace["[^\d]", case_insensitive=false, limit=0](#0, ""), ((text_to_integer(left(#1, 1)) * 10) + text_to_integer(right(#1, 1))))
+        key_plan
+          project=()
+        Get::PassArrangements materialize.public.aoc_1201
+          raw=true
+  Return
+    Union
+      ArrangeBy
+        input_key=[]
+        raw=true
+        Get::PassArrangements l0
+          raw=false
+          arrangements[0]={ key=[], permutation=id, thinning=(#0) }
+      Mfp
+        project=(#0)
+        map=(null)
+        Union consolidate_output=true
+          Negate
+            Get::Arrangement l0
+              project=()
+              key=
+              raw=false
+              arrangements[0]={ key=[], permutation=id, thinning=(#0) }
+          Constant
             - ()
 
 Source materialize.public.aoc_1201
@@ -98,7 +115,7 @@ WHERE first.line = last.line
 391
 
 query T multiline
-EXPLAIN OPTIMIZED PLAN WITH(humanized expressions, arity, join implementations) AS VERBOSE TEXT FOR
+EXPLAIN PHYSICAL PLAN WITH(humanized expressions, arity, join implementations) AS VERBOSE TEXT FOR
 WITH
     lines AS (
         SELECT regexp_split_to_table(input, '\n') AS line
@@ -129,70 +146,140 @@ WHERE first.line = last.line
 Explained Query:
   With
     cte l0 =
-      Project (#0, #1, #4) // { arity: 3 }
-        Join on=(#3 = substr(#0, #1, #2)) type=delta // { arity: 5 }
-          implementation
-            %0 » %1[×] » %2[#0]UK
-            %1 » %0[×] » %2[#0]UK
-            %2 » %0[×] » %1[×]
-          ArrangeBy keys=[[]] // { arity: 2 }
-            FlatMap generate_series(1, char_length(#0), 1) // { arity: 2 }
-              Project (#1) // { arity: 1 }
-                Filter (#1) IS NOT NULL // { arity: 2 }
-                  FlatMap unnest_array(regexp_split_to_array["\n", case_insensitive=false](#0{input})) // { arity: 2 }
-                    ReadStorage materialize.public.aoc_1201 // { arity: 1 }
-          ArrangeBy keys=[[]] // { arity: 1 }
-            Constant // { arity: 1 }
-              - (1)
-              - (2)
-              - (3)
-              - (4)
-              - (5)
-          ArrangeBy keys=[[#0]] // { arity: 2 }
-            Constant // { arity: 2 }
-              - ("0", 0)
-              - ("1", 1)
-              - ("2", 2)
-              - ("3", 3)
-              - ("4", 4)
-              - ("5", 5)
-              - ("6", 6)
-              - ("7", 7)
-              - ("8", 8)
-              - ("9", 9)
-              - ("one", 1)
-              - ("six", 6)
-              - ("two", 2)
-              - ("zero", 0)
-              - ("five", 5)
-              - ("four", 4)
-              - ("nine", 9)
-              - ("eight", 8)
-              - ("seven", 7)
-              - ("three", 3)
+      Join::Delta
+        plan_path[0]
+          delta_stage[1]
+            closure
+              project=(#1, #2, #4)
+            lookup={ relation=2, key=[#0] }
+            stream={ key=[substr(#0, #1, #2)], thinning=(#0..=#2) }
+          delta_stage[0]
+            lookup={ relation=1, key=[] }
+            stream={ key=[], thinning=(#0, #1) }
+          source={ relation=0, key=[] }
+        plan_path[1]
+          delta_stage[1]
+            closure
+              project=(#1, #2, #4)
+            lookup={ relation=2, key=[#0] }
+            stream={ key=[substr(#0, #1, #2)], thinning=(#0..=#2) }
+          delta_stage[0]
+            closure
+              project=(#1, #2, #0)
+            lookup={ relation=0, key=[] }
+            stream={ key=[], thinning=(#0) }
+          source={ relation=1, key=[] }
+        plan_path[2]
+          delta_stage[1]
+            closure
+              project=(#0, #1, #3)
+              ready_equivalences=substr(#0, #1, #4) = #2
+            lookup={ relation=1, key=[] }
+            stream={ key=[], thinning=(#0..=#3) }
+          delta_stage[0]
+            closure
+              project=(#2, #3, #0, #1)
+            lookup={ relation=0, key=[] }
+            stream={ key=[], thinning=(#0, #1) }
+          source={ relation=2, key=[#0] }
+        ArrangeBy
+          raw=true
+          arrangements[0]={ key=[], permutation=id, thinning=(#0, #1) }
+          types=[text, integer]
+          FlatMap generate_series(1, char_length(#0), 1)
+            FlatMap unnest_array(regexp_split_to_array["\n", case_insensitive=false](#0))
+              mfp_after
+                project=(#1)
+                filter=((#1) IS NOT NULL)
+              Get::PassArrangements materialize.public.aoc_1201
+                raw=true
+        ArrangeBy
+          raw=true
+          arrangements[0]={ key=[], permutation=id, thinning=(#0) }
+          types=[integer]
+          Constant
+            - (1)
+            - (2)
+            - (3)
+            - (4)
+            - (5)
+        ArrangeBy
+          raw=true
+          arrangements[0]={ key=[#0], permutation=id, thinning=(#1) }
+          types=[text, integer]
+          Constant
+            - ("0", 0)
+            - ("1", 1)
+            - ("2", 2)
+            - ("3", 3)
+            - ("4", 4)
+            - ("5", 5)
+            - ("6", 6)
+            - ("7", 7)
+            - ("8", 8)
+            - ("9", 9)
+            - ("one", 1)
+            - ("six", 6)
+            - ("two", 2)
+            - ("zero", 0)
+            - ("five", 5)
+            - ("four", 4)
+            - ("nine", 9)
+            - ("eight", 8)
+            - ("seven", 7)
+            - ("three", 3)
     cte l1 =
-      Reduce aggregates=[sum(((#0 * 10) + #1))] // { arity: 1 }
-        Project (#1, #3) // { arity: 2 }
-          Join on=(#0 = #2) type=differential // { arity: 4 }
-            implementation
-              %0[#0]UK » %1[#0]UK
-            ArrangeBy keys=[[#0]] // { arity: 2 }
-              Project (#0, #2) // { arity: 2 }
-                TopK group_by=[#0] order_by=[#1 asc nulls_last] limit=1 // { arity: 3 }
-                  Get l0 // { arity: 3 }
-            ArrangeBy keys=[[#0]] // { arity: 2 }
-              Project (#0, #2) // { arity: 2 }
-                TopK group_by=[#0] order_by=[#1 desc nulls_first] limit=1 // { arity: 3 }
-                  Get l0 // { arity: 3 }
-  Return // { arity: 1 }
-    Union // { arity: 1 }
-      Get l1 // { arity: 1 }
-      Map (null) // { arity: 1 }
-        Union // { arity: 0 }
-          Negate // { arity: 0 }
-            Project () // { arity: 0 }
-              Get l1 // { arity: 1 }
-          Constant // { arity: 0 }
+      Reduce::Accumulable
+        simple_aggrs[0]=(0, 0, sum(((#0 * 10) + #1)))
+        val_plan
+          project=(#2)
+          map=(((#0 * 10) + #1))
+        key_plan
+          project=()
+        Join::Linear
+          linear_stage[0]
+            closure
+              project=(#1, #2)
+            lookup={ relation=1, key=[#0] }
+            stream={ key=[#0], thinning=(#1) }
+          source={ relation=0, key=[#0] }
+          ArrangeBy
+            raw=true
+            arrangements[0]={ key=[#0], permutation=id, thinning=(#1) }
+            types=[text, integer]
+            Mfp
+              project=(#0, #2)
+              TopK::MonotonicTop1 group_by=[#0] order_by=[#1 asc nulls_last] must_consolidate
+                Get::PassArrangements l0
+                  raw=true
+          ArrangeBy
+            raw=true
+            arrangements[0]={ key=[#0], permutation=id, thinning=(#1) }
+            types=[text, integer]
+            Mfp
+              project=(#0, #2)
+              TopK::MonotonicTop1 group_by=[#0] order_by=[#1 desc nulls_first] must_consolidate
+                Get::PassArrangements l0
+                  raw=true
+  Return
+    Union
+      ArrangeBy
+        input_key=[]
+        raw=true
+        Get::PassArrangements l1
+          raw=false
+          arrangements[0]={ key=[], permutation=id, thinning=(#0) }
+      Mfp
+        project=(#0)
+        map=(null)
+        Union consolidate_output=true
+          Negate
+            Get::Arrangement l1
+              project=()
+              key=
+              raw=false
+              arrangements[0]={ key=[], permutation=id, thinning=(#0) }
+          Constant
             - ()
 
 Source materialize.public.aoc_1201
