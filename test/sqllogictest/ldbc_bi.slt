@@ -350,7 +350,6 @@ Explained Query:
           key_plan=id
           Get::Collection materialize.public.message
             project=()
-            filter=((#0 < 2010-06-11 09:21:46 UTC))
             raw=true
     Return
       Mfp
@@ -379,7 +378,7 @@ Explained Query:
               types=[integer, numeric, boolean, integer]
               Get::Collection materialize.public.message
                 project=(#2, #4..=#6)
-                filter=((#0 < 2010-06-11 09:21:46 UTC) AND (#1) IS NOT NULL)
+                filter=((#1) IS NOT NULL)
                 map=(extract_year_tstz(#0), (#3) IS NOT NULL, case when (#2 < 40) then 0 else case when (#2 < 80) then 1 else case when (#2 < 160) then 2 else 3 end end end)
                 raw=true
             ArrangeBy
@@ -2116,7 +2115,7 @@ Explained Query:
             types=[bigint]
             Get::Collection materialize.public.tag
               project=(#0)
-              filter=((#0) IS NOT NULL AND (#1 = "Slovenia"))
+              filter=((#1 = "Slovenia"))
               raw=true
       cte l2 =
         Join::Delta
@@ -2209,7 +2208,6 @@ Explained Query:
             arrangements[0]={ key=[#0], permutation=id, thinning=(#1) }
             types=[bigint, text]
             Get::Collection materialize.public.tag
-              filter=((#0) IS NOT NULL)
               raw=true
       cte l3 =
         Reduce::Distinct
@@ -2786,8 +2784,8 @@ Explained Query:
           arrangements[1]={ key=[#1], permutation={#0: #1, #1: #0}, thinning=(#0) }
           types=[bigint, bigint]
           Get::Collection materialize.public.message
-            project=(#1, #3)
-            filter=((#0 <= 2012-11-24 00:00:00 UTC) AND (#0 >= 2012-08-29 00:00:00 UTC) AND (#4) IS NULL)
+            project=(#0, #2)
+            filter=((#3) IS NULL)
             raw=true
         Reduce::Accumulable
           simple_aggrs[0]=(0, 0, count(*))
@@ -2796,15 +2794,14 @@ Explained Query:
             map=(true)
           key_plan=id
           Get::Collection materialize.public.message
-            project=(#2)
-            filter=((#0 <= 2012-11-24 00:00:00 UTC) AND (#0 >= 2012-08-29 00:00:00 UTC))
+            project=(#1)
             raw=true
 
 Source materialize.public.person
   project=(#1..=#3)
   filter=((#1{id}) IS NOT NULL)
 Source materialize.public.message
-  project=(#0..=#2, #9, #12)
+  project=(#1, #2, #9, #12)
   filter=((#0{creationdate} <= 2012-11-24 00:00:00 UTC) AND (#0{creationdate} >= 2012-08-29 00:00:00 UTC))
 
 Target cluster: quickstart
@@ -3929,7 +3926,6 @@ Explained Query:
             arrangements[0]={ key=[#8], permutation={#0: #1, #1: #2, #2: #3, #3: #4, #4: #5, #5: #6, #6: #7, #7: #8, #8: #0}, thinning=(#0..=#7, #9, #10) }
             types=[timestamp with time zone, bigint?, text, text, text, date, text, text, bigint, text, text]
             Get::Collection materialize.public.person
-              filter=((#0 < 2012-11-09 00:00:00 UTC))
               raw=true
       cte l1 =
         Join::Linear
@@ -4092,7 +4088,7 @@ Explained Query:
             types=[bigint]
             Get::Collection materialize.public.person
               project=(#1)
-              filter=((#0 < 2012-11-09 00:00:00 UTC) AND (#1) IS NOT NULL)
+              filter=((#1) IS NOT NULL)
               raw=true
           ArrangeBy
             raw=true
@@ -4531,7 +4527,7 @@ Explained Query:
             types=[bigint]
             Get::Collection materialize.public.country
               project=(#0)
-              filter=((#0) IS NOT NULL AND (#1 = "Philippines"))
+              filter=((#1 = "Philippines"))
               raw=true
           ArrangeBy
             raw=true
@@ -4572,7 +4568,7 @@ Explained Query:
             types=[bigint]
             Get::Collection materialize.public.country
               project=(#0)
-              filter=((#0) IS NOT NULL AND (#1 = "Taiwan"))
+              filter=((#1 = "Taiwan"))
               raw=true
       cte l3 =
         Mfp
@@ -5941,8 +5937,8 @@ Explained Query:
               key_plan
                 project=(#1, #0)
               Get::Collection materialize.public.message
-                project=(#1, #2)
-                filter=((2012-10-07 00:00:00 = date_to_timestamp(timestamp_with_time_zone_to_date(#0))))
+                project=(#0, #1)
+                filter=((2012-10-07 00:00:00 = #2))
                 raw=true
           Reduce::Distinct
             val_plan
@@ -5965,7 +5961,7 @@ Explained Query:
                 types=[bigint]
                 Get::Collection materialize.public.tag
                   project=(#0)
-                  filter=((#0) IS NOT NULL AND (#1 = "Diosdado_Macapagal"))
+                  filter=((#1 = "Diosdado_Macapagal"))
                   raw=true
       cte l3 =
         ArrangeBy
@@ -6078,8 +6074,8 @@ Explained Query:
               key_plan
                 project=(#1, #0)
               Get::Collection materialize.public.message
-                project=(#1, #2)
-                filter=((2012-12-14 00:00:00 = date_to_timestamp(timestamp_with_time_zone_to_date(#0))))
+                project=(#0, #1)
+                filter=((2012-12-14 00:00:00 = #2))
                 raw=true
           Reduce::Distinct
             val_plan
@@ -6102,7 +6098,7 @@ Explained Query:
                 types=[bigint]
                 Get::Collection materialize.public.tag
                   project=(#0)
-                  filter=((#0) IS NOT NULL AND (#1 = "Thailand_Noriega"))
+                  filter=((#1 = "Thailand_Noriega"))
                   raw=true
       cte l6 =
         Join::Delta
@@ -6236,7 +6232,8 @@ Source materialize.public.person_knows_person
 Source materialize.public.message_hastag_tag
   project=(#1, #2)
 Source materialize.public.message
-  project=(#0, #1, #9)
+  project=(#1, #9, #13)
+  map=(date_to_timestamp(timestamp_with_time_zone_to_date(#0{creationdate})))
 
 Target cluster: quickstart
 

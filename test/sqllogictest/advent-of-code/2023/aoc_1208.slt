@@ -71,8 +71,8 @@ Explained Query:
     cte l0 =
       Union
         Get::Collection materialize.public.paths
-          project=(#0, #0, #3)
-          filter=(("A" = substr(#0, 3, 1)))
+          project=(#0, #0, #4)
+          filter=(("A" = #3))
           map=(0)
           raw=true
         Join::Delta
@@ -125,7 +125,8 @@ Explained Query:
             arrangements[0]={ key=[#0], permutation=id, thinning=(#1, #2) }
             types=[text, text?, text?]
             Get::Collection materialize.public.paths
-              filter=(("Z" != substr(#0, 3, 1)))
+              project=(#0..=#2)
+              filter=(("Z" != #3))
               raw=true
           ArrangeBy
             raw=true
@@ -151,6 +152,9 @@ Explained Query:
       raw=true
 
 Source materialize.public.steps_input
+Source materialize.public.paths
+  project=(#0..=#3)
+  map=(substr(#0{state}, 3, 1))
 
 Target cluster: quickstart
 

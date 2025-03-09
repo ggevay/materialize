@@ -335,7 +335,7 @@ Explained Query:
             map=(regexp_split_to_array["\{", case_insensitive=false](#1), array_index(#2, 1), btrim(array_index(#2, 2), "}"))
           Get::Collection materialize.public.input
             project=(#1)
-            map=(array_index(regexp_split_to_array["\n\n", case_insensitive=false](#0), 1))
+            map=(array_index(#0, 1))
             raw=true
     cte l1 =
       Union
@@ -345,7 +345,7 @@ Explained Query:
             map=(regexp_split_to_array[",", case_insensitive=false](btrim(btrim(#1, "\}"), "\{")), text_to_integer(substr(array_index(#2, 1), 3)), text_to_integer(substr(array_index(#2, 2), 3)), text_to_integer(substr(array_index(#2, 3), 3)), text_to_integer(substr(array_index(#2, 4), 3)), "in")
           Get::Collection materialize.public.input
             project=(#1)
-            map=(array_index(regexp_split_to_array["\n\n", case_insensitive=false](#0), 2))
+            map=(array_index(#0, 2))
             raw=true
         Mfp
           project=(#6, #1..=#4)
@@ -477,6 +477,10 @@ Explained Query:
                     arrangements[0]={ key=[], permutation=id, thinning=(#0) }
                 Constant
                   - ()
+
+Source materialize.public.input
+  project=(#1)
+  map=(regexp_split_to_array["\n\n", case_insensitive=false](#0{input}))
 
 Target cluster: quickstart
 
