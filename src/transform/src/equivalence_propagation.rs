@@ -244,6 +244,10 @@ impl EquivalencePropagation {
                         let changed = reducer.reduce_expr(expr);
                         if changed {
                             expr.reduce(&input_types[..(input_arity + index)]);
+                        } else {
+                            let mut expr_cloned = expr.clone();
+                            expr_cloned.reduce(&input_types[..(input_arity + index)]);
+                            assert_eq!(*expr, expr_cloned);
                         }
                         // Introduce the fact relating the mapped expression and corresponding column.
                         // This allows subsequent expressions to be optimized with this information.
@@ -283,6 +287,10 @@ impl EquivalencePropagation {
                         let changed = reducer.reduce_expr(expr);
                         if changed {
                             expr.reduce(input_types.as_ref().unwrap());
+                        } else {
+                            let mut expr_cloned = expr.clone();
+                            expr_cloned.reduce(input_types.as_ref().unwrap());
+                            assert_eq!(*expr, expr_cloned);
                         }
                     }
                     let input_arity = *derived
@@ -316,6 +324,10 @@ impl EquivalencePropagation {
                         let changed = reducer.reduce_expr(expr);
                         if changed {
                             expr.reduce(input_types.as_ref().unwrap());
+                        } else {
+                            let mut expr_cloned = expr.clone();
+                            expr_cloned.reduce(input_types.as_ref().unwrap());
+                            assert_eq!(*expr, expr_cloned);
                         }
                     }
                     // Incorporate `predicates` into `outer_equivalences`.
@@ -413,6 +425,10 @@ impl EquivalencePropagation {
                             let acceptable_sub = literal_domination(&old, expr);
                             if changed {
                                 expr.reduce(input_types.as_ref().unwrap());
+                            } else {
+                                let mut expr_cloned = expr.clone();
+                                expr_cloned.reduce(input_types.as_ref().unwrap());
+                                assert_eq!(*expr, expr_cloned);
                             }
                             if !acceptable_sub && !literal_domination(&old, expr) {
                                 expr.clone_from(&old);
@@ -484,6 +500,10 @@ impl EquivalencePropagation {
                         let acceptable_sub = literal_domination(&old_key, key);
                         if changed {
                             key.reduce(input_type.as_ref().unwrap());
+                        } else {
+                            let mut expr_cloned = key.clone();
+                            expr_cloned.reduce(input_type.as_ref().unwrap());
+                            assert_eq!(*key, expr_cloned);
                         }
                         if !acceptable_sub && !literal_domination(&old_key, key) {
                             key.clone_from(&old_key);
@@ -493,6 +513,10 @@ impl EquivalencePropagation {
                         let changed = reducer.reduce_expr(&mut aggr.expr);
                         if changed {
                             aggr.expr.reduce(input_type.as_ref().unwrap());
+                        } else {
+                            let mut expr_cloned = aggr.expr.clone();
+                            expr_cloned.reduce(input_type.as_ref().unwrap());
+                            assert_eq!(aggr.expr, expr_cloned);
                         }
                         // A count expression over a non-null expression can discard the expression.
                         if aggr.func == mz_expr::AggregateFunc::Count && !aggr.distinct {
@@ -556,6 +580,10 @@ impl EquivalencePropagation {
                         let acceptable_sub = literal_domination(&old_expr, expr);
                         if changed {
                             expr.reduce(input_types.as_ref().unwrap());
+                        } else {
+                            let mut expr_cloned = expr.clone();
+                            expr_cloned.reduce(input_types.as_ref().unwrap());
+                            assert_eq!(*expr, expr_cloned);
                         }
                         if !acceptable_sub && !literal_domination(&old_expr, expr) {
                             expr.clone_from(&old_expr);
