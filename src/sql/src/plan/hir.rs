@@ -26,7 +26,7 @@ pub use mz_expr::{
     BinaryFunc, ColumnOrder, TableFunc, UnaryFunc, UnmaterializableFunc, VariadicFunc, WindowFrame,
 };
 use mz_ore::collections::CollectionExt;
-use mz_ore::stack;
+use mz_ore::{soft_assert_or_log, stack};
 use mz_ore::stack::RecursionLimitError;
 use mz_ore::str::separated;
 use mz_ore::treat_as_equal::TreatAsEqual;
@@ -34,7 +34,8 @@ use mz_repr::adt::array::ArrayDimension;
 use mz_repr::adt::numeric::NumericMaxScale;
 use mz_repr::*;
 use serde::{Deserialize, Serialize};
-
+use mz_ore::cast::CastInto;
+use mz_ore::error::ErrorExt;
 use crate::plan::Params;
 use crate::plan::error::PlanError;
 use crate::plan::query::ExprContext;
@@ -165,10 +166,26 @@ pub enum HirRelationExpr {
         group_key: Vec<usize>,
         /// Column indices used to order rows within groups.
         order_key: Vec<ColumnOrder>,
-        /// Number of records to retain
+        /// Number of records to retain.
+        /// It is of ScalarType::Int64. (It's not entirely clear why not UInt64, see below at
+        /// `offset`.)
         limit: Option<HirScalarExpr>,
-        /// Number of records to skip
-        offset: usize,
+        /// Number of records to skip.
+        /// It is of ScalarType::Int64.
+        /// This can contain parameters at first, but by the time we reach lowering, this should
+        /// already be simply a Literal.
+        ///
+        /// TODO: It's not clear why this is Int64 instead of UInt64. If it were UInt64, we wouldn't
+        /// need to manually check non-negativity, but would just get this for free when casting to
+        /// UInt64.
+        /// There are some arguments for Postgres-compatibility, because Postgres expects an
+        /// Int64. But it's not clear whether there is an actual situation where having a UInt64
+        /// here would introduce a Postgres-incompatibility.
+        /// Another thing is that our prepared statements currently have the limitation that the
+        /// argument passed to EXECUTE must have exactly the same type as the parameter, i.e., it's
+        /// not enough if it's castable. Since UInt64 is not a standard type, various tools might
+        /// have trouble passing it.
+        offset: HirScalarExpr,
         /// User-supplied hint: how many rows will have the same group key.
         expected_group_size: Option<u64>,
     },
@@ -1665,7 +1682,7 @@ impl HirRelationExpr {
         group_key: Vec<usize>,
         order_key: Vec<ColumnOrder>,
         limit: Option<HirScalarExpr>,
-        offset: usize,
+        offset: HirScalarExpr,
         expected_group_size: Option<u64>,
     ) -> Self {
         HirRelationExpr::TopK {
@@ -2127,12 +2144,12 @@ impl HirRelationExpr {
     /// finishing into a trivial finishing.
     pub fn finish_maintained(
         &mut self,
-        finishing: &mut RowSetFinishing<HirScalarExpr>,
+        finishing: &mut RowSetFinishing<HirScalarExpr, HirScalarExpr>,
         group_size_hints: GroupSizeHints,
     ) {
-        if !finishing.is_trivial(self.arity()) {
+        if !HirRelationExpr::is_trivial_row_set_finishing_hir(finishing, self.arity()) {
             let old_finishing =
-                mem::replace(finishing, RowSetFinishing::trivial(finishing.project.len()));
+                mem::replace(finishing, HirRelationExpr::trivial_row_set_finishing_hir(finishing.project.len()));
             *self = HirRelationExpr::top_k(
                 std::mem::replace(
                     self,
@@ -2148,6 +2165,24 @@ impl HirRelationExpr {
                 group_size_hints.limit_input_group_size,
             )
             .project(old_finishing.project);
+        }
+    }
+
+    //////// todo: comment that there is another one
+    pub fn is_trivial_row_set_finishing_hir(rsf: &RowSetFinishing<HirScalarExpr, HirScalarExpr>, arity: usize) -> bool {
+        rsf.limit.is_none()
+            && rsf.order_by.is_empty()
+            && rsf.offset.clone().try_into_literal_int64().is_ok_and(|o| o == 0)
+            && rsf.project.iter().copied().eq(0..arity)
+    }
+
+    ///////// todo: comment
+    pub fn trivial_row_set_finishing_hir(arity: usize) -> RowSetFinishing<HirScalarExpr, HirScalarExpr> {
+        RowSetFinishing {
+            order_by: Vec::new(),
+            limit: None,
+            offset: HirScalarExpr::literal(Datum::Int64(0), ScalarType::Int64),
+            project: (0..arity).collect(),
         }
     }
 
@@ -2996,10 +3031,12 @@ impl HirScalarExpr {
     }
 
     pub fn literal(datum: Datum, scalar_type: ScalarType) -> HirScalarExpr {
+        let col_type = scalar_type.nullable(datum.is_null());
+        soft_assert_or_log!(datum.is_instance_of(&col_type), "type is correct");
         let row = Row::pack([datum]);
         HirScalarExpr::Literal(
             row,
-            scalar_type.nullable(datum.is_null()),
+            col_type,
             TreatAsEqual(None),
         )
     }
@@ -3061,7 +3098,7 @@ impl HirScalarExpr {
         Some(Datum::Null) == self.as_literal()
     }
 
-    /// Return true iff `self` consists only of constants, function calls, and
+    /// Return true iff `self` consists only of literals, materializable function calls, and
     /// if-else statements.
     pub fn is_constant(&self) -> bool {
         let mut worklist = vec![self];
@@ -3089,6 +3126,7 @@ impl HirScalarExpr {
                 } => {
                     worklist.extend(exprs.iter());
                 }
+                // (CallUnmaterializable is not allowed)
                 Self::If {
                     cond,
                     then,
@@ -3364,6 +3402,20 @@ impl HirScalarExpr {
         }
     }
 
+    /// /////////// todo: comment that this has the same expectations as lower_uncorrelated
+
+    /// TODO: use this everywhere instead of `simplify_to_literal`, so that we don't hide the error
+    /// msg.
+    fn simplify_to_literal_with_result(self) -> Result<Row, PlanError> {
+        let mut expr = self.lower_uncorrelated().map_err(|err| PlanError::ConstantExpressionSimplificationFailed(err.to_string_with_causes()))?;
+        expr.reduce(&[]);
+        match expr {
+            mz_expr::MirScalarExpr::Literal(Ok(row), _) => Ok(row),
+            mz_expr::MirScalarExpr::Literal(Err(err), _) => Err(PlanError::ConstantExpressionSimplificationFailed(err.to_string_with_causes())),
+            _ => Err(PlanError::ConstantExpressionSimplificationFailed("Not a constant".to_string()))
+        }
+    }
+
     /// Attempts to simplify this expression to a literal 64-bit integer.
     ///
     /// Returns `None` if this expression cannot be simplified, e.g. because it
@@ -3404,8 +3456,8 @@ impl HirScalarExpr {
 
     /// Attempts to simplify this expression to a literal MzTimestamp.
     ///
-    /// Returns `None` if this expression cannot be simplified, e.g. because it
-    /// contains non-literal values.
+    /// Returns `None` if the expression simplifies to `null` or if the expression cannot be
+    /// simplified, e.g. because it contains non-literal values or a cast fails.
     ///
     /// TODO: Make this (and the other similar fns above) return Result, so that we can show the
     /// error when it fails. (E.g., there can be non-trivial cast errors.)
@@ -3422,6 +3474,46 @@ impl HirScalarExpr {
                 Some(datum.unwrap_mz_timestamp())
             }
         })
+    }
+
+    /// Attempts to simplify this expression of [`ScalarType::Int64`] to a literal Int64 and
+    /// returns it as an usize.
+    ///
+    /// Returns `PlanError::ConstantExpressionSimplificationFailed` if
+    /// - it's not a constant expression (as determined by `is_constant`)
+    /// - evaluates to null
+    /// - an EvalError occurs during evaluation (e.g., a cast fails)
+    ///
+    /// # Panics
+    ///
+    /// Panics if this expression does not have type [`ScalarType::Int64`].
+    pub fn try_into_literal_int64(self) -> Result<i64, PlanError> {
+        // TODO: add the `is_constant` check also to all the other into_literal_... (by adding it to
+        // `simplify_to_literal`), but those should be just soft_asserts at first that it doesn't
+        // actually happen that it's weaker than `reduce`, and then add them for real after 1 week.
+        if !self.is_constant() {
+            return Err(PlanError::ConstantExpressionSimplificationFailed(format!("Expected a constant expression, got {}", self)));
+        }
+        self.clone().simplify_to_literal_with_result().and_then(|row| { ///////////// todo: why do we need this clone???
+            let datum = row.unpack_first();
+            if datum.is_null() {
+                Err(PlanError::ConstantExpressionSimplificationFailed(format!("Expected an expression that evaluates to a non-null value, got {}", self)))
+            } else {
+                Ok(datum.unwrap_int64().cast_into())
+            }
+        })
+    }
+
+    pub fn contains_parameters(&self) -> bool {
+        let mut contains_parameters = false;
+        #[allow(deprecated)]
+        let _ = self.visit_recursively(0, &mut |_depth: usize, expr: &HirScalarExpr| -> Result<(), ()> {
+            if let HirScalarExpr::Parameter(..) = expr {
+                contains_parameters = true;
+            }
+            Ok(())
+        });
+        contains_parameters
     }
 }
 
