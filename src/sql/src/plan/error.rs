@@ -285,6 +285,8 @@ pub enum PlanError {
     Replan(String),
     NetworkPolicyLockoutError,
     NetworkPolicyInUse,
+    // Expected a constant expression that evaluates without an error to a non-null value.
+    ConstantExpressionSimplificationFailed(String),
     // TODO(benesch): eventually all errors should be structured.
     Unstructured(String),
 }
@@ -801,6 +803,7 @@ impl fmt::Display for PlanError {
             Self::UntilReadyTimeoutRequired => {
                 write!(f, "TIMEOUT=<duration> option is required for ALTER CLUSTER ... WITH (WAIT UNTIL READY ( ... ))")
             },
+            Self::ConstantExpressionSimplificationFailed(e) => write!(f, "{}", e),
         }
     }
 }
