@@ -22,14 +22,26 @@ pub use flatmap_to_map::FlatMapToMap;
 pub use projection_extraction::ProjectionExtraction;
 pub use topk_elision::TopKElision;
 
-use mz_expr::MirRelationExpr;
+use mz_expr::{JoinImplementation, MirRelationExpr};
 
 use crate::TransformCtx;
 use crate::analysis::{DerivedBuilder, RelationType};
 
 /// A transform that visits each AST node and reduces scalar expressions.
 #[derive(Debug)]
-pub struct ReduceScalars;
+pub struct ReduceScalars {
+    /// Whether to touch Joins. Should be set to false after JoinImplementation has run. Otherwise,
+    /// [`find_bound_expr`] won't find the things it's looking for, see
+    /// <https://github.com/MaterializeInc/database-issues/issues/9285>
+    reduce_joins: bool,
+}
+
+impl ReduceScalars {
+    /// Constructs a new [`ReduceScalars`] instance, with specifying whether to touch Joins.
+    pub fn new(reduce_joins: bool) -> Self {
+        Self { reduce_joins }
+    }
+}
 
 impl crate::Transform for ReduceScalars {
     fn name(&self) -> &'static str {
@@ -102,31 +114,36 @@ impl crate::Transform for ReduceScalars {
                         scalar.reduce(&output_type[..input_arity + index]);
                     }
                 }
-                MirRelationExpr::Join { equivalences, .. } => {
-                    let mut children: Vec<_> = view.children_rev().collect::<Vec<_>>();
-                    children.reverse();
-                    let input_types = children
-                        .iter()
-                        .flat_map(|c| {
-                            c.value::<RelationType>()
-                                .expect("RelationType required")
-                                .as_ref()
-                                .unwrap()
-                                .iter()
-                                .cloned()
-                        })
-                        .collect::<Vec<_>>();
-
-                    for class in equivalences.iter_mut() {
-                        for expr in class.iter_mut() {
-                            expr.reduce(&input_types[..]);
-                        }
-                        class.sort();
-                        class.dedup();
+                MirRelationExpr::Join { equivalences, implementation, .. } => {
+                    if !matches!(implementation, JoinImplementation::Unimplemented) {
+                        assert!(!self.reduce_joins);
                     }
-                    equivalences.retain(|e| e.len() > 1);
-                    equivalences.sort();
-                    equivalences.dedup();
+                    if self.reduce_joins {
+                        let mut children: Vec<_> = view.children_rev().collect::<Vec<_>>();
+                        children.reverse();
+                        let input_types = children
+                            .iter()
+                            .flat_map(|c| {
+                                c.value::<RelationType>()
+                                    .expect("RelationType required")
+                                    .as_ref()
+                                    .unwrap()
+                                    .iter()
+                                    .cloned()
+                            })
+                            .collect::<Vec<_>>();
+
+                        for class in equivalences.iter_mut() {
+                            for expr in class.iter_mut() {
+                                expr.reduce(&input_types[..]);
+                            }
+                            class.sort();
+                            class.dedup();
+                        }
+                        equivalences.retain(|e| e.len() > 1);
+                        equivalences.sort();
+                        equivalences.dedup();
+                    }
                 }
                 MirRelationExpr::Reduce {
                     group_key,

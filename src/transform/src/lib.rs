@@ -594,7 +594,10 @@ macro_rules! transforms {
     }};
 }
 
-/// A sequence of transformations that simplify the `MirRelationExpr`
+/// A sequence of transformations that simplify the `MirRelationExpr`.
+///
+/// Includes a call to [`ReduceScalars`] with `reduce_joins = true`, so don't call it after
+/// [`JoinImplementation`] has run!
 #[derive(Debug)]
 pub struct FuseAndCollapse {
     transforms: Vec<Box<dyn Transform>>,
@@ -631,7 +634,7 @@ impl Default for FuseAndCollapse {
                 // Some optimizations fight against this, and we want to be sure to end as a
                 // `MirRelationExpr::Constant` if that is the case, so that subsequent use can
                 // clearly see this.
-                Box::new(fold_constants_fixpoint()),
+                Box::new(fold_constants_fixpoint(true)),
             ],
         }
     }
@@ -679,7 +682,7 @@ pub fn fuse_and_collapse_fixpoint() -> Fixpoint {
 /// Let.
 ///
 /// We also call `ReduceScalars`, because that does constant folding inside scalar expressions.
-pub fn fold_constants_fixpoint() -> Fixpoint {
+pub fn fold_constants_fixpoint(reduce_joins: bool) -> Fixpoint {
     Fixpoint {
         name: "fold_constants_fixpoint",
         limit: 100,
@@ -687,7 +690,7 @@ pub fn fold_constants_fixpoint() -> Fixpoint {
             Box::new(FoldConstants {
                 limit: Some(FOLD_CONSTANTS_LIMIT),
             }),
-            Box::new(canonicalization::ReduceScalars),
+            Box::new(canonicalization::ReduceScalars::new(reduce_joins)),
             Box::new(NormalizeLets::new(false)),
         ],
     }
@@ -833,7 +836,7 @@ impl Optimizer {
                 limit: 100,
                 transforms: vec![
                     Box::new(EquivalencePropagation::default()),
-                    Box::new(fold_constants_fixpoint()),
+                    Box::new(fold_constants_fixpoint(true)),
                     Box::new(Demand::default()),
                     // Demand might have introduced dummies, so let's also do a ProjectionPushdown.
                     Box::new(ProjectionPushdown::default()),
@@ -857,12 +860,17 @@ impl Optimizer {
             Box::new(ProjectionPushdown::skip_joins()); if ctx.features.enable_projection_pushdown_after_relation_cse,
             // Plans look nicer if we tidy MFPs again after ProjectionPushdown.
             Box::new(CanonicalizeMfp); if ctx.features.enable_projection_pushdown_after_relation_cse,
-            // Do a last run of constant folding. Importantly, this also runs `NormalizeLets`!
+            // Do a last run of constant folding.
+            //
+            // Importantly, this also runs `NormalizeLets`!
             // We need `NormalizeLets` at the end of the MIR pipeline for various reasons:
             // - The rendering expects some invariants about Let/LetRecs.
             // - `CollectIndexRequests` needs a normalized plan.
             //   https://github.com/MaterializeInc/database-issues/issues/6371
-            Box::new(fold_constants_fixpoint()),
+            //
+            // Also importantly, we need to set `reduce_joins = false`, otherwise `ReduceScalars`
+            // could invalidate join plans.
+            Box::new(fold_constants_fixpoint(false)),
             Box::new(
                 Typecheck::new(ctx.typecheck())
                     .disallow_new_globals()
@@ -913,7 +921,7 @@ impl Optimizer {
                     // The last RelationCSE before JoinImplementation should be with
                     // inline_mfp = true.
                     Box::new(cse::relation_cse::RelationCSE::new(true)),
-                    Box::new(fold_constants_fixpoint()),
+                    Box::new(fold_constants_fixpoint(true)),
                 ],
             }),
             Box::new(
@@ -931,7 +939,7 @@ impl Optimizer {
     /// Builds a tiny optimizer, which is only suitable for optimizing fast-path queries.
     pub fn fast_path_optimizer(_ctx: &mut TransformCtx) -> Self {
         let transforms: Vec<Box<dyn Transform>> = vec![
-            Box::new(canonicalization::ReduceScalars),
+            Box::new(canonicalization::ReduceScalars::new(false)),
             Box::new(LiteralConstraints),
             Box::new(CanonicalizeMfp),
             // We might have arrived at a constant, e.g., due to contradicting literal constraints.
@@ -942,7 +950,7 @@ impl Optimizer {
                     Box::new(FoldConstants {
                         limit: Some(FOLD_CONSTANTS_LIMIT),
                     }),
-                    Box::new(canonicalization::ReduceScalars),
+                    Box::new(canonicalization::ReduceScalars::new(false)),
                 ],
             }),
         ];
@@ -954,10 +962,13 @@ impl Optimizer {
 
     /// Builds a tiny optimizer, which just folds constants. For more details, see
     /// [fold_constants_fixpoint].
+    ///
+    /// Includes a call to [`ReduceScalars`] with `reduce_joins = true`, so don't call it after
+    /// [`JoinImplementation`] has run!
     pub fn constant_optimizer(_ctx: &mut TransformCtx) -> Self {
         Self {
             name: "fast_path_optimizer",
-            transforms: vec![Box::new(fold_constants_fixpoint())],
+            transforms: vec![Box::new(fold_constants_fixpoint(true))],
         }
     }
 
