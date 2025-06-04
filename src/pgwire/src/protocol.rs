@@ -11,8 +11,8 @@ use std::collections::BTreeMap;
 use std::convert::TryFrom;
 use std::future::Future;
 use std::sync::Arc;
-use std::time::Instant;
-use std::{iter, mem};
+use std::time::{Duration, Instant};
+use std::{iter, mem, thread};
 
 use byteorder::{ByteOrder, NetworkEndian};
 use futures::future::{BoxFuture, FutureExt, pending};
@@ -583,6 +583,8 @@ where
                 portal_name,
                 max_rows,
             }) => {
+                thread::sleep(Duration::from_millis(1000)); /////////////////////////
+
                 let max_rows = match usize::try_from(max_rows) {
                     Ok(0) | Err(_) => ExecuteCount::All, // If `max_rows < 0`, no limit.
                     Ok(n) => ExecuteCount::Count(n),
