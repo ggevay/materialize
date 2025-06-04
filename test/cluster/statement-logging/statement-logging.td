@@ -306,3 +306,7 @@ ROLLBACK
 > SELECT finished_at - began_at
   FROM mz_internal.mz_recent_activity_log
   WHERE finished_at - began_at < INTERVAL '1 sec';
+
+> SELECT *
+  FROM mz_internal.mz_statement_execution_history mseh JOIN mz_internal.mz_statement_lifecycle_history mslh ON (mseh.id = mslh.statement_id)
+  WHERE mslh.event_type = 'execution-began' AND mseh.began_at != mslh.occurred_at;
