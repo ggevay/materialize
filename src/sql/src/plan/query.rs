@@ -2685,7 +2685,7 @@ fn plan_select_from_where(
                     };
                     match distinct_exprs.iter().position(move |e| e == expr) {
                         None => sql_bail!(
-                            "SELECT DISTINCT ON expressions must match initial ORDER BY expressions"
+                            "SELECT DISTINCT ON expressions must match a prefix of the ORDER BY expressions, i.e., the ORDER BY should start with the same expressions as the DISTINCT ON"
                         ),
                         Some(pos) => {
                             distinct_exprs.remove(pos);
