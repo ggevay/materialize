@@ -12,6 +12,7 @@ use std::collections::BTreeSet;
 use mz_catalog::memory::objects::{CatalogItem, Index};
 use mz_compute_types::ComputeInstanceId;
 use mz_expr::{CollectionPlan, MirScalarExpr};
+use mz_ore::soft_assert_or_log;
 use mz_repr::GlobalId;
 use mz_transform::IndexOracle;
 
@@ -86,7 +87,11 @@ impl DataflowBuilder<'_> {
     pub fn indexes_on(&self, id: GlobalId) -> impl Iterator<Item = (GlobalId, &Index)> {
         self.catalog
             .get_indexes_on(id, self.compute.instance_id())
-            .filter(|(idx_id, _idx)| self.compute.contains_collection(idx_id))
+            .filter(|(idx_id, _idx)| {
+                let contains = self.compute.contains_collection(idx_id);
+                soft_assert_or_log!(contains, "OptimizerCatalog doesn't agree with ComputeInstanceSnapshot");
+                contains
+            })
             .filter(|(idx_id, _idx)| self.replan.map_or(true, |id| idx_id < &id))
     }
 }
