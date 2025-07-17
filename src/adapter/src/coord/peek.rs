@@ -27,7 +27,7 @@ use mz_compute_client::controller::PeekNotification;
 use mz_compute_client::protocol::command::PeekTarget;
 use mz_compute_client::protocol::response::PeekResponse;
 use mz_compute_types::ComputeInstanceId;
-use mz_compute_types::dataflows::{DataflowDescription, IndexImport};
+use mz_compute_types::dataflows::DataflowDescription;
 use mz_controller_types::ClusterId;
 use mz_expr::explain::{HumanizedExplain, HumanizerMode, fmt_text_constant_rows};
 use mz_expr::row::RowCollection;
@@ -50,6 +50,7 @@ use serde::{Deserialize, Serialize};
 use timely::progress::{Antichain, Timestamp};
 use uuid::Uuid;
 
+use crate::catalog::CatalogState;
 use crate::coord::timestamp_selection::TimestampDetermination;
 use crate::optimize::OptimizerError;
 use crate::statement_logging::{StatementEndedExecutionReason, StatementExecutionStrategy};
@@ -416,188 +417,225 @@ fn permute_oneshot_mfp_around_index(
 }
 
 /// Determine if the dataflow plan can be implemented without an actual dataflow.
-///
-/// If the optimized plan is a `Constant` or a `Get` of a maintained arrangement,
-/// we can avoid building a dataflow (and either just return the results, or peek
-/// out of the arrangement, respectively).
 pub fn create_fast_path_plan<T: Timestamp>(
     dataflow_plan: &mut DataflowDescription<OptimizedMirRelationExpr, (), T>,
     view_id: GlobalId,
     finishing: Option<&RowSetFinishing>,
     persist_fast_path_limit: usize,
     persist_fast_path_order: bool,
+    index_oracle: &CatalogState,
 ) -> Result<Option<FastPathPlan>, OptimizerError> {
     // At this point, `dataflow_plan` contains our best optimized dataflow.
     // We will check the plan to see if there is a fast path to escape full dataflow construction.
 
     // We need to restrict ourselves to settings where the inserted transient view is the first thing
     // to build (no dependent views). There is likely an index to build as well, but we may not be sure.
-    if dataflow_plan.objects_to_build.len() >= 1 && dataflow_plan.objects_to_build[0].id == view_id
-    {
-        let mut mir = &*dataflow_plan.objects_to_build[0].plan.as_inner_mut();
-        if let Some((rows, found_typ)) = mir.as_const() {
-            // In the case of a constant, we can return the result now.
-            return Ok(Some(FastPathPlan::Constant(
-                rows.clone()
-                    .map(|rows| rows.into_iter().map(|(row, diff)| (row, diff)).collect()),
-                found_typ.clone(),
-            )));
+    Ok(
+        if dataflow_plan.objects_to_build.len() >= 1
+            && dataflow_plan.objects_to_build[0].id == view_id
+        {
+            let mir = &*dataflow_plan.objects_to_build[0].plan.as_inner_mut();
+            create_fast_path_plan_inner(
+                mir,
+                finishing,
+                persist_fast_path_limit,
+                persist_fast_path_order,
+                index_oracle,
+                Some(&dataflow_plan.index_imports.keys().cloned().collect()),
+            )?
+            .into_iter()
+            .next()
         } else {
-            // If there is a TopK that would be completely covered by the finishing, then jump
-            // through the TopK.
-            if let MirRelationExpr::TopK {
-                input,
-                group_key,
-                order_key,
-                limit,
-                offset,
-                monotonic: _,
-                expected_group_size: _,
-            } = mir
-            {
-                if let Some(finishing) = finishing {
-                    if group_key.is_empty() && *order_key == finishing.order_by && *offset == 0 {
-                        // The following is roughly `limit >= finishing.limit`, but with Options.
-                        let finishing_limits_at_least_as_topk = match (limit, finishing.limit) {
-                            (None, _) => true,
-                            (Some(..), None) => false,
-                            (Some(topk_limit), Some(finishing_limit)) => {
-                                if let Some(l) = topk_limit.as_literal_int64() {
-                                    l >= *finishing_limit
-                                } else {
-                                    false
-                                }
-                            }
-                        };
-                        if finishing_limits_at_least_as_topk {
-                            mir = input;
-                        }
-                    }
-                }
-            }
-            // In the case of a linear operator around an indexed view, we
-            // can skip creating a dataflow and instead pull all the rows in
-            // index and apply the linear operator against them.
-            let (mfp, mir) = mz_expr::MapFilterProject::extract_from_expression(mir);
-            match mir {
-                MirRelationExpr::Get {
-                    id: Id::Global(get_id),
-                    typ: relation_typ,
-                    ..
-                } => {
-                    // Just grab any arrangement if an arrangement exists
-                    for (index_id, IndexImport { desc, .. }) in dataflow_plan.index_imports.iter() {
-                        if desc.on_id == *get_id {
-                            return Ok(Some(FastPathPlan::PeekExisting(
-                                *get_id,
-                                *index_id,
-                                None,
-                                permute_oneshot_mfp_around_index(mfp, &desc.key)?,
-                            )));
-                        }
-                    }
+            None
+        },
+    )
+}
 
-                    // If there is no arrangement, consider peeking the persist shard directly.
-                    // Generally, we consider a persist peek when the query can definitely be satisfied
-                    // by scanning through a small, constant number of Persist key-values.
-                    let safe_mfp = mfp_to_safe_plan(mfp)?;
-                    let (_maps, filters, projection) = safe_mfp.as_map_filter_project();
-
-                    let literal_constraint = if persist_fast_path_order {
-                        let mut row = Row::default();
-                        let mut packer = row.packer();
-                        for (idx, col) in relation_typ.column_types.iter().enumerate() {
-                            if !preserves_order(&col.scalar_type) {
-                                break;
-                            }
-                            let col_expr = MirScalarExpr::column(idx);
-
-                            let Some((literal, _)) = filters
-                                .iter()
-                                .filter_map(|f| f.expr_eq_literal(&col_expr))
-                                .next()
-                            else {
-                                break;
-                            };
-                            packer.extend_by_row(&literal);
-                        }
-                        if row.is_empty() { None } else { Some(row) }
-                    } else {
-                        None
-                    };
-
-                    let finish_ok = match &finishing {
-                        None => false,
-                        Some(RowSetFinishing {
-                            order_by,
-                            limit,
-                            offset,
-                            ..
-                        }) => {
-                            let order_ok = if persist_fast_path_order {
-                                order_by.iter().enumerate().all(|(idx, order)| {
-                                    // Map the ordering column back to the column in the source data.
-                                    // (If it's not one of the input columns, we can't make any guarantees.)
-                                    let column_idx = projection[order.column];
-                                    if column_idx >= safe_mfp.input_arity {
-                                        return false;
-                                    }
-                                    let column_type = &relation_typ.column_types[column_idx];
-                                    let index_ok = idx == column_idx;
-                                    let nulls_ok = !column_type.nullable || order.nulls_last;
-                                    let asc_ok = !order.desc;
-                                    let type_ok = preserves_order(&column_type.scalar_type);
-                                    index_ok && nulls_ok && asc_ok && type_ok
-                                })
+/// Determine if the given MIR expression can be implemented without an actual dataflow.
+///
+///
+/// If the optimized plan is a `Constant` or a `Get` of a maintained arrangement,
+/// we can avoid building a dataflow (and either just return the results, or peek
+/// out of the arrangement, respectively).
+pub fn create_fast_path_plan_inner(
+    mut mir: &MirRelationExpr,
+    finishing: Option<&RowSetFinishing>,
+    persist_fast_path_limit: usize,
+    persist_fast_path_order: bool,
+    index_oracle: &CatalogState,
+    indexes: Option<&BTreeSet<GlobalId>>, // only considers these indexes if given
+) -> Result<Vec<FastPathPlan>, OptimizerError> {
+    if let Some((rows, found_typ)) = mir.as_const() {
+        Ok(vec![FastPathPlan::Constant(
+            rows.clone()
+                .map(|rows| rows.into_iter().map(|(row, diff)| (row, diff)).collect()),
+            found_typ.clone(),
+        )])
+    } else {
+        // If there is a TopK that would be completely covered by the finishing, then jump
+        // through the TopK.
+        if let MirRelationExpr::TopK {
+            input,
+            group_key,
+            order_key,
+            limit,
+            offset,
+            monotonic: _,
+            expected_group_size: _,
+        } = mir
+        {
+            if let Some(finishing) = finishing {
+                if group_key.is_empty() && *order_key == finishing.order_by && *offset == 0 {
+                    // The following is roughly `limit >= finishing.limit`, but with Options.
+                    let finishing_limits_at_least_as_topk = match (limit, finishing.limit) {
+                        (None, _) => true,
+                        (Some(..), None) => false,
+                        (Some(topk_limit), Some(finishing_limit)) => {
+                            if let Some(l) = topk_limit.as_literal_int64() {
+                                l >= *finishing_limit
                             } else {
-                                order_by.is_empty()
-                            };
-                            let limit_ok = limit.map_or(false, |l| {
-                                usize::cast_from(l) + *offset < persist_fast_path_limit
-                            });
-                            order_ok && limit_ok
+                                false
+                            }
                         }
                     };
-
-                    let key_constraint = if let Some(literal) = &literal_constraint {
-                        let prefix_len = literal.iter().count();
-                        relation_typ
-                            .keys
-                            .iter()
-                            .any(|k| k.iter().all(|idx| *idx < prefix_len))
-                    } else {
-                        false
-                    };
-
-                    // We can generate a persist peek when:
-                    // - We have a literal constraint that includes an entire key (so we'll return at most one value)
-                    // - We can return the first N key values (no filters, small limit, consistent order)
-                    if key_constraint || (filters.is_empty() && finish_ok) {
-                        return Ok(Some(FastPathPlan::PeekPersist(
-                            *get_id,
-                            literal_constraint,
-                            safe_mfp,
-                        )));
+                    if finishing_limits_at_least_as_topk {
+                        mir = input;
                     }
                 }
-                MirRelationExpr::Join { implementation, .. } => {
-                    if let mz_expr::JoinImplementation::IndexedFilter(coll_id, idx_id, key, vals) =
-                        implementation
-                    {
-                        return Ok(Some(FastPathPlan::PeekExisting(
-                            *coll_id,
-                            *idx_id,
-                            Some(vals.clone()),
-                            permute_oneshot_mfp_around_index(mfp, key)?,
-                        )));
-                    }
-                }
-                // nothing can be done for non-trivial expressions.
-                _ => {}
             }
         }
+        // In the case of a linear operator around an indexed view, we
+        // can skip creating a dataflow and instead pull all the rows in
+        // index and apply the linear operator against them.
+        let (mfp, mir) = mz_expr::MapFilterProject::extract_from_expression(mir);
+        match mir {
+            MirRelationExpr::Get {
+                id: Id::Global(get_id),
+                typ: relation_typ,
+                ..
+            } => {
+                let mut fast_path_plans = Vec::new();
+
+                // Grab all relevant indexes.
+                let peek_existing = index_oracle
+                    .get_indexes_on_any_cluster(*get_id)
+                    .filter(|(_index_id, index)| {
+                        indexes.map_or(true, |indexes| indexes.contains(&index.global_id))
+                    })
+                    // this is flat_map instead of map because of the ?
+                    .flat_map(|(index_id, index)| {
+                        Ok::<FastPathPlan, OptimizerError>(FastPathPlan::PeekExisting(
+                            *get_id,
+                            index_id,
+                            None,
+                            permute_oneshot_mfp_around_index(mfp.clone(), &index.keys)?,
+                        ))
+                    });
+                fast_path_plans.extend(peek_existing);
+
+                // Also consider peeking the persist shard directly.
+                // Generally, we consider a persist peek when the query can definitely be satisfied
+                // by scanning through a small, constant number of Persist key-values.
+                let safe_mfp = mfp_to_safe_plan(mfp)?;
+                let (_maps, filters, projection) = safe_mfp.as_map_filter_project();
+
+                let literal_constraint = if persist_fast_path_order {
+                    let mut row = Row::default();
+                    let mut packer = row.packer();
+                    for (idx, col) in relation_typ.column_types.iter().enumerate() {
+                        if !preserves_order(&col.scalar_type) {
+                            break;
+                        }
+                        let col_expr = MirScalarExpr::column(idx);
+
+                        let Some((literal, _)) = filters
+                            .iter()
+                            .filter_map(|f| f.expr_eq_literal(&col_expr))
+                            .next()
+                        else {
+                            break;
+                        };
+                        packer.extend_by_row(&literal);
+                    }
+                    if row.is_empty() { None } else { Some(row) }
+                } else {
+                    None
+                };
+
+                let finish_ok = match &finishing {
+                    None => false,
+                    Some(RowSetFinishing {
+                        order_by,
+                        limit,
+                        offset,
+                        ..
+                    }) => {
+                        let order_ok = if persist_fast_path_order {
+                            order_by.iter().enumerate().all(|(idx, order)| {
+                                // Map the ordering column back to the column in the source data.
+                                // (If it's not one of the input columns, we can't make any guarantees.)
+                                let column_idx = projection[order.column];
+                                if column_idx >= safe_mfp.input_arity {
+                                    return false;
+                                }
+                                let column_type = &relation_typ.column_types[column_idx];
+                                let index_ok = idx == column_idx;
+                                let nulls_ok = !column_type.nullable || order.nulls_last;
+                                let asc_ok = !order.desc;
+                                let type_ok = preserves_order(&column_type.scalar_type);
+                                index_ok && nulls_ok && asc_ok && type_ok
+                            })
+                        } else {
+                            order_by.is_empty()
+                        };
+                        let limit_ok = limit.map_or(false, |l| {
+                            usize::cast_from(l) + *offset < persist_fast_path_limit
+                        });
+                        order_ok && limit_ok
+                    }
+                };
+
+                let key_constraint = if let Some(literal) = &literal_constraint {
+                    let prefix_len = literal.iter().count();
+                    relation_typ
+                        .keys
+                        .iter()
+                        .any(|k| k.iter().all(|idx| *idx < prefix_len))
+                } else {
+                    false
+                };
+
+                // We can generate a persist peek when:
+                // - We have a literal constraint that includes an entire key (so we'll return at most one value)
+                // - We can return the first N key values (no filters, small limit, consistent order)
+                if key_constraint || (filters.is_empty() && finish_ok) {
+                    fast_path_plans.push(FastPathPlan::PeekPersist(
+                        *get_id,
+                        literal_constraint,
+                        safe_mfp,
+                    ));
+                }
+
+                Ok(fast_path_plans)
+            }
+            MirRelationExpr::Join { implementation, .. } => {
+                if let mz_expr::JoinImplementation::IndexedFilter(coll_id, idx_id, key, vals) =
+                    implementation
+                {
+                    Ok(vec![FastPathPlan::PeekExisting(
+                        *coll_id,
+                        *idx_id,
+                        Some(vals.clone()),
+                        permute_oneshot_mfp_around_index(mfp, key)?,
+                    )])
+                } else {
+                    Ok(Vec::new())
+                }
+            }
+            // nothing can be done for non-trivial expressions.
+            _ => Ok(Vec::new()),
+        }
     }
-    Ok(None)
 }
 
 impl FastPathPlan {

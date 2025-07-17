@@ -1448,7 +1448,16 @@ impl CatalogState {
         id: GlobalId,
         cluster: ClusterId,
     ) -> impl Iterator<Item = (GlobalId, &Index)> {
-        let index_matches = move |idx: &Index| idx.on == id && idx.cluster_id == cluster;
+        self.get_indexes_on_any_cluster(id)
+            .filter(move |(_index_id, index)| index.cluster_id == cluster)
+    }
+
+    /// Returns all indexes on the given object from all clusters.
+    pub fn get_indexes_on_any_cluster(
+        &self,
+        id: GlobalId,
+    ) -> impl Iterator<Item = (GlobalId, &Index)> {
+        let index_matches = move |idx: &Index| idx.on == id;
 
         self.try_get_entry_by_global_id(&id)
             .into_iter()
