@@ -15,22 +15,19 @@ use std::sync::Arc;
 
 use mz_compute_types::dataflows::{BuildDesc, DataflowDescription};
 use mz_expr::{AccessStrategy, Id, MirRelationExpr, OptimizedMirRelationExpr, RowSetFinishing};
-use mz_ore::num::NonNeg;
 use mz_repr::explain::ExprHumanizer;
 use mz_repr::{GlobalId, Timestamp};
 use mz_sql::ast::Statement;
 use mz_sql::names::Aug;
 use mz_sql::optimizer_metrics::OptimizerMetrics;
 use mz_sql::plan::HirRelationExpr;
-use mz_sql::session::metadata::SessionMetadata;
-use mz_transform::EmptyStatisticsOracle;
 use serde::Serialize;
-
+use mz_controller_types::ClusterId;
 use crate::TimestampContext;
 use crate::catalog::Catalog;
-use crate::coord::peek::{FastPathPlan, PeekPlan};
+use crate::coord::peek::FastPathPlan;
 use crate::optimize::dataflows::ComputeInstanceSnapshot;
-use crate::optimize::{self, Optimize, OptimizerConfig, OptimizerError};
+use crate::optimize::OptimizerConfig;
 use crate::session::SessionMeta;
 
 /// Information needed to compute PlanInsights.
@@ -43,6 +40,7 @@ pub struct PlanInsightsContext {
     //
     // TODO: Avoid populating this if not needed. Maybe make this a method that can return a
     // ComputeInstanceSnapshot for a given cluster.
+    /////////// todo: can we remove this and maybe some other fields too?
     pub compute_instances: BTreeMap<String, ComputeInstanceSnapshot>,
     pub target_instance: String,
     pub metrics: OptimizerMetrics,
@@ -53,6 +51,8 @@ pub struct PlanInsightsContext {
     pub view_id: GlobalId,
     pub index_id: GlobalId,
     pub enable_re_optimize: bool,
+    pub fast_path_limit: bool, /////////// todo maybe better name
+    pub fast_path_clusters: Vec<(ClusterId, GlobalId, GlobalId)>, ////////// todo struct or comment (cluster, index_id, on_id)
 }
 
 /// Insights about an optimized plan.
@@ -75,87 +75,8 @@ pub struct PlanInsights {
 
 #[derive(Clone, Debug, Serialize)]
 pub struct FastPathCluster {
-    index: Name,
-    on: Name,
-}
-
-impl PlanInsights {
-    pub async fn compute_fast_path_clusters(
-        &mut self,
-        humanizer: &dyn ExprHumanizer,
-        ctx: Box<PlanInsightsContext>,
-    ) {
-        let session: Arc<dyn SessionMetadata + Send> = Arc::new(ctx.session);
-        let tasks = ctx
-            .compute_instances
-            .into_iter()
-            .map(|(name, compute_instance)| {
-                let raw_expr = ctx.raw_expr.clone();
-                let mut finishing = ctx.finishing.clone();
-                // For the current cluster, try adding a LIMIT to see if it fast paths with PeekPersist.
-                if name == ctx.target_instance {
-                    finishing.limit = Some(NonNeg::try_from(1).expect("non-negitave"));
-                }
-                let session = Arc::clone(&session);
-                let timestamp_context = ctx.timestamp_context.clone();
-                let mut optimizer = optimize::peek::Optimizer::new(
-                    Arc::clone(&ctx.catalog),
-                    compute_instance,
-                    finishing,
-                    ctx.view_id,
-                    ctx.index_id,
-                    ctx.optimizer_config.clone(),
-                    ctx.metrics.clone(),
-                );
-                mz_ore::task::spawn_blocking(
-                    || "compute fast path clusters",
-                    move || {
-                        // HIR ⇒ MIR lowering and MIR optimization (local)
-                        let local_mir_plan = optimizer.catch_unwind_optimize(raw_expr)?;
-                        // Attach resolved context required to continue the pipeline.
-                        let local_mir_plan = local_mir_plan.resolve(
-                            timestamp_context,
-                            &*session,
-                            Box::new(EmptyStatisticsOracle {}),
-                        );
-                        // MIR optimization (global), MIR ⇒ LIR lowering, and LIR optimization (global)
-                        let global_lir_plan = optimizer.catch_unwind_optimize(local_mir_plan)?;
-                        Ok::<_, OptimizerError>((name, global_lir_plan))
-                    },
-                )
-            });
-        for task in tasks {
-            let res = task.await;
-            let Ok(Ok((name, plan))) = res else {
-                continue;
-            };
-            let (plan, _, _) = plan.unapply();
-            if let PeekPlan::FastPath(plan) = plan {
-                // Same-cluster optimization is the LIMIT check.
-                if name == ctx.target_instance {
-                    self.fast_path_limit =
-                        Some(ctx.optimizer_config.features.persist_fast_path_limit);
-                    continue;
-                }
-                let idx_name = if let FastPathPlan::PeekExisting(_, idx_id, _, _) = plan {
-                    let idx_entry = ctx.catalog.get_entry_by_global_id(&idx_id);
-                    Some(FastPathCluster {
-                        index: structured_name(humanizer, idx_id),
-                        on: structured_name(
-                            humanizer,
-                            idx_entry.index().expect("must be index").on,
-                        ),
-                    })
-                } else {
-                    // This shouldn't ever happen (changing the cluster should not affect whether a
-                    // fast path of type constant or persist peek is created), but protect against
-                    // it anyway.
-                    None
-                };
-                self.fast_path_clusters.insert(name, idx_name);
-            }
-        }
-    }
+    pub index: Name,   ///////// todo: new instead of pub?
+    pub on: Name,
 }
 
 /// Insights about an imported collection in a plan.
@@ -288,7 +209,8 @@ fn add_import_insights(
     );
 }
 
-fn structured_name(humanizer: &dyn ExprHumanizer, id: GlobalId) -> Name {
+////////// todo: maybe move it instead of pub
+pub fn structured_name(humanizer: &dyn ExprHumanizer, id: GlobalId) -> Name {
     let mut parts = humanizer.humanize_id_parts(id).unwrap_or(Vec::new());
     Name {
         item: parts.pop(),

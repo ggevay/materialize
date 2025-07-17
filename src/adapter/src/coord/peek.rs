@@ -444,6 +444,7 @@ pub fn create_fast_path_plan<T: Timestamp>(
                 Some(&dataflow_plan.index_imports.keys().cloned().collect()),
             )?
             .into_iter()
+            .map(|(fast_path_plan, _cluster_id)| fast_path_plan)
             .next()
         } else {
             None
@@ -463,14 +464,14 @@ pub fn create_fast_path_plan_inner(
     persist_fast_path_limit: usize,
     persist_fast_path_order: bool,
     index_oracle: &CatalogState,
-    indexes: Option<&BTreeSet<GlobalId>>, // only considers these indexes if given
-) -> Result<Vec<FastPathPlan>, OptimizerError> {
+    indexes: Option<&BTreeSet<GlobalId>>, // if given, only considers these indexes
+) -> Result<Vec<(FastPathPlan, Option<ClusterId>)>, OptimizerError> {
     if let Some((rows, found_typ)) = mir.as_const() {
-        Ok(vec![FastPathPlan::Constant(
+        Ok(vec![(FastPathPlan::Constant(
             rows.clone()
                 .map(|rows| rows.into_iter().map(|(row, diff)| (row, diff)).collect()),
             found_typ.clone(),
-        )])
+        ), None)])
     } else {
         // If there is a TopK that would be completely covered by the finishing, then jump
         // through the TopK.
@@ -524,12 +525,12 @@ pub fn create_fast_path_plan_inner(
                     })
                     // this is flat_map instead of map because of the ?
                     .flat_map(|(index_id, index)| {
-                        Ok::<FastPathPlan, OptimizerError>(FastPathPlan::PeekExisting(
+                        Ok::<(FastPathPlan, Option<ClusterId>), OptimizerError>((FastPathPlan::PeekExisting(
                             *get_id,
                             index_id,
                             None,
                             permute_oneshot_mfp_around_index(mfp.clone(), &index.keys)?,
-                        ))
+                        ), Some(index.cluster_id)))
                     });
                 fast_path_plans.extend(peek_existing);
 
@@ -609,11 +610,11 @@ pub fn create_fast_path_plan_inner(
                 // - We have a literal constraint that includes an entire key (so we'll return at most one value)
                 // - We can return the first N key values (no filters, small limit, consistent order)
                 if key_constraint || (filters.is_empty() && finish_ok) {
-                    fast_path_plans.push(FastPathPlan::PeekPersist(
+                    fast_path_plans.push((FastPathPlan::PeekPersist(
                         *get_id,
                         literal_constraint,
                         safe_mfp,
-                    ));
+                    ), None));
                 }
 
                 Ok(fast_path_plans)
@@ -622,12 +623,12 @@ pub fn create_fast_path_plan_inner(
                 if let mz_expr::JoinImplementation::IndexedFilter(coll_id, idx_id, key, vals) =
                     implementation
                 {
-                    Ok(vec![FastPathPlan::PeekExisting(
+                    Ok(vec![(FastPathPlan::PeekExisting(
                         *coll_id,
                         *idx_id,
                         Some(vals.clone()),
                         permute_oneshot_mfp_around_index(mfp, key)?,
-                    )])
+                    ), None)])
                 } else {
                     Ok(Vec::new())
                 }

@@ -310,6 +310,7 @@ impl Coordinator {
                     view_id,
                     index_id,
                     optimizer_config,
+                    explain_ctx.needs_plan_insights(),
                     self.optimizer_metrics(),
                 ))
             }
@@ -559,7 +560,7 @@ impl Coordinator {
             || "optimize peek",
             move || {
                 span.in_scope(|| {
-                    let pipeline = || -> Result<Either<optimize::peek::GlobalLirPlan, optimize::copy_to::GlobalLirPlan>, AdapterError> {
+                    let pipeline = || -> Result<Either<(optimize::peek::GlobalLirPlan, (bool, Vec<(ClusterId, GlobalId, GlobalId)>)), optimize::copy_to::GlobalLirPlan>, AdapterError> {
                         let _dispatch_guard = explain_ctx.dispatch_guard();
 
                         let raw_expr = plan.source.clone();
@@ -574,7 +575,7 @@ impl Coordinator {
                                 // MIR optimization (global), MIR ⇒ LIR lowering, and LIR optimization (global)
                                 let global_lir_plan = optimizer.catch_unwind_optimize(local_mir_plan)?;
 
-                                Ok(Either::Left(global_lir_plan))
+                                Ok(Either::Left((global_lir_plan, optimizer.plan_insights_fast_path.clone())))
                             }
                             // Optimize COPY TO statement.
                             Either::Right(optimizer) => {
@@ -594,7 +595,7 @@ impl Coordinator {
                     let optimization_finished_at = now();
 
                     let stage = match pipeline_result {
-                        Ok(Either::Left(global_lir_plan)) => {
+                        Ok(Either::Left((global_lir_plan, plan_insights_fast_path))) => {
                             let optimizer = optimizer.unwrap_left();
                             // Enable fast path cluster calculation for slow path plans.
                             let needs_plan_insights = explain_ctx.needs_plan_insights();
@@ -624,6 +625,8 @@ impl Coordinator {
                                 view_id: optimizer.select_id(),
                                 index_id: optimizer.index_id(),
                                 enable_re_optimize,
+                                fast_path_limit: plan_insights_fast_path.0,
+                                fast_path_clusters: plan_insights_fast_path.1,
                             }).map(Box::new);
                             match explain_ctx {
                                 ExplainContext::Plan(explain_ctx) => {

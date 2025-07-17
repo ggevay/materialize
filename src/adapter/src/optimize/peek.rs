@@ -29,10 +29,11 @@ use mz_transform::typecheck::{SharedContext as TypecheckContext, empty_context};
 use mz_transform::{StatisticsOracle, TransformCtx};
 use timely::progress::Antichain;
 use tracing::debug_span;
-
+use mz_controller_types::ClusterId;
+use mz_ore::num::NonNeg;
 use crate::TimestampContext;
 use crate::catalog::Catalog;
-use crate::coord::peek::{PeekDataflowPlan, PeekPlan, create_fast_path_plan};
+use crate::coord::peek::{PeekDataflowPlan, PeekPlan, create_fast_path_plan, create_fast_path_plan_inner, FastPathPlan};
 use crate::optimize::dataflows::{
     ComputeInstanceSnapshot, DataflowBuilder, EvalTime, ExprPrepStyle, prep_relation_expr,
     prep_scalar_expr,
@@ -57,10 +58,15 @@ pub struct Optimizer {
     index_id: GlobalId,
     /// Optimizer config.
     config: OptimizerConfig,
+    ///  ////////////// todo: comment
+    needs_plan_insights: bool,
     /// Optimizer metrics.
     metrics: OptimizerMetrics,
     /// The time spent performing optimization so far.
     duration: Duration,
+    /// ///////// todo: comment    and maybe struct    and maybe accessor
+    /// (fast_path_limit, (cluster, index_id, on_id))
+    pub plan_insights_fast_path: (bool, Vec<(ClusterId, GlobalId, GlobalId)>),
 }
 
 impl Optimizer {
@@ -71,6 +77,7 @@ impl Optimizer {
         select_id: GlobalId,
         index_id: GlobalId,
         config: OptimizerConfig,
+        needs_plan_insights: bool,
         metrics: OptimizerMetrics,
     ) -> Self {
         Self {
@@ -81,8 +88,10 @@ impl Optimizer {
             select_id,
             index_id,
             config,
+            needs_plan_insights,
             metrics,
             duration: Default::default(),
+            plan_insights_fast_path: (false, Vec::new()),
         }
     }
 
@@ -343,6 +352,39 @@ impl<'s> Optimize<LocalMirPlan<Resolved<'s>>> for Optimizer {
                 return Err(e);
             }
         };
+
+        if self.needs_plan_insights && !use_fast_path_optimizer {
+            let mut tweaked_finishing = self.finishing.clone();
+            tweaked_finishing.limit = Some(NonNeg::try_from(1).expect("constant is non-negative"));
+            match create_fast_path_plan_inner(
+                expr.as_inner(),
+                Some(&tweaked_finishing),
+                self.config.features.persist_fast_path_limit,
+                self.config.persist_fast_path_order,
+                self.catalog.state(),
+                None,
+            ) {
+                Ok(fast_path_plans) => {
+                    let fast_path_clusters = fast_path_plans.iter().cloned().filter_map(|(plan, cluster_id)| {
+                        soft_assert_or_log!(cluster_id.is_some() || !matches!(plan, FastPathPlan::PeekExisting(..)), "xxxxxxxxxx"); ////////////// todo   probably remove
+                        if let (FastPathPlan::PeekExisting(idx_on, idx_id, ..), Some(cluster_id)) = (plan, cluster_id) {
+                            Some((cluster_id, idx_on, idx_id))
+                        } else {
+                            None
+                        }
+                    });
+                    let fast_path_limit = fast_path_plans.iter().any(|(plan, _cluster_id)| {
+                        matches!(plan, FastPathPlan::PeekExisting(..))
+                    });
+                    self.plan_insights_fast_path.0 = fast_path_limit;
+                    self.plan_insights_fast_path.1 = fast_path_clusters.collect();
+                },
+                Err(..) => {
+                    // Ignore errors here, because plan insights are not critical.
+                    ///////////// todo: simplify code
+                }
+            };
+        }
 
         // Run global optimization.
         mz_transform::optimize_dataflow(&mut df_desc, &mut transform_ctx, use_fast_path_optimizer)?;
