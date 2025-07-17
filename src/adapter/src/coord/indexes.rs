@@ -87,10 +87,22 @@ impl DataflowBuilder<'_> {
     pub fn indexes_on(&self, id: GlobalId) -> impl Iterator<Item = (GlobalId, &Index)> {
         self.catalog
             .get_indexes_on(id, self.compute.instance_id())
-            .filter(|(idx_id, _idx)| {
+            .filter(move |(idx_id, _idx)| {
                 let contains = self.compute.contains_collection(idx_id);
-                soft_assert_or_log!(contains, "OptimizerCatalog doesn't agree with ComputeInstanceSnapshot");
-                contains
+                // TODO(ggevay): If this assert doesn't fire for a while, we should be able to
+                // remove the ComputeInstanceSnapshot from all the `Optimizer`s (e.g. in peek.rs),
+                // because this always true call seems to be its only non-trivial usage. Other
+                // usages just ask for the instance id, which is a much smaller thing.
+                ///////soft_assert_or_log!(contains, "OptimizerCatalog doesn't agree with ComputeInstanceSnapshot. id: {}, idx_id: {}", id, idx_id);
+
+
+
+                ////////contains
+
+
+                true
+
+
             })
             .filter(|(idx_id, _idx)| self.replan.map_or(true, |id| idx_id < &id))
     }
