@@ -1,0 +1,83 @@
+# Copyright Materialize, Inc. and contributors. All rights reserved.
+#
+# Use of this software is governed by the Business Source License
+# included in the LICENSE file at the root of this repository.
+#
+# As of the Change Date specified in that file, in accordance with
+# the Business Source License, use of this software will be governed
+# by the Apache License, Version 2.0.
+
+# This file is for error semantics and evaluation order/short-circuiting, see
+# https://github.com/MaterializeInc/database-issues/issues/4972
+
+statement ok
+create table test (a int, b int);
+
+statement ok
+insert into test values (1, 0);
+
+query I
+select coalesce(a, 1/b) from test;
+----
+1
+
+# Postgres errors on it, which we consider to be a bug in Postgres, because Postgres' coalesce docs say it should
+# short-circuit: https://www.postgresql.org/docs/current/functions-conditional.html#FUNCTIONS-COALESCE-NVL-IFNULL
+query I
+select coalesce(a, 1/0) from test;
+----
+1
+
+query I
+select coalesce(a, 1/b) from test where b = 0;
+----
+1
+
+query I
+select coalesce(7, 1/b) from test;
+----
+7
+
+query I
+select coalesce(7, 1/0) from test;
+----
+7
+
+statement ok
+create table test_nonnull (a int not null, b int);
+
+statement ok
+insert into test_nonnull values (1, 0);
+
+query I
+select coalesce(a, 1/b) from test_nonnull;
+----
+1
+
+# Postgres errors, which we consider to be a bug in Postgres
+query I
+select coalesce(a, 1/0) from test_nonnull;
+----
+1
+
+query I
+select coalesce(a, 1/b) from test_nonnull where b = 0;
+----
+1
+
+query I
+select coalesce(7, 1/b) from test_nonnull;
+----
+7
+
+query I
+select coalesce(7, 1/0) from test_nonnull;
+----
+7
+
+# Bug in Materialize. This errors because MFP CSE pulls the a/b from the coalesce. We should add a similar exception
+# as we have for MSE::If.
+query error db error: ERROR: Evaluation error: division by zero
+select coalesce(a, a/b + 1, a/b + 2) from test;
+
+# TODO(ggevay): Add similar tests for `MSE::If` and many other things.
