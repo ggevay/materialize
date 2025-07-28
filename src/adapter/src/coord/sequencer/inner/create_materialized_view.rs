@@ -596,6 +596,8 @@ impl Coordinator {
         let (dataflow_as_of, storage_as_of, until) =
             self.select_timestamps(id_bundle, refresh_schedule.as_ref(), read_holds)?;
 
+        println!("###### MV dataflow_as_of: {:?}, storage_as_of: {:?}", dataflow_as_of, storage_as_of);
+
         tracing::info!(
             dataflow_as_of = ?dataflow_as_of,
             storage_as_of = ?storage_as_of,

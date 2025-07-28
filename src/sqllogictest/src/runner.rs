@@ -1722,6 +1722,8 @@ impl<'a> RunnerInner<'a> {
             .execute_view_inner(create_index.as_str(), output, location.clone())
             .await?;
 
+        thread::sleep(Duration::from_millis(2100));
+
         let view_outcome;
         if let Some(outcome) = tentative_outcome {
             view_outcome = outcome;

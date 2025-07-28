@@ -11,6 +11,17 @@
 
 mode cockroach
 
+simple conn=mz_system,user=mz_system
+ALTER CLUSTER quickstart OWNER TO materialize
+----
+COMPLETE 0
+
+statement ok
+ALTER CLUSTER quickstart SET (REPLICATION FACTOR = 1, SIZE = '1');
+
+statement ok
+select mz_unsafe.mz_sleep(2);
+
 # Two columns here represent a validity interval [a, b].
 # These values must be castable to mz_timestamp, otherwise the BETWEEN will error.
 statement ok

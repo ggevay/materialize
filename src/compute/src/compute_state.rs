@@ -829,6 +829,11 @@ impl<'a, A: Allocate + 'static> ActiveComputeState<'a, A> {
         }
 
         for (id, frontiers) in responses {
+
+            if id == GlobalId::User(4) {
+                println!(">>> send_compute_response    (id: {}, frontiers: {:?}", id, frontiers);
+            }
+
             self.send_compute_response(ComputeResponse::Frontiers(id, frontiers));
         }
     }

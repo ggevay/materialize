@@ -332,11 +332,13 @@ impl<'w, A: Allocate + 'static> Worker<'w, A> {
 
         // Commence normal operation.
         loop {
-            // Get the maintenance interval, default to zero if we don't have a compute state.
-            let maintenance_interval = self
-                .compute_state
-                .as_ref()
-                .map_or(Duration::ZERO, |state| state.server_maintenance_interval);
+            // // Get the maintenance interval, default to zero if we don't have a compute state.
+            // let maintenance_interval = self
+            //     .compute_state
+            //     .as_ref()
+            //     .map_or(Duration::ZERO, |state| state.server_maintenance_interval);
+
+            let maintenance_interval = Duration::from_millis(0);
 
             let now = Instant::now();
             // Determine if we need to perform maintenance, which is true if `maintenance_interval`

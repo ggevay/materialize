@@ -485,6 +485,7 @@ impl Coordinator {
                 // hold on to them and downgrade when possible?
                 let read_holds = coord.acquire_read_holds(&id_bundle);
                 let since = coord.least_valid_read(&read_holds);
+                println!("###### index as_of: {:?}", since);
                 df_desc.set_as_of(since);
 
                 coord

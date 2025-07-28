@@ -1975,6 +1975,10 @@ where
         frontiers: FrontiersResponse<T>,
         replica_id: ReplicaId,
     ) {
+        if id == GlobalId::User(4) {
+            println!("<<< handle_frontiers_response(id: {}, frontiers: {:?}", id, frontiers);
+        }
+
         if !self.collections.contains_key(&id) {
             soft_panic_or_log!(
                 "frontiers update for an unknown collection \
