@@ -12,6 +12,18 @@
 mode cockroach
 
 simple conn=mz_system,user=mz_system
+ALTER SYSTEM SET enable_compute_logical_backpressure = false;
+----
+COMPLETE 0
+
+
+simple conn=mz_system,user=mz_system
+ALTER SYSTEM SET enable_compute_temporal_bucketing = false;
+----
+COMPLETE 0
+
+
+simple conn=mz_system,user=mz_system
 ALTER CLUSTER quickstart OWNER TO materialize
 ----
 COMPLETE 0
