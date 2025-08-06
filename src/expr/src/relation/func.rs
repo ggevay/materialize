@@ -31,7 +31,8 @@ use mz_repr::adt::numeric::{self, Numeric, NumericMaxScale};
 use mz_repr::adt::regex::Regex as ReprRegex;
 use mz_repr::adt::timestamp::{CheckedTimestamp, TimestampLike};
 use mz_repr::{
-    ColumnName, ColumnType, Datum, Diff, RelationType, Row, RowArena, ScalarType, SharedRow,
+    ColumnName, ColumnType, Datum, Diff, RelationType, Row, RowArena, RowPacker, ScalarType,
+    SharedRow, datum_size,
 };
 use num::{CheckedAdd, Integer, Signed, ToPrimitive};
 use ordered_float::OrderedFloat;
@@ -4254,59 +4255,40 @@ impl TableFuncMaybeWithOrdinality {
         if !self.with_ordinality {
             return self.func.eval(datums, temp_storage);
         }
-
-        // WITH ORDINALITY: zip 1, 2, 3, 4, ... to the output of the table function.
-        //
-        // We don't want to handle negative diffs here, similarly to how Reduce and TopK assert that
-        // there are no negative diffs. It's a bit more dangerous here, because Reduce and TopK have
-        // a consolidation before their assertions. But we should be fine even without a
-        // consolidation, because a Union with a Negated input always immediately does a
-        // consolidation (see `refine_union_negate_consolidation`). We have an issue for making this
-        // invariant official:
-        // https://github.com/MaterializeInc/database-issues/issues/8771
-        //
-        // (Note that there is the `repeat_row` _internal_ table function, which can produce a
-        // negative diff by itself, i.e., without inheriting a negative diff from its input. This is
-        // not supported together with WITH ORDINALITY, which seems appropriate.)
-        //
-        // But, if things go south, and we somehow encounter negative diffs here, then we do want to
-        // emit an EvalError. However, we don't want to materialize the table function's results
-        // into a Vec. So, we evaluate the table function twice: first just checking for negative
-        // diffs, and second doing the actual WITH ORDINALITY.
-
-        // 1. Check for negative diffs.
-        for (_row, diff) in self.func.eval(datums, temp_storage)? {
-            if diff.into_inner() < 0 {
-                tracing::error!("TableFunc with_ordinality encountered a negative diff");
-                return Err(EvalError::Internal(
-                    "TableFunc with_ordinality encountered a negative diff".into(),
-                ));
-            }
-        }
-
-        // 2. Do the WITH ORDINALITY.
-        let mut row_buf = Row::default();
+        // WITH ORDINALITY: zip 1, 2, 3, 4, ... to the output of the table function. We need to blow
+        // up non-1 diffs, because the ordinality column will have different values for each copy.
+        let mut next_ordinal: i64 = 1;
         let it = self
             .func
             .eval(datums, temp_storage)?
-            .flat_map(|(row, diff)| {
-                iter::repeat(row).take(
-                    diff.into_inner()
-                        .try_into()
-                        .expect("checked above for negative diffs"),
-                )
-            })
-            .enumerate()
-            .map(move |(i, row)| {
-                let mut packer = row_buf.packer();
-                packer.extend_by_row(&row);
-                // the `+ 1` is because WITH ORDINALITY starts from 1, while `enumerate` starts from 0.
-                packer.push(Datum::Int64(
-                    (i + 1)
-                        .try_into()
-                        .expect("table function doesn't have more than 2^63 output rows"),
-                ));
-                (row_buf.clone(), Diff::ONE)
+            .flat_map(move |(mut row, diff)| {
+                let diff = diff.into_inner();
+                // WITH ORDINALITY is not well-defined for negative diffs. This is ok, since the
+                // only table function that can emit negative diffs is `repeat_row`, which is in
+                // `mz_unsafe`, so users can never call it.
+                //
+                // (We also don't need to worry about negative diffs in FlatMap's input, because
+                // the diff of the input of the FlatMap is factored in after we return from here.)
+                assert!(diff >= 0);
+                // The ordinals that will be associated with this row.
+                let mut ordinals = next_ordinal..(next_ordinal + diff);
+                next_ordinal += diff;
+                // The maximum byte capacity we need for the original row and its ordinal.
+                let cap = row.data_len() + datum_size(&Datum::Int64(next_ordinal));
+                iter::from_fn(move || {
+                    let ordinal = ordinals.next()?;
+                    let mut row = if ordinals.is_empty() {
+                        // This is the last row, so no need to clone. (Most table functions emit
+                        // only 1 diffs, so this completely avoids cloning in most cases.)
+                        std::mem::take(&mut row)
+                    } else {
+                        let mut new_row = Row::with_capacity(cap);
+                        new_row.clone_from(&row);
+                        new_row
+                    };
+                    RowPacker::for_existing_row(&mut row).push(Datum::Int64(ordinal));
+                    Some((row, Diff::ONE))
+                })
             });
         Ok(Box::new(it))
     }
