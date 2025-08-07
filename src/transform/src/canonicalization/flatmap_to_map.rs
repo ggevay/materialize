@@ -12,7 +12,7 @@
 
 use mz_expr::visit::Visit;
 use mz_expr::{MirRelationExpr, MirScalarExpr, TableFunc, TableFuncMaybeWithOrdinality};
-use mz_repr::{Datum, Diff, Row, ScalarType};
+use mz_repr::{Datum, Diff, RowPacker, ScalarType};
 
 use crate::TransformCtx;
 
@@ -83,12 +83,7 @@ impl FlatMapElimination {
                             }
                             (Some((mut row, Diff::ONE)), None) => {
                                 if func.with_ordinality {
-                                    // Extend the row by an 1.
-                                    let mut new_row = Row::empty();
-                                    let mut packer = new_row.packer();
-                                    packer.extend_by_row(&row);
-                                    packer.push(Datum::Int64(1));
-                                    row = new_row;
+                                    RowPacker::for_existing_row(&mut row).push(Datum::Int64(1));
                                 }
                                 assert_eq!(func.output_type().column_types.len(), 1);
                                 *relation =
