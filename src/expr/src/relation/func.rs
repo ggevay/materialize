@@ -3716,6 +3716,9 @@ fn mz_acl_explode<'a>(
     Ok(res.into_iter())
 }
 
+/// Don't add table functions that emit negative diffs! These are undefined with `WITH ORDINALITY`.
+/// (`Repeat` _can_ emit negative diffs, on which `WITH ORDINALITY` panics, but this is in
+/// mz_unsafe, so not callable by users.)
 #[derive(
     Arbitrary, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize, Hash, MzReflect,
 )]

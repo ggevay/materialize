@@ -1691,6 +1691,10 @@ pub struct TableFuncPlan {
 ///   WITH ORDINALITY on this UNNEST (e.g., `regexp_split_to_table`).
 /// - `_pg_expandarray` and `date_bin_hopping` also look easy.
 /// - `mz_name_rank` and `mz_resolve_object_name` look more complicated but hopefully solvable.
+///
+/// Another approach to fixing this would be to add an ORDER BY to the SQL definitions and then
+/// move this ORDER BY into a row_number window function call. This would at least solve the
+/// correctness problem, but not the performance problem.
 #[derive(Debug)]
 pub enum TableFuncImpl {
     CallTable {
