@@ -47,7 +47,7 @@ impl FlatMapElimination {
         if let MirRelationExpr::FlatMap { func, exprs, input } = relation {
             if let TableFuncMaybeWithOrdinality {
                 func: TableFunc::GuardSubquerySize { .. },
-                with_ordinality: false,
+                with_ordinality: _,
             } = func
             {
                 if let Some(1) = exprs[0].as_literal_int64() {
