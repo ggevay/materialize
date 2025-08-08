@@ -1606,8 +1606,8 @@ Project (#5, #6)
       Map (coalesce(#2, #4))
         FullOuterJoin (#2 = #4)
           Map (#1)
-            CallTable jsonb_object_keys[with ordinality](text_to_jsonb("{\"1\":2}"))
-          CallTable jsonb_object_keys[with ordinality](text_to_jsonb("{\"3\":4}"))
+            CallTable jsonb_object_keys[with_ordinality](text_to_jsonb("{\"1\":2}"))
+          CallTable jsonb_object_keys[with_ordinality](text_to_jsonb("{\"3\":4}"))
 
 Target cluster: quickstart
 

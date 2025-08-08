@@ -49,7 +49,7 @@ use itertools::Itertools;
 use mz_expr::virtual_syntax::AlgExcept;
 use mz_expr::{
     Id, LetRecLimit, LocalId, MapFilterProject, MirScalarExpr, RowSetFinishing, TableFunc,
-    TableFuncMaybeWithOrdinality, func as expr_func,
+    func as expr_func,
 };
 use mz_ore::assert_none;
 use mz_ore::collections::CollectionExt;
@@ -2129,12 +2129,9 @@ fn plan_values(
         }
     }
     let out = HirRelationExpr::CallTable {
-        func: TableFuncMaybeWithOrdinality {
-            func: TableFunc::Wrap {
-                width: ncols,
-                types: col_types,
-            },
-            with_ordinality: false,
+        func: TableFunc::Wrap {
+            width: ncols,
+            types: col_types,
         },
         exprs,
     };
@@ -2211,12 +2208,9 @@ fn plan_values_insert(
     }
 
     Ok(HirRelationExpr::CallTable {
-        func: TableFuncMaybeWithOrdinality {
-            func: TableFunc::Wrap {
-                width: values[0].len(),
-                types,
-            },
-            with_ordinality: false,
+        func: TableFunc::Wrap {
+            width: values[0].len(),
+            types,
         },
         exprs,
     })
@@ -3305,13 +3299,14 @@ fn plan_table_function_internal(
             let tf = func::select_impl(ecx, FuncSpec::Func(name), impls, scalar_args, vec![])?;
             let scope = Scope::from_source(scope_name.clone(), tf.column_names);
             let expr = match tf.imp {
-                TableFuncImpl::CallTable { func, exprs } => HirRelationExpr::CallTable {
-                    func: TableFuncMaybeWithOrdinality {
-                        func,
-                        with_ordinality,
-                    },
-                    exprs,
-                },
+                TableFuncImpl::CallTable { mut func, exprs } => {
+                    if with_ordinality {
+                        func = TableFunc::WithOrdinality {
+                            inner: Box::new(func),
+                        };
+                    }
+                    HirRelationExpr::CallTable { func, exprs }
+                }
                 TableFuncImpl::Expr(expr) => {
                     if !with_ordinality {
                         expr
@@ -3354,12 +3349,15 @@ fn plan_table_function_internal(
 
             let scope = Scope::from_source(scope_name.clone(), vec![column_name]);
 
+            let mut func = TableFunc::TabletizedScalar { relation, name };
+            if with_ordinality {
+                func = TableFunc::WithOrdinality {
+                    inner: Box::new(func),
+                };
+            }
             (
                 HirRelationExpr::CallTable {
-                    func: TableFuncMaybeWithOrdinality {
-                        func: TableFunc::TabletizedScalar { relation, name },
-                        with_ordinality,
-                    },
+                    func,
                     exprs: vec![expr],
                 },
                 scope,

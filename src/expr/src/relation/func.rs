@@ -21,8 +21,8 @@ use itertools::{Either, Itertools};
 use mz_lowertest::MzReflect;
 use mz_ore::cast::CastFrom;
 
-use mz_ore::soft_assert_or_log;
 use mz_ore::str::separated;
+use mz_ore::{soft_assert_eq_no_log, soft_assert_or_log};
 use mz_proto::{IntoRustIfSome, ProtoType, RustType, TryFromProtoError};
 use mz_repr::adt::array::ArrayDimension;
 use mz_repr::adt::date::Date;
@@ -52,10 +52,10 @@ use crate::explain::{HumanizedExpr, HumanizerMode};
 use crate::relation::proto_aggregate_func::{
     self, ProtoColumnOrders, ProtoFusedValueWindowFunc, ProtoFusedWindowAggregate,
 };
-use crate::relation::proto_table_func::ProtoTabletizedScalar;
+use crate::relation::proto_table_func::{ProtoTabletizedScalar, ProtoWithOrdinality};
 use crate::relation::{
-    ColumnOrder, ProtoAggregateFunc, ProtoTableFunc, ProtoTableFuncMaybeWithOrdinality,
-    WindowFrame, WindowFrameBound, WindowFrameUnits, compare_columns, proto_table_func,
+    ColumnOrder, ProtoAggregateFunc, ProtoTableFunc, WindowFrame, WindowFrameBound,
+    WindowFrameUnits, compare_columns, proto_table_func,
 };
 use crate::scalar::func::{add_timestamp_months, jsonb_stringify};
 
@@ -3719,9 +3719,7 @@ fn mz_acl_explode<'a>(
 /// Don't add table functions that emit negative diffs! These are undefined with `WITH ORDINALITY`.
 /// (`Repeat` _can_ emit negative diffs, on which `WITH ORDINALITY` panics, but this is in
 /// mz_unsafe, so not callable by users.)
-#[derive(
-    Arbitrary, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize, Hash, MzReflect,
-)]
+#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize, Hash, MzReflect)]
 pub enum TableFunc {
     AclExplode,
     MzAclExplode,
@@ -3787,6 +3785,49 @@ pub enum TableFunc {
         relation: RelationType,
     },
     RegexpMatches,
+    /// This is a special table function that is used to implement the `WITH ORDINALITY` clause:
+    /// When the user does
+    /// `f(...) WITH ORDINALITY`,
+    /// we plan this as
+    /// `TableFunc::WithOrdinality { inner: f(...) }`
+    ///
+    /// WITH ORDINALITY means that we append an extra output column, whose value is 1,2,3,... for
+    /// the output rows corresponding to a call of the table function on one input row. For example,
+    /// WITH ORDINALITY numbers the elements of a list when calling unnest_list.
+    WithOrdinality {
+        inner: Box<TableFunc>,
+    },
+}
+
+/// Manual `Arbitrary`, because proptest-derive is choking on the recursive `WithOrdinality`
+/// variant.
+impl Arbitrary for TableFunc {
+    type Parameters = ();
+    type Strategy = BoxedStrategy<Self>;
+
+    fn arbitrary_with(_: Self::Parameters) -> Self::Strategy {
+        let leaf = Union::new(vec![
+            Just(TableFunc::AclExplode),
+            Just(TableFunc::MzAclExplode),
+            Just(TableFunc::JsonbObjectKeys),
+            Just(TableFunc::GenerateSeriesInt32),
+            Just(TableFunc::GenerateSeriesInt64),
+            Just(TableFunc::GenerateSeriesTimestamp),
+            Just(TableFunc::GenerateSeriesTimestampTz),
+            Just(TableFunc::Repeat),
+            Just(TableFunc::GenerateSubscriptsArray),
+            Just(TableFunc::RegexpMatches),
+        ])
+        .boxed();
+
+        // recursive WithOrdinality variant
+        leaf.prop_recursive(2, 256, 2, |inner| {
+            inner.clone().prop_map(|tf| TableFunc::WithOrdinality {
+                inner: Box::new(tf),
+            })
+        })
+        .boxed()
+    }
 }
 
 impl RustType<ProtoTableFunc> for TableFunc {
@@ -3825,6 +3866,11 @@ impl RustType<ProtoTableFunc> for TableFunc {
                     })
                 }
                 TableFunc::RegexpMatches => Kind::RegexpMatches(()),
+                TableFunc::WithOrdinality { inner } => {
+                    Kind::WithOrdinality(Box::new(ProtoWithOrdinality {
+                        inner: Some(inner.into_proto()),
+                    }))
+                }
             }),
         }
     }
@@ -3873,6 +3919,11 @@ impl RustType<ProtoTableFunc> for TableFunc {
                     .into_rust_if_some("ProtoTabletizedScalar::relation")?,
             },
             Kind::RegexpMatches(_) => TableFunc::RegexpMatches,
+            Kind::WithOrdinality(inner) => TableFunc::WithOrdinality {
+                inner: inner
+                    .inner
+                    .into_rust_if_some("ProtoWithOrdinality::inner")?,
+            },
         })
     }
 }
@@ -3963,6 +4014,7 @@ impl TableFunc {
                 Ok(Box::new(std::iter::once((r, Diff::ONE))))
             }
             TableFunc::RegexpMatches => Ok(Box::new(regexp_matches(datums)?)),
+            TableFunc::WithOrdinality { inner } => with_ordinality(inner, datums, temp_storage),
         }
     }
 
@@ -4103,7 +4155,17 @@ impl TableFunc {
 
                 (column_types, keys)
             }
+            TableFunc::WithOrdinality { inner } => {
+                let mut typ = inner.output_type();
+                // Add the ordinality column.
+                typ.column_types.push(ScalarType::Int64.nullable(false));
+                // The ordinality column is always a key.
+                typ.keys.push(vec![typ.column_types.len() - 1]);
+                (typ.column_types, typ.keys)
+            }
         };
+
+        soft_assert_eq_no_log!(column_types.len(), self.output_arity());
 
         if !keys.is_empty() {
             RelationType::new(column_types).with_keys(keys)
@@ -4134,6 +4196,7 @@ impl TableFunc {
             TableFunc::Wrap { width, .. } => *width,
             TableFunc::TabletizedScalar { relation, .. } => relation.column_types.len(),
             TableFunc::RegexpMatches => 1,
+            TableFunc::WithOrdinality { inner } => inner.output_arity() + 1,
         }
     }
 
@@ -4159,6 +4222,7 @@ impl TableFunc {
             TableFunc::GuardSubquerySize { .. } => false,
             TableFunc::Wrap { .. } => false,
             TableFunc::TabletizedScalar { .. } => false,
+            TableFunc::WithOrdinality { inner } => inner.empty_on_null_input(),
         }
     }
 
@@ -4187,6 +4251,7 @@ impl TableFunc {
             TableFunc::TabletizedScalar { .. } => true,
             TableFunc::RegexpMatches => true,
             TableFunc::GuardSubquerySize { .. } => false,
+            TableFunc::WithOrdinality { inner } => inner.preserves_monotonicity(),
         }
     }
 }
@@ -4214,119 +4279,51 @@ impl fmt::Display for TableFunc {
             TableFunc::Wrap { width, .. } => write!(f, "wrap{}", width),
             TableFunc::TabletizedScalar { name, .. } => f.write_str(name),
             TableFunc::RegexpMatches => write!(f, "regexp_matches(_, _, _)"),
+            TableFunc::WithOrdinality { inner } => write!(f, "{}[with_ordinality]", inner),
         }
     }
 }
 
-/// A table function plus an optional WITH ORDINALITY clause.
-///
-/// WITH ORDINALITY means that we append an extra output column, whose value is 1,2,3,... for the
-/// output rows corresponding to a call of the table function on one input row. For example,
-/// WITH ORDINALITY numbers the elements of a list when calling unnest_list.
-#[derive(
-    Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, MzReflect, Arbitrary,
-)]
-pub struct TableFuncMaybeWithOrdinality {
-    pub func: TableFunc,
-    pub with_ordinality: bool,
-}
-
-impl RustType<ProtoTableFuncMaybeWithOrdinality> for TableFuncMaybeWithOrdinality {
-    fn into_proto(&self) -> ProtoTableFuncMaybeWithOrdinality {
-        ProtoTableFuncMaybeWithOrdinality {
-            func: Some(self.func.clone()).into_proto(),
-            with_ordinality: self.with_ordinality,
-        }
-    }
-
-    fn from_proto(proto: ProtoTableFuncMaybeWithOrdinality) -> Result<Self, TryFromProtoError> {
-        Ok(TableFuncMaybeWithOrdinality {
-            func: proto
-                .func
-                .into_rust_if_some("ProtoTableFuncMaybeWithOrdinality::func")?,
-            with_ordinality: proto.with_ordinality,
-        })
-    }
-}
-
-impl TableFuncMaybeWithOrdinality {
-    pub fn eval<'a>(
-        &'a self,
-        datums: &'a [Datum<'a>],
-        temp_storage: &'a RowArena,
-    ) -> Result<Box<dyn Iterator<Item = (Row, Diff)> + 'a>, EvalError> {
-        if !self.with_ordinality {
-            return self.func.eval(datums, temp_storage);
-        }
-        // WITH ORDINALITY: zip 1, 2, 3, 4, ... to the output of the table function. We need to blow
-        // up non-1 diffs, because the ordinality column will have different values for each copy.
-        let mut next_ordinal: i64 = 1;
-        let it = self
-            .func
-            .eval(datums, temp_storage)?
-            .flat_map(move |(mut row, diff)| {
-                let diff = diff.into_inner();
-                // WITH ORDINALITY is not well-defined for negative diffs. This is ok, since the
-                // only table function that can emit negative diffs is `repeat_row`, which is in
-                // `mz_unsafe`, so users can never call it.
-                //
-                // (We also don't need to worry about negative diffs in FlatMap's input, because
-                // the diff of the input of the FlatMap is factored in after we return from here.)
-                assert!(diff >= 0);
-                // The ordinals that will be associated with this row.
-                let mut ordinals = next_ordinal..(next_ordinal + diff);
-                next_ordinal += diff;
-                // The maximum byte capacity we need for the original row and its ordinal.
-                let cap = row.data_len() + datum_size(&Datum::Int64(next_ordinal));
-                iter::from_fn(move || {
-                    let ordinal = ordinals.next()?;
-                    let mut row = if ordinals.is_empty() {
-                        // This is the last row, so no need to clone. (Most table functions emit
-                        // only 1 diffs, so this completely avoids cloning in most cases.)
-                        std::mem::take(&mut row)
-                    } else {
-                        let mut new_row = Row::with_capacity(cap);
-                        new_row.clone_from(&row);
-                        new_row
-                    };
-                    RowPacker::for_existing_row(&mut row).push(Datum::Int64(ordinal));
-                    Some((row, Diff::ONE))
-                })
-            });
-        Ok(Box::new(it))
-    }
-
-    pub fn output_type(&self) -> RelationType {
-        let mut typ = self.func.output_type();
-        if self.with_ordinality {
-            typ.column_types.push(ScalarType::Int64.nullable(false));
-        }
-        typ
-    }
-
-    pub fn output_arity(&self) -> usize {
-        self.func.output_arity() + if self.with_ordinality { 1 } else { 0 }
-    }
-
-    pub fn empty_on_null_input(&self) -> bool {
-        self.func.empty_on_null_input()
-    }
-
-    /// True iff the table function preserves the append-only property of its input.
-    pub fn preserves_monotonicity(&self) -> bool {
-        self.func.preserves_monotonicity()
-    }
-}
-
-impl fmt::Display for TableFuncMaybeWithOrdinality {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let with_ordinality = if self.with_ordinality {
-            "[with ordinality]"
-        } else {
-            ""
-        };
-        write!(f, "{}{}", self.func, with_ordinality)
-    }
+pub fn with_ordinality<'a>(
+    inner: &'a TableFunc,
+    datums: &'a [Datum<'a>],
+    temp_storage: &'a RowArena,
+) -> Result<Box<dyn Iterator<Item = (Row, Diff)> + 'a>, EvalError> {
+    // zip 1, 2, 3, 4, ... to the output of the table function. We need to blow up non-1 diffs,
+    // because the ordinality column will have different values for each copy.
+    let mut next_ordinal: i64 = 1;
+    let it = inner
+        .eval(datums, temp_storage)?
+        .flat_map(move |(mut row, diff)| {
+            let diff = diff.into_inner();
+            // WITH ORDINALITY is not well-defined for negative diffs. This is ok, since the
+            // only table function that can emit negative diffs is `repeat_row`, which is in
+            // `mz_unsafe`, so users can never call it.
+            //
+            // (We also don't need to worry about negative diffs in FlatMap's input, because
+            // the diff of the input of the FlatMap is factored in after we return from here.)
+            assert!(diff >= 0);
+            // The ordinals that will be associated with this row.
+            let mut ordinals = next_ordinal..(next_ordinal + diff);
+            next_ordinal += diff;
+            // The maximum byte capacity we need for the original row and its ordinal.
+            let cap = row.data_len() + datum_size(&Datum::Int64(next_ordinal));
+            iter::from_fn(move || {
+                let ordinal = ordinals.next()?;
+                let mut row = if ordinals.is_empty() {
+                    // This is the last row, so no need to clone. (Most table functions emit
+                    // only 1 diffs, so this completely avoids cloning in most cases.)
+                    std::mem::take(&mut row)
+                } else {
+                    let mut new_row = Row::with_capacity(cap);
+                    new_row.clone_from(&row);
+                    new_row
+                };
+                RowPacker::for_existing_row(&mut row).push(Datum::Int64(ordinal));
+                Some((row, Diff::ONE))
+            })
+        });
+    Ok(Box::new(it))
 }
 
 #[cfg(test)]

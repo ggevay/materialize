@@ -1816,10 +1816,7 @@ SELECT generate_series(a, b) from t
                 ]
               }
             ],
-            "func": {
-              "func": "GenerateSeriesInt32",
-              "with_ordinality": false
-            },
+            "func": "GenerateSeriesInt32",
             "mfp_after": {
               "expressions": [],
               "predicates": [],

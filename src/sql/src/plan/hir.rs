@@ -19,9 +19,7 @@ use std::{fmt, mem};
 use itertools::Itertools;
 use mz_expr::virtual_syntax::{AlgExcept, Except, IR};
 use mz_expr::visit::{Visit, VisitChildren};
-use mz_expr::{
-    CollectionPlan, Id, LetRecLimit, RowSetFinishing, TableFuncMaybeWithOrdinality, func,
-};
+use mz_expr::{CollectionPlan, Id, LetRecLimit, RowSetFinishing, func};
 // these happen to be unchanged at the moment, but there might be additions later
 use mz_expr::AggregateFunc::{FusedWindowAggregate, WindowAggregate};
 pub use mz_expr::{
@@ -133,7 +131,7 @@ pub enum HirRelationExpr {
         scalars: Vec<HirScalarExpr>,
     },
     CallTable {
-        func: TableFuncMaybeWithOrdinality,
+        func: TableFunc,
         exprs: Vec<HirScalarExpr>,
     },
     Filter {

@@ -11,7 +11,7 @@
 //!
 
 use mz_expr::visit::Visit;
-use mz_expr::{MirRelationExpr, MirScalarExpr, TableFunc, TableFuncMaybeWithOrdinality};
+use mz_expr::{MirRelationExpr, MirScalarExpr, TableFunc};
 use mz_repr::{Datum, Diff, RowPacker, ScalarType};
 
 use crate::TransformCtx;
@@ -45,21 +45,20 @@ impl FlatMapElimination {
     /// Turns `FlatMap` into `Map` if only one row is produced by flatmap.
     pub fn action(relation: &mut MirRelationExpr) {
         if let MirRelationExpr::FlatMap { func, exprs, input } = relation {
-            if let TableFuncMaybeWithOrdinality {
-                func: TableFunc::GuardSubquerySize { .. },
-                with_ordinality: _,
-            } = func
-            {
+            let (func, with_ordinality) = if let TableFunc::WithOrdinality { inner } = func {
+                // get to the actual function, but remember that we have a WITH ORDINALITY clause.
+                (&**inner, true)
+            } else {
+                (&*func, false)
+            };
+
+            if let TableFunc::GuardSubquerySize { .. } = func {
+                // (`with_ordinality` doesn't matter because this function never emits rows)
                 if let Some(1) = exprs[0].as_literal_int64() {
                     relation.take_safely(None);
                 }
-            } else if let TableFuncMaybeWithOrdinality {
-                func: TableFunc::Wrap { width, .. },
-                with_ordinality,
-            } = func
-            {
+            } else if let TableFunc::Wrap { width, .. } = func {
                 if *width >= exprs.len() {
-                    let with_ordinality = with_ordinality.clone();
                     *relation = input.take_dangerous().map(std::mem::take(exprs));
                     if with_ordinality {
                         *relation = relation.take_dangerous().map_one(MirScalarExpr::literal(
@@ -68,7 +67,7 @@ impl FlatMapElimination {
                         ));
                     }
                 }
-            } else if is_supported_unnest(&func.func) {
+            } else if is_supported_unnest(func) {
                 let func = func.clone();
                 let exprs = exprs.clone();
                 use mz_expr::MirScalarExpr;
@@ -82,7 +81,7 @@ impl FlatMapElimination {
                                 relation.take_safely(None);
                             }
                             (Some((mut row, Diff::ONE)), None) => {
-                                if func.with_ordinality {
+                                if with_ordinality {
                                     RowPacker::for_existing_row(&mut row).push(Datum::Int64(1));
                                 }
                                 assert_eq!(func.output_type().column_types.len(), 1);
