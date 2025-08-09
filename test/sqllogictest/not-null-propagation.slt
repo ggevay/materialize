@@ -498,25 +498,100 @@ EXPLAIN OPTIMIZED PLAN WITH(types, no fast path, humanized expressions) AS VERBO
 Explained Query:
   With
     cte l0 =
+      Distinct project=[#0{col_null}] // { types: "(integer?)" }
+        Project (#0{col_null}) // { types: "(integer?)" }
+          ReadStorage materialize.public.int_table // { types: "(integer?, integer)" }
+    cte l1 =
+      Reduce group_by=[#0{col_null}] aggregates=[any((#1{right_col0_0} = 1))] // { types: "(integer?, boolean?)" }
+        FlatMap wrap1(#0{col_null}) // { types: "(integer?, integer?)" }
+          Get l0 // { types: "(integer?)" }
+    cte l2 =
+      Union // { types: "(integer?, boolean?)" }
+        Get l1 // { types: "(integer?, boolean?)" }
+        Map (false) // { types: "(integer?, boolean)" }
+          Union // { types: "(integer?)" }
+            Negate // { types: "(integer?)" }
+              Project (#0{col_null}) // { types: "(integer?)" }
+                Get l1 // { types: "(integer?, boolean?)" }
+            Get l0 // { types: "(integer?)" }
+    cte l3 =
       Distinct project=[#0{col_null}, #1{col_not_null}] // { types: "(integer?, integer)" }
         ReadStorage materialize.public.int_table // { types: "(integer?, integer)" }
+    cte l4 =
+      FlatMap wrap1(#1{col_not_null}) // { types: "(integer?, integer, integer)" }
+        Get l3 // { types: "(integer?, integer)" }
+    cte l5 =
+      Distinct project=[#0{col_null}, #1{col_not_null}] // { types: "(integer?, integer)" }
+        Project (#0{col_null}, #1{col_not_null}) // { types: "(integer?, integer)" }
+          Filter (#2{right_col0_2} = 1) // { types: "(integer?, integer, integer)" }
+            Get l4 // { types: "(integer?, integer, integer)" }
+    cte l6 =
+      Reduce group_by=[#0{col_null}, #1{col_not_null}] aggregates=[any((#0{col_null} = #2{right_col0_8}))] // { types: "(integer?, integer, boolean?)" }
+        Get l4 // { types: "(integer?, integer, integer)" }
+    cte l7 =
+      Union // { types: "(integer?, integer, boolean?)" }
+        Get l6 // { types: "(integer?, integer, boolean?)" }
+        Map (false) // { types: "(integer?, integer, boolean)" }
+          Union // { types: "(integer?, integer)" }
+            Negate // { types: "(integer?, integer)" }
+              Project (#0{col_null}, #1{col_not_null}) // { types: "(integer?, integer)" }
+                Get l6 // { types: "(integer?, integer, boolean?)" }
+            Get l3 // { types: "(integer?, integer)" }
+    cte l8 =
+      Reduce group_by=[#0{col_null}, #1{col_not_null}] aggregates=[any((#1{col_not_null} = #2{right_col0_10}))] // { types: "(integer?, integer, boolean?)" }
+        FlatMap wrap1(#0{col_null}) // { types: "(integer?, integer, integer?)" }
+          Get l3 // { types: "(integer?, integer)" }
+    cte l9 =
+      Union // { types: "(integer?, integer, boolean?)" }
+        Get l8 // { types: "(integer?, integer, boolean?)" }
+        Map (false) // { types: "(integer?, integer, boolean)" }
+          Union // { types: "(integer?, integer)" }
+            Negate // { types: "(integer?, integer)" }
+              Project (#0{col_null}, #1{col_not_null}) // { types: "(integer?, integer)" }
+                Get l8 // { types: "(integer?, integer, boolean?)" }
+            Get l3 // { types: "(integer?, integer)" }
   Return // { types: "(boolean?, boolean, boolean?, boolean?, boolean?, boolean?)" }
-    Project (#5, #4, #7, #8, #6, #6) // { types: "(boolean?, boolean, boolean?, boolean?, boolean?, boolean?)" }
-      Map ((#0{col_null} = 1), (#0{col_null} = #1{col_not_null}), null, null) // { types: "(integer?, integer, integer?, integer, boolean, boolean?, boolean?, boolean?, boolean?)" }
-        Join on=(#0{col_null} = #2{col_null} AND #1{col_not_null} = #3{col_not_null}) type=differential // { types: "(integer?, integer, integer?, integer, boolean)" }
-          ArrangeBy keys=[[#0{col_null}, #1{col_not_null}]] // { types: "(integer?, integer)" }
+    Project (#3{any}, #6, #13, #14, #9{any}, #12{any}) // { types: "(boolean?, boolean, boolean?, boolean?, boolean?, boolean?)" }
+      Map (null, null) // { types: "(integer?, integer, integer?, boolean?, integer?, integer, boolean, integer?, integer, boolean?, integer?, integer, boolean?, boolean?, boolean?)" }
+        Join on=(#0{col_null} = #2{col_null} = #4{col_null} = #7{col_null} = #10{col_null} AND #1{col_not_null} = #5{col_not_null} = #8{col_not_null} = #11{col_not_null}) type=delta // { types: "(integer?, integer, integer?, boolean?, integer?, integer, boolean, integer?, integer, boolean?, integer?, integer, boolean?)" }
+          ArrangeBy keys=[[#0{col_null}], [#0{col_null}, #1{col_not_null}]] // { types: "(integer?, integer)" }
             ReadStorage materialize.public.int_table // { types: "(integer?, integer)" }
+          ArrangeBy keys=[[#0{col_null}]] // { types: "(integer?, boolean?)" }
+            Union // { types: "(integer?, boolean?)" }
+              Get l2 // { types: "(integer?, boolean?)" }
+              Map (null) // { types: "(integer?, boolean?)" }
+                Union // { types: "(integer?)" }
+                  Negate // { types: "(integer?)" }
+                    Project (#0{col_null}) // { types: "(integer?)" }
+                      Get l2 // { types: "(integer?, boolean?)" }
+                  Get l0 // { types: "(integer?)" }
           ArrangeBy keys=[[#0{col_null}, #1{col_not_null}]] // { types: "(integer?, integer, boolean)" }
             Union // { types: "(integer?, integer, boolean)" }
-              Filter (#1{col_not_null} = 1) // { types: "(integer?, integer, boolean)" }
-                Map (true) // { types: "(integer?, integer, boolean)" }
-                  Get l0 // { types: "(integer?, integer)" }
+              Map (true) // { types: "(integer?, integer, boolean)" }
+                Get l5 // { types: "(integer?, integer)" }
               Map (false) // { types: "(integer?, integer, boolean)" }
                 Union // { types: "(integer?, integer)" }
                   Negate // { types: "(integer?, integer)" }
-                    Filter (#1{col_not_null} = 1) // { types: "(integer?, integer)" }
-                      Get l0 // { types: "(integer?, integer)" }
-                  Get l0 // { types: "(integer?, integer)" }
+                    Get l5 // { types: "(integer?, integer)" }
+                  Get l3 // { types: "(integer?, integer)" }
+          ArrangeBy keys=[[#0{col_null}, #1{col_not_null}]] // { types: "(integer?, integer, boolean?)" }
+            Union // { types: "(integer?, integer, boolean?)" }
+              Get l7 // { types: "(integer?, integer, boolean?)" }
+              Map (null) // { types: "(integer?, integer, boolean?)" }
+                Union // { types: "(integer?, integer)" }
+                  Negate // { types: "(integer?, integer)" }
+                    Project (#0{col_null}, #1{col_not_null}) // { types: "(integer?, integer)" }
+                      Get l7 // { types: "(integer?, integer, boolean?)" }
+                  Get l3 // { types: "(integer?, integer)" }
+          ArrangeBy keys=[[#0{col_null}, #1{col_not_null}]] // { types: "(integer?, integer, boolean?)" }
+            Union // { types: "(integer?, integer, boolean?)" }
+              Get l9 // { types: "(integer?, integer, boolean?)" }
+              Map (null) // { types: "(integer?, integer, boolean?)" }
+                Union // { types: "(integer?, integer)" }
+                  Negate // { types: "(integer?, integer)" }
+                    Project (#0{col_null}, #1{col_not_null}) // { types: "(integer?, integer)" }
+                      Get l9 // { types: "(integer?, integer, boolean?)" }
+                  Get l3 // { types: "(integer?, integer)" }
 
 Source materialize.public.int_table
 
@@ -531,25 +606,100 @@ EXPLAIN OPTIMIZED PLAN WITH(types, no fast path, humanized expressions) AS VERBO
 Explained Query:
   With
     cte l0 =
+      Distinct project=[#0{col_null}] // { types: "(integer?)" }
+        Project (#0{col_null}) // { types: "(integer?)" }
+          ReadStorage materialize.public.int_table // { types: "(integer?, integer)" }
+    cte l1 =
+      Reduce group_by=[#0{col_null}] aggregates=[any((1 > #1{right_col0_0}))] // { types: "(integer?, boolean?)" }
+        FlatMap wrap1(#0{col_null}) // { types: "(integer?, integer?)" }
+          Get l0 // { types: "(integer?)" }
+    cte l2 =
+      Union // { types: "(integer?, boolean?)" }
+        Get l1 // { types: "(integer?, boolean?)" }
+        Map (false) // { types: "(integer?, boolean)" }
+          Union // { types: "(integer?)" }
+            Negate // { types: "(integer?)" }
+              Project (#0{col_null}) // { types: "(integer?)" }
+                Get l1 // { types: "(integer?, boolean?)" }
+            Get l0 // { types: "(integer?)" }
+    cte l3 =
       Distinct project=[#0{col_null}, #1{col_not_null}] // { types: "(integer?, integer)" }
         ReadStorage materialize.public.int_table // { types: "(integer?, integer)" }
+    cte l4 =
+      FlatMap wrap1(#1{col_not_null}) // { types: "(integer?, integer, integer)" }
+        Get l3 // { types: "(integer?, integer)" }
+    cte l5 =
+      Distinct project=[#0{col_null}, #1{col_not_null}] // { types: "(integer?, integer)" }
+        Project (#0{col_null}, #1{col_not_null}) // { types: "(integer?, integer)" }
+          Filter (1 > #2{right_col0_2}) // { types: "(integer?, integer, integer)" }
+            Get l4 // { types: "(integer?, integer, integer)" }
+    cte l6 =
+      Reduce group_by=[#0{col_null}, #1{col_not_null}] aggregates=[any((#0{col_null} > #2{right_col0_8}))] // { types: "(integer?, integer, boolean?)" }
+        Get l4 // { types: "(integer?, integer, integer)" }
+    cte l7 =
+      Union // { types: "(integer?, integer, boolean?)" }
+        Get l6 // { types: "(integer?, integer, boolean?)" }
+        Map (false) // { types: "(integer?, integer, boolean)" }
+          Union // { types: "(integer?, integer)" }
+            Negate // { types: "(integer?, integer)" }
+              Project (#0{col_null}, #1{col_not_null}) // { types: "(integer?, integer)" }
+                Get l6 // { types: "(integer?, integer, boolean?)" }
+            Get l3 // { types: "(integer?, integer)" }
+    cte l8 =
+      Reduce group_by=[#0{col_null}, #1{col_not_null}] aggregates=[any((#1{col_not_null} > #2{right_col0_10}))] // { types: "(integer?, integer, boolean?)" }
+        FlatMap wrap1(#0{col_null}) // { types: "(integer?, integer, integer?)" }
+          Get l3 // { types: "(integer?, integer)" }
+    cte l9 =
+      Union // { types: "(integer?, integer, boolean?)" }
+        Get l8 // { types: "(integer?, integer, boolean?)" }
+        Map (false) // { types: "(integer?, integer, boolean)" }
+          Union // { types: "(integer?, integer)" }
+            Negate // { types: "(integer?, integer)" }
+              Project (#0{col_null}, #1{col_not_null}) // { types: "(integer?, integer)" }
+                Get l8 // { types: "(integer?, integer, boolean?)" }
+            Get l3 // { types: "(integer?, integer)" }
   Return // { types: "(boolean?, boolean, boolean?, boolean?, boolean?, boolean?)" }
-    Project (#5, #4, #8, #9, #6, #7) // { types: "(boolean?, boolean, boolean?, boolean?, boolean?, boolean?)" }
-      Map ((1 > #0{col_null}), (#0{col_null} > #1{col_not_null}), (#1{col_not_null} > #0{col_null}), null, null) // { types: "(integer?, integer, integer?, integer, boolean, boolean?, boolean?, boolean?, boolean?, boolean?)" }
-        Join on=(#0{col_null} = #2{col_null} AND #1{col_not_null} = #3{col_not_null}) type=differential // { types: "(integer?, integer, integer?, integer, boolean)" }
-          ArrangeBy keys=[[#0{col_null}, #1{col_not_null}]] // { types: "(integer?, integer)" }
+    Project (#3{any}, #6, #13, #14, #9{any}, #12{any}) // { types: "(boolean?, boolean, boolean?, boolean?, boolean?, boolean?)" }
+      Map (null, null) // { types: "(integer?, integer, integer?, boolean?, integer?, integer, boolean, integer?, integer, boolean?, integer?, integer, boolean?, boolean?, boolean?)" }
+        Join on=(#0{col_null} = #2{col_null} = #4{col_null} = #7{col_null} = #10{col_null} AND #1{col_not_null} = #5{col_not_null} = #8{col_not_null} = #11{col_not_null}) type=delta // { types: "(integer?, integer, integer?, boolean?, integer?, integer, boolean, integer?, integer, boolean?, integer?, integer, boolean?)" }
+          ArrangeBy keys=[[#0{col_null}], [#0{col_null}, #1{col_not_null}]] // { types: "(integer?, integer)" }
             ReadStorage materialize.public.int_table // { types: "(integer?, integer)" }
+          ArrangeBy keys=[[#0{col_null}]] // { types: "(integer?, boolean?)" }
+            Union // { types: "(integer?, boolean?)" }
+              Get l2 // { types: "(integer?, boolean?)" }
+              Map (null) // { types: "(integer?, boolean?)" }
+                Union // { types: "(integer?)" }
+                  Negate // { types: "(integer?)" }
+                    Project (#0{col_null}) // { types: "(integer?)" }
+                      Get l2 // { types: "(integer?, boolean?)" }
+                  Get l0 // { types: "(integer?)" }
           ArrangeBy keys=[[#0{col_null}, #1{col_not_null}]] // { types: "(integer?, integer, boolean)" }
             Union // { types: "(integer?, integer, boolean)" }
-              Filter (1 > #1{col_not_null}) // { types: "(integer?, integer, boolean)" }
-                Map (true) // { types: "(integer?, integer, boolean)" }
-                  Get l0 // { types: "(integer?, integer)" }
+              Map (true) // { types: "(integer?, integer, boolean)" }
+                Get l5 // { types: "(integer?, integer)" }
               Map (false) // { types: "(integer?, integer, boolean)" }
                 Union // { types: "(integer?, integer)" }
                   Negate // { types: "(integer?, integer)" }
-                    Filter (1 > #1{col_not_null}) // { types: "(integer?, integer)" }
-                      Get l0 // { types: "(integer?, integer)" }
-                  Get l0 // { types: "(integer?, integer)" }
+                    Get l5 // { types: "(integer?, integer)" }
+                  Get l3 // { types: "(integer?, integer)" }
+          ArrangeBy keys=[[#0{col_null}, #1{col_not_null}]] // { types: "(integer?, integer, boolean?)" }
+            Union // { types: "(integer?, integer, boolean?)" }
+              Get l7 // { types: "(integer?, integer, boolean?)" }
+              Map (null) // { types: "(integer?, integer, boolean?)" }
+                Union // { types: "(integer?, integer)" }
+                  Negate // { types: "(integer?, integer)" }
+                    Project (#0{col_null}, #1{col_not_null}) // { types: "(integer?, integer)" }
+                      Get l7 // { types: "(integer?, integer, boolean?)" }
+                  Get l3 // { types: "(integer?, integer)" }
+          ArrangeBy keys=[[#0{col_null}, #1{col_not_null}]] // { types: "(integer?, integer, boolean?)" }
+            Union // { types: "(integer?, integer, boolean?)" }
+              Get l9 // { types: "(integer?, integer, boolean?)" }
+              Map (null) // { types: "(integer?, integer, boolean?)" }
+                Union // { types: "(integer?, integer)" }
+                  Negate // { types: "(integer?, integer)" }
+                    Project (#0{col_null}, #1{col_not_null}) // { types: "(integer?, integer)" }
+                      Get l9 // { types: "(integer?, integer, boolean?)" }
+                  Get l3 // { types: "(integer?, integer)" }
 
 Source materialize.public.int_table
 
@@ -563,25 +713,100 @@ EXPLAIN OPTIMIZED PLAN WITH(types, no fast path, humanized expressions) AS VERBO
 Explained Query:
   With
     cte l0 =
+      Distinct project=[#0{col_null}] // { types: "(integer?)" }
+        Project (#0{col_null}) // { types: "(integer?)" }
+          ReadStorage materialize.public.int_table // { types: "(integer?, integer)" }
+    cte l1 =
+      Reduce group_by=[#0{col_null}] aggregates=[all((1 < #1{right_col0_0}))] // { types: "(integer?, boolean?)" }
+        FlatMap wrap1(#0{col_null}) // { types: "(integer?, integer?)" }
+          Get l0 // { types: "(integer?)" }
+    cte l2 =
+      Union // { types: "(integer?, boolean?)" }
+        Get l1 // { types: "(integer?, boolean?)" }
+        Map (true) // { types: "(integer?, boolean)" }
+          Union // { types: "(integer?)" }
+            Negate // { types: "(integer?)" }
+              Project (#0{col_null}) // { types: "(integer?)" }
+                Get l1 // { types: "(integer?, boolean?)" }
+            Get l0 // { types: "(integer?)" }
+    cte l3 =
       Distinct project=[#0{col_null}, #1{col_not_null}] // { types: "(integer?, integer)" }
         ReadStorage materialize.public.int_table // { types: "(integer?, integer)" }
+    cte l4 =
+      FlatMap wrap1(#1{col_not_null}) // { types: "(integer?, integer, integer)" }
+        Get l3 // { types: "(integer?, integer)" }
+    cte l5 =
+      Distinct project=[#0{col_null}, #1{col_not_null}] // { types: "(integer?, integer)" }
+        Project (#0{col_null}, #1{col_not_null}) // { types: "(integer?, integer)" }
+          Filter (1 >= #2{right_col0_2}) // { types: "(integer?, integer, integer)" }
+            Get l4 // { types: "(integer?, integer, integer)" }
+    cte l6 =
+      Reduce group_by=[#0{col_null}, #1{col_not_null}] aggregates=[all((#0{col_null} < #2{right_col0_8}))] // { types: "(integer?, integer, boolean?)" }
+        Get l4 // { types: "(integer?, integer, integer)" }
+    cte l7 =
+      Union // { types: "(integer?, integer, boolean?)" }
+        Get l6 // { types: "(integer?, integer, boolean?)" }
+        Map (true) // { types: "(integer?, integer, boolean)" }
+          Union // { types: "(integer?, integer)" }
+            Negate // { types: "(integer?, integer)" }
+              Project (#0{col_null}, #1{col_not_null}) // { types: "(integer?, integer)" }
+                Get l6 // { types: "(integer?, integer, boolean?)" }
+            Get l3 // { types: "(integer?, integer)" }
+    cte l8 =
+      Reduce group_by=[#0{col_null}, #1{col_not_null}] aggregates=[all((#1{col_not_null} < #2{right_col0_10}))] // { types: "(integer?, integer, boolean?)" }
+        FlatMap wrap1(#0{col_null}) // { types: "(integer?, integer, integer?)" }
+          Get l3 // { types: "(integer?, integer)" }
+    cte l9 =
+      Union // { types: "(integer?, integer, boolean?)" }
+        Get l8 // { types: "(integer?, integer, boolean?)" }
+        Map (true) // { types: "(integer?, integer, boolean)" }
+          Union // { types: "(integer?, integer)" }
+            Negate // { types: "(integer?, integer)" }
+              Project (#0{col_null}, #1{col_not_null}) // { types: "(integer?, integer)" }
+                Get l8 // { types: "(integer?, integer, boolean?)" }
+            Get l3 // { types: "(integer?, integer)" }
   Return // { types: "(boolean?, boolean, boolean?, boolean?, boolean?, boolean?)" }
-    Project (#5, #8..=#10, #6, #7) // { types: "(boolean?, boolean, boolean?, boolean?, boolean?, boolean?)" }
-      Map ((1 < #0{col_null}), (#0{col_null} < #1{col_not_null}), (#1{col_not_null} < #0{col_null}), NOT(#4), null, null) // { types: "(integer?, integer, integer?, integer, boolean, boolean?, boolean?, boolean?, boolean, boolean?, boolean?)" }
-        Join on=(#0{col_null} = #2{col_null} AND #1{col_not_null} = #3{col_not_null}) type=differential // { types: "(integer?, integer, integer?, integer, boolean)" }
-          ArrangeBy keys=[[#0{col_null}, #1{col_not_null}]] // { types: "(integer?, integer)" }
+    Project (#3{all}, #13..=#15, #9{all}, #12{all}) // { types: "(boolean?, boolean, boolean?, boolean?, boolean?, boolean?)" }
+      Map (NOT(#6), null, null) // { types: "(integer?, integer, integer?, boolean?, integer?, integer, boolean, integer?, integer, boolean?, integer?, integer, boolean?, boolean, boolean?, boolean?)" }
+        Join on=(#0{col_null} = #2{col_null} = #4{col_null} = #7{col_null} = #10{col_null} AND #1{col_not_null} = #5{col_not_null} = #8{col_not_null} = #11{col_not_null}) type=delta // { types: "(integer?, integer, integer?, boolean?, integer?, integer, boolean, integer?, integer, boolean?, integer?, integer, boolean?)" }
+          ArrangeBy keys=[[#0{col_null}], [#0{col_null}, #1{col_not_null}]] // { types: "(integer?, integer)" }
             ReadStorage materialize.public.int_table // { types: "(integer?, integer)" }
+          ArrangeBy keys=[[#0{col_null}]] // { types: "(integer?, boolean?)" }
+            Union // { types: "(integer?, boolean?)" }
+              Get l2 // { types: "(integer?, boolean?)" }
+              Map (null) // { types: "(integer?, boolean?)" }
+                Union // { types: "(integer?)" }
+                  Negate // { types: "(integer?)" }
+                    Project (#0{col_null}) // { types: "(integer?)" }
+                      Get l2 // { types: "(integer?, boolean?)" }
+                  Get l0 // { types: "(integer?)" }
           ArrangeBy keys=[[#0{col_null}, #1{col_not_null}]] // { types: "(integer?, integer, boolean)" }
             Union // { types: "(integer?, integer, boolean)" }
-              Filter (1 >= #1{col_not_null}) // { types: "(integer?, integer, boolean)" }
-                Map (true) // { types: "(integer?, integer, boolean)" }
-                  Get l0 // { types: "(integer?, integer)" }
+              Map (true) // { types: "(integer?, integer, boolean)" }
+                Get l5 // { types: "(integer?, integer)" }
               Map (false) // { types: "(integer?, integer, boolean)" }
                 Union // { types: "(integer?, integer)" }
                   Negate // { types: "(integer?, integer)" }
-                    Filter (1 >= #1{col_not_null}) // { types: "(integer?, integer)" }
-                      Get l0 // { types: "(integer?, integer)" }
-                  Get l0 // { types: "(integer?, integer)" }
+                    Get l5 // { types: "(integer?, integer)" }
+                  Get l3 // { types: "(integer?, integer)" }
+          ArrangeBy keys=[[#0{col_null}, #1{col_not_null}]] // { types: "(integer?, integer, boolean?)" }
+            Union // { types: "(integer?, integer, boolean?)" }
+              Get l7 // { types: "(integer?, integer, boolean?)" }
+              Map (null) // { types: "(integer?, integer, boolean?)" }
+                Union // { types: "(integer?, integer)" }
+                  Negate // { types: "(integer?, integer)" }
+                    Project (#0{col_null}, #1{col_not_null}) // { types: "(integer?, integer)" }
+                      Get l7 // { types: "(integer?, integer, boolean?)" }
+                  Get l3 // { types: "(integer?, integer)" }
+          ArrangeBy keys=[[#0{col_null}, #1{col_not_null}]] // { types: "(integer?, integer, boolean?)" }
+            Union // { types: "(integer?, integer, boolean?)" }
+              Get l9 // { types: "(integer?, integer, boolean?)" }
+              Map (null) // { types: "(integer?, integer, boolean?)" }
+                Union // { types: "(integer?, integer)" }
+                  Negate // { types: "(integer?, integer)" }
+                    Project (#0{col_null}, #1{col_not_null}) // { types: "(integer?, integer)" }
+                      Get l9 // { types: "(integer?, integer, boolean?)" }
+                  Get l3 // { types: "(integer?, integer)" }
 
 Source materialize.public.int_table
 
