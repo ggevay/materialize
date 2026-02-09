@@ -31,6 +31,7 @@ use mz_sql_parser::ast;
 use mz_sql_parser::ast::display::AstDisplay;
 use mz_storage_client::controller::CollectionDescription;
 use std::collections::BTreeMap;
+use std::sync::Arc;
 use timely::progress::Antichain;
 use tracing::Span;
 
@@ -400,6 +401,7 @@ impl Coordinator {
                 plan,
                 resolved_ids,
                 explain_ctx,
+                session: Arc::new(session.meta()),
             },
         ))
     }
@@ -412,6 +414,7 @@ impl Coordinator {
             plan,
             resolved_ids,
             explain_ctx,
+            session,
         }: CreateMaterializedViewOptimize,
     ) -> Result<StageResult<Box<CreateMaterializedViewStage>>, AdapterError> {
         let plan::CreateMaterializedViewPlan {
@@ -446,8 +449,10 @@ impl Coordinator {
         let force_non_monotonic = Default::default();
 
         // Build an optimizer for this MATERIALIZED VIEW.
+        let catalog = self.owned_catalog();
         let mut optimizer = optimize::materialized_view::Optimizer::new(
-            self.owned_catalog().as_optimizer_catalog(),
+            Arc::clone(&catalog),
+            catalog.as_optimizer_catalog(),
             compute_instance,
             global_id,
             view_id,
@@ -458,6 +463,7 @@ impl Coordinator {
             optimizer_config,
             self.optimizer_metrics(),
             force_non_monotonic,
+            session,
         );
 
         let span = Span::current();

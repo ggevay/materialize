@@ -49,7 +49,7 @@ use timely::progress::Antichain;
 
 use crate::coord::infer_sql_type_for_catalog;
 use crate::optimize::dataflows::{
-    ComputeInstanceSnapshot, DataflowBuilder, ExprPrep, ExprPrepMaintained,
+    ComputeInstanceSnapshot, DataflowBuilder, EvalTime, ExprPrep, ExprPrepOneShot,
 };
 use crate::optimize::{
     LirDataflowDescription, MirDataflowDescription, Optimize, OptimizeMode, OptimizerCatalog,
@@ -59,8 +59,10 @@ use crate::optimize::{
 pub struct Optimizer {
     /// A representation typechecking context to use throughout the optimizer pipeline.
     repr_typecheck_ctx: ReprTypecheckContext,
-    /// A snapshot of the catalog state.
-    catalog: Arc<dyn OptimizerCatalog>,
+    /// A snapshot of the catalog.
+    catalog: Arc<crate::catalog::Catalog>,
+    /// A snapshot of the catalog for dataflow optimization.
+    catalog_for_optimization: Arc<dyn OptimizerCatalog>,
     /// A snapshot of the cluster that will run the dataflows.
     compute_instance: ComputeInstanceSnapshot,
     /// A durable GlobalId to be used with the exported materialized view sink.
@@ -100,11 +102,14 @@ pub struct Optimizer {
     /// CT sink connection directly. This would allow us to replace this field
     /// with something derived directly from that sink connection.
     force_source_non_monotonic: BTreeSet<GlobalId>,
+    /// Session metadata.
+    session: Arc<dyn mz_sql::session::metadata::SessionMetadata>,
 }
 
 impl Optimizer {
     pub fn new(
-        catalog: Arc<dyn OptimizerCatalog>,
+        catalog: Arc<crate::catalog::Catalog>,
+        catalog_for_optimization: Arc<dyn OptimizerCatalog>,
         compute_instance: ComputeInstanceSnapshot,
         sink_id: GlobalId,
         view_id: GlobalId,
@@ -115,10 +120,12 @@ impl Optimizer {
         config: OptimizerConfig,
         metrics: OptimizerMetrics,
         force_source_non_monotonic: BTreeSet<GlobalId>,
+        session: Arc<dyn mz_sql::session::metadata::SessionMetadata>,
     ) -> Self {
         Self {
             repr_typecheck_ctx: empty_repr_context(),
             catalog,
+            catalog_for_optimization,
             compute_instance,
             sink_id,
             view_id,
@@ -130,6 +137,7 @@ impl Optimizer {
             metrics,
             duration: Default::default(),
             force_source_non_monotonic,
+            session,
         }
     }
 }
@@ -257,7 +265,7 @@ impl Optimize<LocalMirPlan> for Optimizer {
 
         let mut df_builder = {
             let compute = self.compute_instance.clone();
-            DataflowBuilder::new(&*self.catalog, compute).with_config(&self.config)
+            DataflowBuilder::new(&*self.catalog_for_optimization, compute).with_config(&self.config)
         };
         let mut df_desc = MirDataflowDescription::new(self.debug_name.clone());
 
@@ -286,7 +294,11 @@ impl Optimize<LocalMirPlan> for Optimizer {
         df_desc.export_sink(self.sink_id, sink_description);
 
         // Prepare expressions in the assembled dataflow.
-        let style = ExprPrepMaintained;
+        let style = ExprPrepOneShot {
+            logical_time: EvalTime::Deferred,
+            session: &*self.session,
+            catalog_state: self.catalog.state(),
+        };
         df_desc.visit_children(
             |r| style.prep_relation_expr(r),
             |s| style.prep_scalar_expr(s),

@@ -147,6 +147,7 @@ use mz_sql::plan::{
     self, AlterSinkPlan, ConnectionDetails, CreateConnectionPlan, HirRelationExpr,
     NetworkPolicyRule, OnTimeoutAction, Params, QueryWhen,
 };
+use mz_sql::session::metadata::SessionMetadata;
 use mz_sql::session::user::User;
 use mz_sql::session::vars::{MAX_CREDIT_CONSUMPTION_RATE, SystemVars, Var};
 use mz_sql_parser::ast::ExplainStage;
@@ -831,6 +832,7 @@ pub struct CreateMaterializedViewOptimize {
     /// An optional context set iff the state machine is initiated from
     /// sequencing an EXPLAIN for this statement.
     explain_ctx: ExplainContext,
+    session: Arc<dyn SessionMetadata>,
 }
 
 #[derive(Debug)]
@@ -3006,8 +3008,18 @@ impl Coordinator {
                 .catalog()
                 .resolve_full_name(entry.name(), None)
                 .to_string();
+            let catalog = self.owned_catalog();
+            let dummy_session: Arc<dyn SessionMetadata> =
+                Arc::new(Session::<Timestamp>::dummy().meta());
             let (_optimized_plan, physical_plan, _metainfo) = self
-                .optimize_create_continual_task(&ct, *id, self.owned_catalog(), debug_name)
+                .optimize_create_continual_task(
+                    &ct,
+                    *id,
+                    Arc::clone(&catalog),
+                    catalog.as_optimizer_catalog(),
+                    debug_name,
+                    dummy_session,
+                )
                 .expect("builtin CT should optimize successfully");
 
             // Determine an as of for the new continual task.
@@ -3173,12 +3185,16 @@ impl Coordinator {
                                     .catalog()
                                     .resolve_full_name(entry.name(), None)
                                     .to_string();
-                                let force_non_monotonic = Default::default();
+                                let force_non_monotonic = BTreeSet::new();
 
                                 let (optimized_plan, global_lir_plan) = {
                                     // Build an optimizer for this MATERIALIZED VIEW.
+                                    let catalog = self.owned_catalog();
+                                    let dummy_session: Arc<dyn SessionMetadata> =
+                                        Arc::new(Session::<Timestamp>::dummy().meta());
                                     let mut optimizer = optimize::materialized_view::Optimizer::new(
-                                        self.owned_catalog().as_optimizer_catalog(),
+                                        Arc::clone(&catalog),
+                                        catalog.as_optimizer_catalog(),
                                         compute_instance.clone(),
                                         global_id,
                                         internal_view_id,
@@ -3189,6 +3205,7 @@ impl Coordinator {
                                         optimizer_config.clone(),
                                         self.optimizer_metrics(),
                                         force_non_monotonic,
+                                        dummy_session,
                                     );
 
                                     // MIR ⇒ MIR optimization (global)
@@ -3270,12 +3287,17 @@ impl Coordinator {
                                     .catalog()
                                     .resolve_full_name(entry.name(), None)
                                     .to_string();
+                                let catalog = self.owned_catalog();
+                                let dummy_session: Arc<dyn SessionMetadata> =
+                                    Arc::new(Session::<Timestamp>::dummy().meta());
                                 let (optimized_plan, physical_plan, metainfo) = self
                                     .optimize_create_continual_task(
                                         ct,
                                         global_id,
-                                        self.owned_catalog(),
+                                        Arc::clone(&catalog),
+                                        catalog.as_optimizer_catalog(),
                                         debug_name,
+                                        dummy_session,
                                     )?;
                                 uncached_expressions.insert(
                                     global_id,

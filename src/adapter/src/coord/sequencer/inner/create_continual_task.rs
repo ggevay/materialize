@@ -37,6 +37,7 @@ use mz_storage_client::controller::CollectionDescription;
 use mz_transform::dataflow::DataflowMetainfo;
 use mz_transform::notice::OptimizerNotice;
 
+use crate::catalog::Catalog;
 use crate::command::ExecuteResponse;
 use crate::coord::Coordinator;
 use crate::error::AdapterError;
@@ -99,8 +100,10 @@ impl Coordinator {
         let (optimized_plan, mut physical_plan, metainfo) = self.optimize_create_continual_task(
             &item,
             global_id,
+            self.owned_catalog(),
             Arc::new(bootstrap_catalog),
             full_name.to_string(),
+            Arc::new(ctx.session().meta()),
         )?;
 
         // Timestamp selection
@@ -166,8 +169,10 @@ impl Coordinator {
         &self,
         ct: &ContinualTask,
         output_id: GlobalId,
-        catalog: Arc<dyn OptimizerCatalog>,
+        catalog: Arc<Catalog>,
+        catalog_for_optimization: Arc<dyn OptimizerCatalog>,
         debug_name: String,
+        session: Arc<dyn SessionMetadata>,
     ) -> Result<
         (
             DataflowDescription<OptimizedMirRelationExpr>,
@@ -176,7 +181,9 @@ impl Coordinator {
         ),
         AdapterError,
     > {
-        let catalog = Arc::new(NoIndexCatalog { delegate: catalog });
+        let catalog_for_optimization = Arc::new(NoIndexCatalog {
+            delegate: catalog_for_optimization,
+        });
 
         let (_, view_id) = self.allocate_transient_id();
         let compute_instance = self
@@ -192,6 +199,7 @@ impl Coordinator {
         let force_non_monotonic = [ct.input_id].into();
         let mut optimizer = optimize::materialized_view::Optimizer::new(
             catalog,
+            catalog_for_optimization,
             compute_instance,
             output_id,
             view_id,
@@ -202,6 +210,7 @@ impl Coordinator {
             optimizer_config,
             self.optimizer_metrics(),
             force_non_monotonic,
+            session,
         );
 
         // HIR ⇒ MIR lowering and MIR ⇒ MIR optimization (local and global)

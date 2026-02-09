@@ -17,7 +17,7 @@ use crate::plan::PlanContext;
 use crate::session::user::{RoleMetadata, User};
 use crate::session::vars::SessionVars;
 
-pub trait SessionMetadata: Debug + Sync {
+pub trait SessionMetadata: Debug + Sync + Send {
     /// Returns the session vars for this session.
     fn vars(&self) -> &SessionVars;
     /// Returns the connection ID associated with the session.
