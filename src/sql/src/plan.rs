@@ -1921,6 +1921,11 @@ pub enum QueryWhen {
     /// readable timestamp (i.e. write frontier minus one) across the named
     /// objects. The list is resolved to concrete frontiers by the sequencer
     /// at query time.
+    ///
+    /// Invariant: This variant must be resolved into [`QueryWhen::AtLeastTimestamp`]
+    /// by the sequencer (see `Coordinator::resolve_frontier_of`) before any of
+    /// the helper methods below are called. The helper methods therefore
+    /// `soft_panic_or_log!` on this variant.
     AtLeastFrontierOf(Vec<CatalogItemId>),
 }
 
@@ -1929,9 +1934,14 @@ impl QueryWhen {
     pub fn advance_to_timestamp(&self) -> Option<Timestamp> {
         match self {
             QueryWhen::AtTimestamp(t) | QueryWhen::AtLeastTimestamp(t) => Some(t.clone()),
-            QueryWhen::Immediately
-            | QueryWhen::FreshestTableWrite
-            | QueryWhen::AtLeastFrontierOf(_) => None,
+            QueryWhen::Immediately | QueryWhen::FreshestTableWrite => None,
+            QueryWhen::AtLeastFrontierOf(_) => {
+                mz_ore::soft_panic_or_log!(
+                    "QueryWhen::AtLeastFrontierOf must be resolved by the sequencer \
+                     before calling advance_to_timestamp"
+                );
+                None
+            }
         }
     }
     /// Returns whether the candidate's upper bound is constrained.
@@ -1942,8 +1952,14 @@ impl QueryWhen {
             QueryWhen::AtTimestamp(_) => true,
             QueryWhen::AtLeastTimestamp(_)
             | QueryWhen::Immediately
-            | QueryWhen::FreshestTableWrite
-            | QueryWhen::AtLeastFrontierOf(_) => false,
+            | QueryWhen::FreshestTableWrite => false,
+            QueryWhen::AtLeastFrontierOf(_) => {
+                mz_ore::soft_panic_or_log!(
+                    "QueryWhen::AtLeastFrontierOf must be resolved by the sequencer \
+                     before calling constrains_upper"
+                );
+                false
+            }
         }
     }
     /// Returns whether the candidate must be advanced to the since.
@@ -1951,9 +1967,15 @@ impl QueryWhen {
         match self {
             QueryWhen::Immediately
             | QueryWhen::AtLeastTimestamp(_)
-            | QueryWhen::FreshestTableWrite
-            | QueryWhen::AtLeastFrontierOf(_) => true,
+            | QueryWhen::FreshestTableWrite => true,
             QueryWhen::AtTimestamp(_) => false,
+            QueryWhen::AtLeastFrontierOf(_) => {
+                mz_ore::soft_panic_or_log!(
+                    "QueryWhen::AtLeastFrontierOf must be resolved by the sequencer \
+                     before calling advance_to_since"
+                );
+                true
+            }
         }
     }
     /// Returns whether the candidate can be advanced to the upper.
@@ -1962,8 +1984,14 @@ impl QueryWhen {
             QueryWhen::Immediately => true,
             QueryWhen::FreshestTableWrite
             | QueryWhen::AtTimestamp(_)
-            | QueryWhen::AtLeastTimestamp(_)
-            | QueryWhen::AtLeastFrontierOf(_) => false,
+            | QueryWhen::AtLeastTimestamp(_) => false,
+            QueryWhen::AtLeastFrontierOf(_) => {
+                mz_ore::soft_panic_or_log!(
+                    "QueryWhen::AtLeastFrontierOf must be resolved by the sequencer \
+                     before calling can_advance_to_upper"
+                );
+                false
+            }
         }
     }
 
@@ -1971,28 +1999,44 @@ impl QueryWhen {
     pub fn can_advance_to_timeline_ts(&self) -> bool {
         match self {
             QueryWhen::Immediately | QueryWhen::FreshestTableWrite => true,
-            QueryWhen::AtTimestamp(_)
-            | QueryWhen::AtLeastTimestamp(_)
-            | QueryWhen::AtLeastFrontierOf(_) => false,
+            QueryWhen::AtTimestamp(_) | QueryWhen::AtLeastTimestamp(_) => false,
+            QueryWhen::AtLeastFrontierOf(_) => {
+                mz_ore::soft_panic_or_log!(
+                    "QueryWhen::AtLeastFrontierOf must be resolved by the sequencer \
+                     before calling can_advance_to_timeline_ts"
+                );
+                false
+            }
         }
     }
     /// Returns whether the candidate must be advanced to the timeline's timestamp.
     pub fn must_advance_to_timeline_ts(&self) -> bool {
         match self {
             QueryWhen::FreshestTableWrite => true,
-            QueryWhen::Immediately
-            | QueryWhen::AtLeastTimestamp(_)
-            | QueryWhen::AtTimestamp(_)
-            | QueryWhen::AtLeastFrontierOf(_) => false,
+            QueryWhen::Immediately | QueryWhen::AtLeastTimestamp(_) | QueryWhen::AtTimestamp(_) => {
+                false
+            }
+            QueryWhen::AtLeastFrontierOf(_) => {
+                mz_ore::soft_panic_or_log!(
+                    "QueryWhen::AtLeastFrontierOf must be resolved by the sequencer \
+                     before calling must_advance_to_timeline_ts"
+                );
+                false
+            }
         }
     }
     /// Returns whether the selected timestamp should be tracked within the current transaction.
     pub fn is_transactional(&self) -> bool {
         match self {
             QueryWhen::Immediately | QueryWhen::FreshestTableWrite => true,
-            QueryWhen::AtLeastTimestamp(_)
-            | QueryWhen::AtTimestamp(_)
-            | QueryWhen::AtLeastFrontierOf(_) => false,
+            QueryWhen::AtLeastTimestamp(_) | QueryWhen::AtTimestamp(_) => false,
+            QueryWhen::AtLeastFrontierOf(_) => {
+                mz_ore::soft_panic_or_log!(
+                    "QueryWhen::AtLeastFrontierOf must be resolved by the sequencer \
+                     before calling is_transactional"
+                );
+                false
+            }
         }
     }
 }
