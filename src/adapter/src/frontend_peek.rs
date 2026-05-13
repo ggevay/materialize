@@ -30,7 +30,7 @@ use mz_sql::ast::Raw;
 use mz_sql::catalog::CatalogCluster;
 use mz_sql::plan::Params;
 use mz_sql::plan::{
-    self, Explainee, ExplaineeStatement, Plan, QueryWhen, SelectPlan, SubscribePlan,
+    self, Explainee, ExplaineeStatement, Plan, ResolvedQueryWhen, SelectPlan, SubscribePlan,
 };
 use mz_sql::rbac;
 use mz_sql::session::metadata::SessionMetadata;
@@ -451,23 +451,18 @@ impl PeekClient {
             }
         };
 
-        let when = match query_plan {
+        let unresolved_when = match query_plan {
             QueryPlan::Select(s) => &s.when,
             QueryPlan::CopyTo(s, _) => &s.when,
             QueryPlan::Subscribe(s) => &s.when,
         };
 
-        // Resolve `AS OF AT LEAST FRONTIER OF <names>` into a concrete
-        // `AtLeastTimestamp` up front, before any helper on `QueryWhen` is
-        // called (some of those helpers `soft_panic_or_log!` on the
-        // unresolved variant). This mirrors what
-        // `Coordinator::determine_timestamp` does internally.
-        let resolved_when = crate::coord::timestamp_selection::resolve_frontier_of(
-            when,
+        // Resolve up front; see `resolve_query_when` for rationale.
+        let when = crate::coord::timestamp_selection::resolve_query_when(
+            unresolved_when,
             &*self.storage_collections,
             catalog.state(),
         )?;
-        let when = resolved_when.as_ref().unwrap_or(when);
 
         let depends_on = match query_plan {
             QueryPlan::Select(s) => s.source.depends_on(),
@@ -590,7 +585,7 @@ impl PeekClient {
         let isolation_level = session.vars().transaction_isolation().clone();
         let timeline = Coordinator::get_timeline(&timeline_context);
         let needs_linearized_read_ts =
-            Coordinator::needs_linearized_read_ts(&isolation_level, when);
+            Coordinator::needs_linearized_read_ts(&isolation_level, &when);
 
         let oracle_read_ts = match timeline {
             Some(timeline) if needs_linearized_read_ts => {
@@ -637,7 +632,7 @@ impl PeekClient {
         // peek sequencing still does a timedomain validation. The new peek sequencing does not do
         // timedomain validation for AS OF queries, which seems more natural. But I'm thinking that
         // it would be the cleanest to just simply disallow AS OF queries inside transactions.
-        let in_immediate_multi_stmt_txn = session.transaction().in_immediate_multi_stmt_txn(when)
+        let in_immediate_multi_stmt_txn = session.transaction().in_immediate_multi_stmt_txn(&when)
             && !matches!(query_plan, QueryPlan::Subscribe { .. });
 
         // Fetch or generate a timestamp for this query and fetch or acquire read holds.
@@ -723,12 +718,11 @@ impl PeekClient {
                     .frontend_determine_timestamp(
                         session,
                         determine_bundle,
-                        when,
+                        &when,
                         target_cluster_id,
                         &timeline_context,
                         oracle_read_ts,
                         real_time_recency_ts,
-                        &catalog,
                     )
                     .await?;
 
@@ -1519,21 +1513,13 @@ impl PeekClient {
         &mut self,
         session: &Session,
         id_bundle: &CollectionIdBundle,
-        when: &QueryWhen,
+        when: &ResolvedQueryWhen,
         compute_instance: ComputeInstanceId,
         timeline_context: &TimelineContext,
         oracle_read_ts: Option<Timestamp>,
         real_time_recency_ts: Option<Timestamp>,
-        catalog: &Catalog,
     ) -> Result<(TimestampDetermination, ReadHolds), AdapterError> {
         // this is copy-pasted from Coordinator
-
-        let resolved_when = crate::coord::timestamp_selection::resolve_frontier_of(
-            when,
-            &*self.storage_collections,
-            catalog.state(),
-        )?;
-        let when = resolved_when.as_ref().unwrap_or(when);
 
         let isolation_level = session.vars().transaction_isolation();
 

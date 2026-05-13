@@ -189,7 +189,7 @@ impl Coordinator {
 
         // SUBSCRIBE AS OF, similar to peeks, doesn't need to worry about transaction
         // timestamp semantics.
-        if explain_ctx.needs_cluster() && when == &QueryWhen::Immediately {
+        if explain_ctx.needs_cluster() && matches!(when, QueryWhen::Immediately) {
             // If this isn't a SUBSCRIBE AS OF, the SUBSCRIBE can be in a transaction if it's the
             // only operation.
             session.add_transaction_ops(TransactionOps::Subscribe)?;
@@ -335,13 +335,21 @@ impl Coordinator {
     ) -> Result<StageResult<Box<SubscribeStage>>, AdapterError> {
         let plan::SubscribePlan { when, .. } = &plan;
 
-        // Timestamp selection
-        let oracle_read_ts = self.oracle_read_ts(ctx.session(), &timeline, when).await;
+        // Timestamp selection. Resolve up front; see `resolve_query_when` for
+        // rationale.
+        let resolved_when = crate::coord::timestamp_selection::resolve_query_when(
+            when,
+            &*self.controller.storage_collections,
+            self.catalog().state(),
+        )?;
+        let oracle_read_ts = self
+            .oracle_read_ts(ctx.session(), &timeline, &resolved_when)
+            .await;
         let bundle = &global_mir_plan.id_bundle(optimizer.cluster_id());
         let (determination, read_holds) = self.determine_timestamp(
             ctx.session(),
             bundle,
-            when,
+            &resolved_when,
             optimizer.cluster_id(),
             &timeline,
             oracle_read_ts,

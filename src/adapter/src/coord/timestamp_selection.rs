@@ -19,7 +19,7 @@ use itertools::Itertools;
 use mz_compute_types::ComputeInstanceId;
 use mz_ore::cast::CastLossy;
 use mz_repr::{GlobalId, Timestamp, TimestampManipulation};
-use mz_sql::plan::QueryWhen;
+use mz_sql::plan::{QueryWhen, ResolvedQueryWhen};
 use mz_sql::session::vars::IsolationLevel;
 use mz_storage_client::storage_collections::StorageCollections;
 use mz_storage_types::sources::Timeline;
@@ -226,7 +226,10 @@ pub trait TimestampProvider {
     /// This assumes that the query happens in the context of a timeline. If
     /// there is no timeline, we cannot and don't have to get a linearized read
     /// timestamp.
-    fn needs_linearized_read_ts(isolation_level: &IsolationLevel, when: &QueryWhen) -> bool {
+    fn needs_linearized_read_ts(
+        isolation_level: &IsolationLevel,
+        when: &ResolvedQueryWhen,
+    ) -> bool {
         // When we're in the context of a timeline (assumption) and one of these
         // scenarios hold, we need to use a linearized read timestamp:
         // - The isolation level is Strict Serializable and the `when` allows us to use the
@@ -247,7 +250,7 @@ pub trait TimestampProvider {
         session: &Session,
         read_holds: &ReadHolds,
         id_bundle: &CollectionIdBundle,
-        when: &QueryWhen,
+        when: &ResolvedQueryWhen,
         oracle_read_ts: Option<Timestamp>,
         real_time_recency_ts: Option<Timestamp>,
         isolation_level: &IsolationLevel,
@@ -439,7 +442,7 @@ pub trait TimestampProvider {
         &self,
         session: &Session,
         id_bundle: &CollectionIdBundle,
-        when: &QueryWhen,
+        when: &ResolvedQueryWhen,
         timeline_context: &TimelineContext,
         oracle_read_ts: Option<Timestamp>,
         real_time_recency_ts: Option<Timestamp>,
@@ -468,7 +471,7 @@ pub trait TimestampProvider {
     fn determine_timestamp_for_inner(
         session: &Session,
         id_bundle: &CollectionIdBundle,
-        when: &QueryWhen,
+        when: &ResolvedQueryWhen,
         timeline_context: &TimelineContext,
         oracle_read_ts: Option<Timestamp>,
         real_time_recency_ts: Option<Timestamp>,
@@ -572,14 +575,14 @@ pub trait TimestampProvider {
     }
 }
 
-/// Resolves `QueryWhen::AtLeastFrontierOf` by reading the current write
-/// frontiers of the named storage collections and converting them into an
-/// equivalent `AtLeastTimestamp`. Specifically, the resulting timestamp is the
-/// maximum, across the named collections, of `write_frontier.step_back()`.
+/// Resolves a [`QueryWhen`] into a [`ResolvedQueryWhen`].
 ///
-/// Returns `Ok(None)` when `when` is not `AtLeastFrontierOf` (so callers can
-/// pass any `QueryWhen` through unchanged), and `Ok(Some(AtLeastTimestamp(_)))`
-/// for the resolved case.
+/// All variants except [`QueryWhen::AtLeastFrontierOf`] map trivially. For
+/// `AtLeastFrontierOf`, reads the current write frontiers of the named
+/// storage collections and converts them into an equivalent
+/// [`ResolvedQueryWhen::AtLeastTimestamp`]. Specifically, the resulting
+/// timestamp is the maximum, across the named collections, of
+/// `write_frontier.step_back()`.
 ///
 /// Errors if any named collection has no readable timestamp yet, either
 /// because it has not yet produced any output (write frontier is
@@ -591,13 +594,19 @@ pub trait TimestampProvider {
 /// so consulting only `StorageCollections` here is sufficient. Indexes (and
 /// other compute collections) are rejected at plan time and therefore never
 /// reach this function.
-pub(crate) fn resolve_frontier_of(
+pub(crate) fn resolve_query_when(
     when: &QueryWhen,
     storage_collections: &dyn StorageCollections,
     catalog_state: &CatalogState,
-) -> Result<Option<QueryWhen>, AdapterError> {
-    let QueryWhen::AtLeastFrontierOf(item_ids) = when else {
-        return Ok(None);
+) -> Result<ResolvedQueryWhen, AdapterError> {
+    let item_ids = match when {
+        QueryWhen::Immediately => return Ok(ResolvedQueryWhen::Immediately),
+        QueryWhen::FreshestTableWrite => return Ok(ResolvedQueryWhen::FreshestTableWrite),
+        QueryWhen::AtTimestamp(t) => return Ok(ResolvedQueryWhen::AtTimestamp(t.clone())),
+        QueryWhen::AtLeastTimestamp(t) => {
+            return Ok(ResolvedQueryWhen::AtLeastTimestamp(t.clone()));
+        }
+        QueryWhen::AtLeastFrontierOf(ids) => ids,
     };
     let mut max_ts: Option<Timestamp> = None;
     for item_id in item_ids {
@@ -620,9 +629,11 @@ pub(crate) fn resolve_frontier_of(
         };
         max_ts = Some(max_ts.map_or(readable, |cur| cur.max(readable)));
     }
-    // `item_ids` was non-empty because we matched `AtLeastFrontierOf`, but
-    // the list could in principle be empty; treat that as no constraint.
-    Ok(max_ts.map(QueryWhen::AtLeastTimestamp))
+    // The list could in principle be empty; treat that as no constraint.
+    Ok(match max_ts {
+        Some(ts) => ResolvedQueryWhen::AtLeastTimestamp(ts),
+        None => ResolvedQueryWhen::Immediately,
+    })
 }
 
 impl Coordinator {
@@ -630,7 +641,7 @@ impl Coordinator {
         &self,
         session: &Session,
         timeline_ctx: &TimelineContext,
-        when: &QueryWhen,
+        when: &ResolvedQueryWhen,
     ) -> Option<Timestamp> {
         let isolation_level = session.vars().transaction_isolation().clone();
         let timeline = Coordinator::get_timeline(timeline_ctx);
@@ -648,15 +659,6 @@ impl Coordinator {
         oracle_read_ts
     }
 
-    /// See [`resolve_frontier_of`].
-    fn resolve_frontier_of(&self, when: &QueryWhen) -> Result<Option<QueryWhen>, AdapterError> {
-        resolve_frontier_of(
-            when,
-            &*self.controller.storage_collections,
-            self.catalog().state(),
-        )
-    }
-
     /// Determines the timestamp for a query, acquires read holds that ensure the
     /// query remains executable at that time, and returns those.
     /// The caller is responsible for eventually dropping those read holds.
@@ -665,15 +667,12 @@ impl Coordinator {
         &self,
         session: &Session,
         id_bundle: &CollectionIdBundle,
-        when: &QueryWhen,
+        when: &ResolvedQueryWhen,
         compute_instance: ComputeInstanceId,
         timeline_context: &TimelineContext,
         oracle_read_ts: Option<Timestamp>,
         real_time_recency_ts: Option<mz_repr::Timestamp>,
     ) -> Result<(TimestampDetermination, ReadHolds), AdapterError> {
-        let resolved_when = self.resolve_frontier_of(when)?;
-        let when = resolved_when.as_ref().unwrap_or(when);
-
         let isolation_level = session.vars().transaction_isolation();
         let (det, read_holds) = self.determine_timestamp_for(
             session,

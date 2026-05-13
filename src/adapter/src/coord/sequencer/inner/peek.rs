@@ -22,7 +22,7 @@ use mz_repr::{Datum, GlobalId, Timestamp};
 use mz_sql::ast::{ExplainStage, Statement};
 use mz_sql::catalog::CatalogCluster;
 // Import `plan` module, but only import select elements to avoid merge conflicts on use statements.
-use mz_sql::plan::QueryWhen;
+use mz_sql::plan::ResolvedQueryWhen;
 use mz_sql::plan::{self};
 use mz_sql::session::metadata::SessionMetadata;
 use mz_transform::EmptyStatisticsOracle;
@@ -361,9 +361,17 @@ impl Coordinator {
             session.role_metadata().clone(),
         );
 
+        // Resolve up front; see `resolve_query_when` for rationale.
+        let resolved_when = crate::coord::timestamp_selection::resolve_query_when(
+            &plan.when,
+            &*self.controller.storage_collections,
+            self.catalog().state(),
+        )?;
+
         Ok(PeekStage::LinearizeTimestamp(PeekStageLinearizeTimestamp {
             validity,
             plan,
+            resolved_when,
             max_query_result_size,
             source_ids,
             target_replica,
@@ -382,6 +390,7 @@ impl Coordinator {
             validity,
             source_ids,
             plan,
+            resolved_when,
             max_query_result_size,
             target_replica,
             timeline_context,
@@ -392,11 +401,12 @@ impl Coordinator {
         let isolation_level = session.vars().transaction_isolation().clone();
         let timeline = Coordinator::get_timeline(&timeline_context);
         let needs_linearized_read_ts =
-            Coordinator::needs_linearized_read_ts(&isolation_level, &plan.when);
+            Coordinator::needs_linearized_read_ts(&isolation_level, &resolved_when);
 
         let build_stage = move |oracle_read_ts: Option<Timestamp>| PeekStageRealTimeRecency {
             validity,
             plan,
+            resolved_when,
             max_query_result_size,
             source_ids,
             target_replica,
@@ -441,6 +451,7 @@ impl Coordinator {
         PeekStageTimestampReadHold {
             mut validity,
             plan,
+            resolved_when,
             max_query_result_size,
             source_ids,
             target_replica,
@@ -468,7 +479,7 @@ impl Coordinator {
 
         let determination = self.sequence_peek_timestamp(
             session,
-            &plan.when,
+            &resolved_when,
             cluster_id,
             timeline_context,
             oracle_read_ts,
@@ -743,6 +754,7 @@ impl Coordinator {
         PeekStageRealTimeRecency {
             validity,
             plan,
+            resolved_when,
             max_query_result_size,
             source_ids,
             target_replica,
@@ -766,6 +778,7 @@ impl Coordinator {
                         let stage = PeekStage::TimestampReadHold(PeekStageTimestampReadHold {
                             validity,
                             plan,
+                            resolved_when,
                             max_query_result_size,
                             target_replica,
                             timeline_context,
@@ -784,6 +797,7 @@ impl Coordinator {
                 PeekStage::TimestampReadHold(PeekStageTimestampReadHold {
                     validity,
                     plan,
+                    resolved_when,
                     max_query_result_size,
                     target_replica,
                     timeline_context,
@@ -1068,7 +1082,7 @@ impl Coordinator {
     pub(super) fn sequence_peek_timestamp(
         &mut self,
         session: &mut Session,
-        when: &QueryWhen,
+        when: &ResolvedQueryWhen,
         cluster_id: ClusterId,
         timeline_context: TimelineContext,
         oracle_read_ts: Option<Timestamp>,

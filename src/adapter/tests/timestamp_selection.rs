@@ -18,7 +18,7 @@ use mz_adapter::session::Session;
 use mz_adapter::{CollectionIdBundle, TimelineContext, TimestampProvider};
 use mz_compute_types::ComputeInstanceId;
 use mz_repr::{GlobalId, Timestamp};
-use mz_sql::plan::QueryWhen;
+use mz_sql::plan::ResolvedQueryWhen;
 use mz_sql::session::vars::IsolationLevel;
 use mz_sql_parser::ast::TransactionIsolationLevel;
 use mz_storage_types::read_holds::ReadHold;
@@ -171,20 +171,20 @@ impl From<IdBundle> for CollectionIdBundle {
     }
 }
 
-fn parse_query_when(s: &str) -> QueryWhen {
+fn parse_query_when(s: &str) -> ResolvedQueryWhen {
     let s = s.to_lowercase();
     match s.split_once(':') {
         Some((when, ts)) => {
             let ts = ts.parse().unwrap();
             match when {
-                "attimestamp" => QueryWhen::AtTimestamp(ts),
-                "atleasttimestamp" => QueryWhen::AtLeastTimestamp(ts),
+                "attimestamp" => ResolvedQueryWhen::AtTimestamp(ts),
+                "atleasttimestamp" => ResolvedQueryWhen::AtLeastTimestamp(ts),
                 _ => panic!("bad when {s}"),
             }
         }
         None => match s.as_str() {
-            "freshesttablewrite" => QueryWhen::FreshestTableWrite,
-            "immediately" => QueryWhen::Immediately,
+            "freshesttablewrite" => ResolvedQueryWhen::FreshestTableWrite,
+            "immediately" => ResolvedQueryWhen::Immediately,
             _ => panic!("bad when {s}"),
         },
     }
@@ -282,7 +282,7 @@ fn test_timestamp_selection() {
                         .determine_timestamp_for(
                             &session,
                             &det.id_bundle.into(),
-                            &parse_query_when(&det.when),
+                            &when,
                             &TimelineContext::TimestampDependent,
                             oracle_read_ts,
                             None, /* real_time_recency_ts */

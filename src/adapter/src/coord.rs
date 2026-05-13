@@ -149,7 +149,7 @@ use mz_sql::names::{QualifiedItemName, ResolvedIds, SchemaSpecifier};
 use mz_sql::optimizer_metrics::OptimizerMetrics;
 use mz_sql::plan::{
     self, AlterSinkPlan, ConnectionDetails, CreateConnectionPlan, HirRelationExpr,
-    NetworkPolicyRule, OnTimeoutAction, Params, QueryWhen,
+    NetworkPolicyRule, OnTimeoutAction, Params, QueryWhen, ResolvedQueryWhen,
 };
 use mz_sql::session::user::User;
 use mz_sql::session::vars::{MAX_CREDIT_CONSUMPTION_RATE, SystemVars, Var};
@@ -604,6 +604,10 @@ pub struct CopyToContext {
 pub struct PeekStageLinearizeTimestamp {
     validity: PlanValidity,
     plan: mz_sql::plan::SelectPlan,
+    /// The result of resolving `plan.when` against current frontiers. Computed
+    /// once in `peek_validate` and threaded through the peek stages so that
+    /// every downstream consumer operates on the resolved type.
+    resolved_when: ResolvedQueryWhen,
     max_query_result_size: Option<u64>,
     source_ids: BTreeSet<GlobalId>,
     target_replica: Option<ReplicaId>,
@@ -618,6 +622,8 @@ pub struct PeekStageLinearizeTimestamp {
 pub struct PeekStageRealTimeRecency {
     validity: PlanValidity,
     plan: mz_sql::plan::SelectPlan,
+    /// See [`PeekStageLinearizeTimestamp::resolved_when`].
+    resolved_when: ResolvedQueryWhen,
     max_query_result_size: Option<u64>,
     source_ids: BTreeSet<GlobalId>,
     target_replica: Option<ReplicaId>,
@@ -633,6 +639,8 @@ pub struct PeekStageRealTimeRecency {
 pub struct PeekStageTimestampReadHold {
     validity: PlanValidity,
     plan: mz_sql::plan::SelectPlan,
+    /// See [`PeekStageLinearizeTimestamp::resolved_when`].
+    resolved_when: ResolvedQueryWhen,
     max_query_result_size: Option<u64>,
     source_ids: BTreeSet<GlobalId>,
     target_replica: Option<ReplicaId>,

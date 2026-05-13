@@ -33,7 +33,7 @@ use mz_repr::role_id::RoleId;
 use mz_repr::user::{ExternalUserMetadata, InternalUserMetadata};
 use mz_repr::{CatalogItemId, Datum, Row, RowIterator, SqlScalarType, Timestamp};
 use mz_sql::ast::{AstInfo, Raw, Statement, TransactionAccessMode};
-use mz_sql::plan::{Params, PlanContext, QueryWhen, StatementDesc};
+use mz_sql::plan::{Params, PlanContext, ResolvedQueryWhen, StatementDesc};
 use mz_sql::session::metadata::SessionMetadata;
 use mz_sql::session::user::{
     INTERNAL_USER_NAME_TO_DEFAULT_CLUSTER, RoleMetadata, SYSTEM_USER, User,
@@ -1188,8 +1188,8 @@ impl TransactionStatus {
     }
 
     /// Whether we are in a multi-statement transaction, AND the query is immediate.
-    pub fn in_immediate_multi_stmt_txn(&self, when: &QueryWhen) -> bool {
-        self.is_in_multi_statement_transaction() && when == &QueryWhen::Immediately
+    pub fn in_immediate_multi_stmt_txn(&self, when: &ResolvedQueryWhen) -> bool {
+        self.is_in_multi_statement_transaction() && when == &ResolvedQueryWhen::Immediately
     }
 
     /// Grants the writes lock to the inner transaction, returning an error if the transaction

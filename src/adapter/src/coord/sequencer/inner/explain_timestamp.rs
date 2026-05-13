@@ -317,11 +317,19 @@ impl Coordinator {
             timeline_context = TimelineContext::TimestampDependent;
         }
 
-        let oracle_read_ts = self.oracle_read_ts(session, &timeline_context, &when).await;
+        // Resolve up front; see `resolve_query_when` for rationale.
+        let resolved_when = crate::coord::timestamp_selection::resolve_query_when(
+            &when,
+            &*self.controller.storage_collections,
+            self.catalog().state(),
+        )?;
+        let oracle_read_ts = self
+            .oracle_read_ts(session, &timeline_context, &resolved_when)
+            .await;
 
         let determination = self.sequence_peek_timestamp(
             session,
-            &when,
+            &resolved_when,
             cluster_id,
             timeline_context,
             oracle_read_ts,
