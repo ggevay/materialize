@@ -21,6 +21,7 @@ use mz_ore::cast::CastLossy;
 use mz_repr::{GlobalId, Timestamp, TimestampManipulation};
 use mz_sql::plan::QueryWhen;
 use mz_sql::session::vars::IsolationLevel;
+use mz_storage_client::storage_collections::StorageCollections;
 use mz_storage_types::sources::Timeline;
 use serde::{Deserialize, Serialize};
 use timely::progress::{Antichain, Timestamp as _};
@@ -571,6 +572,61 @@ pub trait TimestampProvider {
     }
 }
 
+/// Resolves `QueryWhen::AtLeastFrontierOf` by reading the current write
+/// frontiers of the named storage collections and converting them into an
+/// equivalent `AtLeastTimestamp`. Specifically, the resulting timestamp is the
+/// maximum, across the named collections, of `write_frontier.step_back()`.
+///
+/// Returns `Ok(None)` when `when` is not `AtLeastFrontierOf` (so callers can
+/// pass any `QueryWhen` through unchanged), and `Ok(Some(AtLeastTimestamp(_)))`
+/// for the resolved case.
+///
+/// Errors if any named collection has no readable timestamp yet, either
+/// because it has not yet produced any output (write frontier is
+/// `[T::minimum()]`) or because it has finished (write frontier is the empty
+/// antichain).
+///
+/// The plan-time check in `plan_as_of` ensures that the named objects are
+/// sources, tables, or materialized views — i.e., storage collections —
+/// so consulting only `StorageCollections` here is sufficient. Indexes (and
+/// other compute collections) are rejected at plan time and therefore never
+/// reach this function.
+pub(crate) fn resolve_frontier_of(
+    when: &QueryWhen,
+    storage_collections: &dyn StorageCollections,
+    catalog_state: &CatalogState,
+) -> Result<Option<QueryWhen>, AdapterError> {
+    let QueryWhen::AtLeastFrontierOf(item_ids) = when else {
+        return Ok(None);
+    };
+    let mut max_ts: Option<Timestamp> = None;
+    for item_id in item_ids {
+        let entry = catalog_state.get_entry(item_id);
+        let gid = entry.latest_global_id();
+        let frontiers = storage_collections.collection_frontiers(gid).map_err(|_| {
+            AdapterError::Internal(format!(
+                "AS OF AT LEAST FRONTIER OF: no storage collection for {}",
+                entry.name().item,
+            ))
+        })?;
+        let readable = frontiers
+            .write_frontier
+            .as_option()
+            .and_then(|upper| upper.step_back());
+        let Some(readable) = readable else {
+            return Err(AdapterError::Unstructured(anyhow::anyhow!(
+                "AS OF AT LEAST FRONTIER OF: {} has no readable timestamp yet \
+                 (collection is unhydrated or closed)",
+                entry.name().item,
+            )));
+        };
+        max_ts = Some(max_ts.map_or(readable, |cur| cur.max(readable)));
+    }
+    // `item_ids` was non-empty because we matched `AtLeastFrontierOf`, but
+    // the list could in principle be empty; treat that as no constraint.
+    Ok(max_ts.map(QueryWhen::AtLeastTimestamp))
+}
+
 impl Coordinator {
     pub(crate) async fn oracle_read_ts(
         &self,
@@ -594,46 +650,13 @@ impl Coordinator {
         oracle_read_ts
     }
 
-    /// Resolves `QueryWhen::AtLeastFrontierOf` by reading the current write
-    /// frontiers of the named storage collections and converting them into an
-    /// equivalent `AtLeastTimestamp`. Specifically, the resulting timestamp is
-    /// the maximum, across the named collections, of `write_frontier.step_back()`.
-    ///
-    /// Errors if any named collection has no readable timestamp yet, either
-    /// because it has not yet produced any output (write frontier is
-    /// `[T::minimum()]`) or because it has finished (write frontier is the
-    /// empty antichain).
+    /// See [`resolve_frontier_of`].
     fn resolve_frontier_of(&self, when: &QueryWhen) -> Result<Option<QueryWhen>, AdapterError> {
-        let QueryWhen::AtLeastFrontierOf(item_ids) = when else {
-            return Ok(None);
-        };
-        let mut max_ts: Option<Timestamp> = None;
-        for item_id in item_ids {
-            let entry = self.catalog().get_entry(item_id);
-            let gid = entry.latest_global_id();
-            let (_since, upper) =
-                self.controller
-                    .storage
-                    .collection_frontiers(gid)
-                    .map_err(|_| {
-                        AdapterError::Internal(format!(
-                            "AS OF AT LEAST FRONTIER OF: no storage collection for {}",
-                            entry.name().item,
-                        ))
-                    })?;
-            let readable = upper.as_option().and_then(|upper| upper.step_back());
-            let Some(readable) = readable else {
-                return Err(AdapterError::Unstructured(anyhow::anyhow!(
-                    "AS OF AT LEAST FRONTIER OF: {} has no readable timestamp yet \
-                     (collection is unhydrated or closed)",
-                    entry.name().item,
-                )));
-            };
-            max_ts = Some(max_ts.map_or(readable, |cur| cur.max(readable)));
-        }
-        // `item_ids` was non-empty because we matched `AtLeastFrontierOf`, but
-        // the list could in principle be empty; treat that as no constraint.
-        Ok(max_ts.map(QueryWhen::AtLeastTimestamp))
+        resolve_frontier_of(
+            when,
+            &*self.controller.storage_collections,
+            self.catalog().state(),
+        )
     }
 
     /// Determines the timestamp for a query, acquires read holds that ensure the

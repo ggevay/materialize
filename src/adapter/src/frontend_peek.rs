@@ -457,6 +457,18 @@ impl PeekClient {
             QueryPlan::Subscribe(s) => &s.when,
         };
 
+        // Resolve `AS OF AT LEAST FRONTIER OF <names>` into a concrete
+        // `AtLeastTimestamp` up front, before any helper on `QueryWhen` is
+        // called (some of those helpers `soft_panic_or_log!` on the
+        // unresolved variant). This mirrors what
+        // `Coordinator::determine_timestamp` does internally.
+        let resolved_when = crate::coord::timestamp_selection::resolve_frontier_of(
+            when,
+            &*self.storage_collections,
+            catalog.state(),
+        )?;
+        let when = resolved_when.as_ref().unwrap_or(when);
+
         let depends_on = match query_plan {
             QueryPlan::Select(s) => s.source.depends_on(),
             QueryPlan::CopyTo(s, _) => s.source.depends_on(),
@@ -716,6 +728,7 @@ impl PeekClient {
                         &timeline_context,
                         oracle_read_ts,
                         real_time_recency_ts,
+                        &catalog,
                     )
                     .await?;
 
@@ -1511,8 +1524,16 @@ impl PeekClient {
         timeline_context: &TimelineContext,
         oracle_read_ts: Option<Timestamp>,
         real_time_recency_ts: Option<Timestamp>,
+        catalog: &Catalog,
     ) -> Result<(TimestampDetermination, ReadHolds), AdapterError> {
         // this is copy-pasted from Coordinator
+
+        let resolved_when = crate::coord::timestamp_selection::resolve_frontier_of(
+            when,
+            &*self.storage_collections,
+            catalog.state(),
+        )?;
+        let when = resolved_when.as_ref().unwrap_or(when);
 
         let isolation_level = session.vars().transaction_isolation();
 
