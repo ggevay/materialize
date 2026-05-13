@@ -595,10 +595,14 @@ impl Coordinator {
     }
 
     /// Resolves `QueryWhen::AtLeastFrontierOf` by reading the current write
-    /// frontiers of the named storage collections and converting to the
-    /// equivalent `AtLeastTimestamp`. Errors if any named collection has not
-    /// yet produced any output (write frontier is `[T::minimum()]` or empty),
-    /// since there is no readable timestamp to constrain against.
+    /// frontiers of the named storage collections and converting them into an
+    /// equivalent `AtLeastTimestamp`. Specifically, the resulting timestamp is
+    /// the maximum, across the named collections, of `write_frontier.step_back()`.
+    ///
+    /// Errors if any named collection has no readable timestamp yet, either
+    /// because it has not yet produced any output (write frontier is
+    /// `[T::minimum()]`) or because it has finished (write frontier is the
+    /// empty antichain).
     fn resolve_frontier_of(&self, when: &QueryWhen) -> Result<Option<QueryWhen>, AdapterError> {
         let QueryWhen::AtLeastFrontierOf(item_ids) = when else {
             return Ok(None);
@@ -646,11 +650,9 @@ impl Coordinator {
         oracle_read_ts: Option<Timestamp>,
         real_time_recency_ts: Option<mz_repr::Timestamp>,
     ) -> Result<(TimestampDetermination, ReadHolds), AdapterError> {
-        // Resolve `AS OF AT LEAST FRONTIER OF <names>` into a concrete
-        // `AtLeastTimestamp` using current write frontiers. This must happen
-        // here rather than at plan time because the frontiers move.
         let resolved_when = self.resolve_frontier_of(when)?;
         let when = resolved_when.as_ref().unwrap_or(when);
+
         let isolation_level = session.vars().transaction_isolation();
         let (det, read_holds) = self.determine_timestamp_for(
             session,

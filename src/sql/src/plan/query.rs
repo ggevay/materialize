@@ -1016,8 +1016,7 @@ pub fn plan_as_of(
                 for name in names {
                     let id = match &name {
                         ResolvedItemName::Item { id, .. } => *id,
-                        ResolvedItemName::Cte { .. }
-                        | ResolvedItemName::Error => sql_bail!(
+                        ResolvedItemName::Cte { .. } | ResolvedItemName::Error => sql_bail!(
                             "AS OF AT LEAST FRONTIER OF requires a source, table, \
                              or materialized view; got {}",
                             name.full_name_str(),
