@@ -267,6 +267,13 @@ pub enum AdapterError {
     },
     /// OIDC group-to-role sync failed and strict mode is enabled.
     OidcGroupSyncFailed(String),
+    /// `AS OF AT LEAST FRONTIER OF` named a collection that has no readable
+    /// timestamp yet. This happens when the collection is unhydrated (its write
+    /// frontier is still `[T::minimum()]`) or has finished (its write frontier
+    /// is the empty antichain).
+    AtLeastFrontierOfUnreadable {
+        name: String,
+    },
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -728,6 +735,9 @@ impl AdapterError {
             // similar to AbsurdSubscribeBounds
             AdapterError::ImpossibleTimestampConstraints { .. } => SqlState::DATA_EXCEPTION,
             AdapterError::OidcGroupSyncFailed(_) => SqlState::INTERNAL_ERROR,
+            AdapterError::AtLeastFrontierOfUnreadable { .. } => {
+                SqlState::OBJECT_NOT_IN_PREREQUISITE_STATE
+            }
         }
     }
 
@@ -1145,6 +1155,13 @@ impl fmt::Display for AdapterError {
             }
             AdapterError::OidcGroupSyncFailed(msg) => {
                 write!(f, "OIDC group-to-role sync failed: {msg}")
+            }
+            AdapterError::AtLeastFrontierOfUnreadable { name } => {
+                write!(
+                    f,
+                    "AS OF AT LEAST FRONTIER OF: {} is unhydrated or closed",
+                    name,
+                )
             }
         }
     }

@@ -614,11 +614,9 @@ pub(crate) fn resolve_frontier_of(
             .as_option()
             .and_then(|upper| upper.step_back());
         let Some(readable) = readable else {
-            return Err(AdapterError::Unstructured(anyhow::anyhow!(
-                "AS OF AT LEAST FRONTIER OF: {} has no readable timestamp yet \
-                 (collection is unhydrated or closed)",
-                entry.name().item,
-            )));
+            return Err(AdapterError::AtLeastFrontierOfUnreadable {
+                name: entry.name().item.clone(),
+            });
         };
         max_ts = Some(max_ts.map_or(readable, |cur| cur.max(readable)));
     }
