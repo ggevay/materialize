@@ -202,3 +202,40 @@ FETCH ALL c
 
 statement ok
 COMMIT
+
+# Tests for `AS OF AT LEAST FRONTIER OF`.
+#
+# These cover plan-time behavior only: slt is single-process and in-memory, so
+# frontiers don't advance through real time and we can't assert anything about
+# the specific timestamp picked. Real-frontier behavior (happy path with
+# observable advancement, sink-consistency, etc.) belongs in testdrive /
+# mzcompose.
+
+statement ok
+CREATE MATERIALIZED VIEW mv AS SELECT * FROM t
+
+# Happy path: tables are accepted. Use a constant query so the result doesn't
+# depend on the chosen timestamp. (We don't test a materialized view here:
+# in slt, MVs aren't hydrated by a real dataflow, so their write frontier
+# stays at `[T::minimum()]` and we'd hit the "unhydrated or closed" error.
+# Real-frontier behavior for MVs/sources belongs in testdrive.)
+query I
+SELECT 1 FROM t AS OF AT LEAST FRONTIER OF t
+----
+1
+
+# Multiple objects in the list are allowed (plan-time check only).
+query error AS OF AT LEAST FRONTIER OF: mv is unhydrated or closed
+SELECT 1 FROM t AS OF AT LEAST FRONTIER OF t, mv
+
+# Non-materialized views are rejected at plan time.
+query error AS OF AT LEAST FRONTIER OF does not support view
+SELECT * FROM t AS OF AT LEAST FRONTIER OF data
+
+# Indexes are rejected at plan time.
+query error AS OF AT LEAST FRONTIER OF does not support index
+SELECT * FROM t AS OF AT LEAST FRONTIER OF t_primary_idx
+
+# Unknown names are rejected at name resolution.
+query error unknown catalog item 'does_not_exist'
+SELECT * FROM t AS OF AT LEAST FRONTIER OF does_not_exist
