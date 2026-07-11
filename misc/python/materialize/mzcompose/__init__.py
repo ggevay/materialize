@@ -231,6 +231,11 @@ def get_variable_system_parameters(
             ["true", "false"],
         ),
         VariableSystemParameter(
+            "enable_compute_temporal_bucketing",
+            "true",
+            ["true", "false"],
+        ),
+        VariableSystemParameter(
             "enable_password_auth",
             "true",
             ["true", "false"],
