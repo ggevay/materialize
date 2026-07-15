@@ -513,6 +513,12 @@ impl AdapterError {
             }
             AdapterError::Catalog(c) => c.detail(),
             AdapterError::Eval(e) => e.detail(),
+            AdapterError::RecursionLimit(_) => Some(
+                "The query plan exceeded an internal complexity limit. This can happen, e.g., \
+                when a query has very many CTEs, UNION branches, columns, or parameters, or \
+                very deep nesting."
+                    .into(),
+            ),
             AdapterError::RelationOutsideTimeDomain { relations, names } => Some(format!(
                 "The following relations in the query are outside the transaction's time domain:\n{}\n{}",
                 relations
@@ -726,6 +732,12 @@ impl AdapterError {
             ),
             AdapterError::Catalog(c) => c.hint(),
             AdapterError::Eval(e) => e.hint(),
+            AdapterError::RecursionLimit(_) => Some(
+                "Consider splitting the query into smaller parts using materialized views or \
+                indexed views. Note that plain (non-indexed) views do not help, because they \
+                are inlined into the queries that use them."
+                    .into(),
+            ),
             AdapterError::AlterClusterUnmanagedWhileReconfiguring => Some(
                 "Cancel the reconfiguration by altering the cluster back to its current \
                 configuration, or wait for it to settle, then convert."
@@ -809,7 +821,7 @@ impl AdapterError {
 
     pub fn code(&self) -> SqlState {
         // We define this up here to make sure `AdapterError::` and `OptimizerError::` act the same way.
-        const RECURSION_LIMIT_ERROR_CODE: SqlState = SqlState::INTERNAL_ERROR;
+        const RECURSION_LIMIT_ERROR_CODE: SqlState = SqlState::STATEMENT_TOO_COMPLEX;
 
         // TODO(benesch): we should only use `SqlState::INTERNAL_ERROR` for
         // those errors that are truly internal errors. At the moment we have
@@ -1281,7 +1293,7 @@ impl fmt::Display for AdapterError {
                     "terminating connection due to idle-in-transaction timeout"
                 )
             }
-            AdapterError::RecursionLimit(e) => e.fmt(f),
+            AdapterError::RecursionLimit(_) => write!(f, "query is too complex"),
             AdapterError::RelationOutsideTimeDomain { .. } => {
                 write!(
                     f,

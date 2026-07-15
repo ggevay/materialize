@@ -135,7 +135,8 @@ known_errors = [
     "nested aggregate functions are not allowed",
     "function map_build(text list) does not exist",
     "timestamp cannot be NaN",
-    "exceeded recursion limit of 2048",
+    "exceeded recursion limit",  # old name of "query is too complex", kept for older versions
+    "query is too complex",
     "key cannot be null",  # expected, see PR materialize#25941
     "regexp_extract must specify at least one capture group",
     "array_fill with arrays not yet supported",
