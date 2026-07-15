@@ -1657,6 +1657,16 @@ impl crate::Transform for Typecheck {
                     typecheck_ctx.insert(Id::Global(id), got);
                 }
             }
+            (Err(TypeError::Recursion { error }), _) => {
+                // The plan is too deep for the typechecker's recursion limit. This is a
+                // resource limit, not evidence of a type inconsistency, so the check is
+                // inconclusive rather than severe. Skip it instead of failing a query that
+                // works fine when typechecking is disabled (as in production, where this
+                // transform doesn't run).
+                // NOTE: When changing this, manually run the ignored test
+                // `typecheck_recursion_limit_is_inconclusive` in this file.
+                ::tracing::warn!("typechecking inconclusive: {error}");
+            }
             (Err(err), _) => {
                 let (expected, binding) = match expected {
                     Some(expected) => {
@@ -2154,5 +2164,52 @@ mod tests {
         assert!(!datum.is_instance_of(&typ));
         let diff = datum_difference_with_column_type(&datum, &typ);
         assert_err!(diff);
+    }
+
+    /// A plan too deep to typecheck must be treated as inconclusive (`Ok`), not as a
+    /// severe type error (which would soft-panic, and thus fail queries in CI that
+    /// work in production, where the `Typecheck` transform doesn't run).
+    ///
+    /// Ignored because of its runtime. Run it manually when changing the
+    /// `TypeError::Recursion` handling in `actually_perform_transform`:
+    /// `bin/cargo-test -p mz-transform -- --run-ignored=ignored-only typecheck_recursion_limit_is_inconclusive`
+    #[mz_ore::test]
+    #[ignore = "manual test, run when changing the TypeError::Recursion handling"]
+    fn typecheck_recursion_limit_is_inconclusive() {
+        // Unguarded recursive walks over the plan outside the typechecker (e.g. hashing
+        // in `Transform::transform`, dropping the plan) need more stack than a default
+        // test thread has for a plan this deep.
+        std::thread::Builder::new()
+            .stack_size(512 << 20)
+            .spawn(typecheck_recursion_limit_is_inconclusive_inner)
+            .expect("thread spawns")
+            .join()
+            .expect("no panic");
+    }
+
+    fn typecheck_recursion_limit_is_inconclusive_inner() {
+        use mz_ore::cast::CastFrom;
+
+        let empty = || MirRelationExpr::constant(vec![vec![]], ReprRelationType::new(vec![]));
+
+        // A Let chain 2x deeper than the recursion limit, so that the typechecker's
+        // recursion guard trips with a comfortable margin.
+        let mut relation = empty();
+        for i in 0..2 * RECURSION_LIMIT {
+            relation = MirRelationExpr::Let {
+                id: LocalId::new(u64::cast_from(i)),
+                value: Box::new(empty()),
+                body: Box::new(relation),
+            };
+        }
+
+        let typecheck_ctx = empty_typechecking_context();
+        let typecheck = Typecheck::new(Arc::clone(&typecheck_ctx));
+        let features = mz_repr::optimize::OptimizerFeatures::default();
+        let mut df_meta = crate::dataflow::DataflowMetainfo::default();
+        let mut transform_ctx =
+            crate::TransformCtx::local(&features, &typecheck_ctx, &mut df_meta, None, None);
+        crate::Transform::transform(&typecheck, &mut relation, &mut transform_ctx)
+            .expect("typechecking a too-deep plan is inconclusive, not an error");
     }
 }
