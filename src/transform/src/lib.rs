@@ -269,6 +269,12 @@ pub trait Transform: fmt::Debug {
 pub enum TransformError {
     /// An unstructured error.
     Internal(String),
+    /// The transform gave up because the plan exceeded its recursion limit.
+    ///
+    /// This variant preserves the structured error so that the adapter can
+    /// present it as a user-facing "query is too complex" error rather than
+    /// an internal error.
+    RecursionLimit(RecursionLimitError),
     /// A reference to an apparently unbound identifier.
     IdentifierMissing(mz_expr::LocalId),
     /// Notify the caller to panic with the given message.
@@ -283,6 +289,7 @@ impl fmt::Display for TransformError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             TransformError::Internal(msg) => write!(f, "internal transform error: {}", msg),
+            TransformError::RecursionLimit(e) => e.fmt(f),
             TransformError::IdentifierMissing(i) => {
                 write!(f, "apparently unbound identifier: {:?}", i)
             }
@@ -297,7 +304,7 @@ impl Error for TransformError {}
 
 impl From<RecursionLimitError> for TransformError {
     fn from(error: RecursionLimitError) -> Self {
-        TransformError::Internal(error.to_string())
+        TransformError::RecursionLimit(error)
     }
 }
 

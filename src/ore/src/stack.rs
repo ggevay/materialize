@@ -256,7 +256,7 @@ impl RecursionGuard {
 }
 
 /// A [`RecursionGuard`]'s recursion limit was reached.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct RecursionLimitError {
     limit: usize,
     id: Option<u64>,

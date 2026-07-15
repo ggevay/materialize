@@ -925,6 +925,9 @@ impl AdapterError {
                 OptimizerError::EvalError(e) => {
                     AdapterError::Eval(e.clone()).code() // Delegate to outer
                 }
+                OptimizerError::TransformError(mz_transform::TransformError::RecursionLimit(_)) => {
+                    RECURSION_LIMIT_ERROR_CODE
+                }
                 OptimizerError::TransformError(_) => SqlState::INTERNAL_ERROR,
                 OptimizerError::UnmaterializableFunction(_) => SqlState::FEATURE_NOT_SUPPORTED,
                 OptimizerError::UncallableFunction { .. } => SqlState::FEATURE_NOT_SUPPORTED,
@@ -1539,6 +1542,9 @@ impl From<OptimizerError> for AdapterError {
         match e {
             PlanError(e) => Self::PlanError(e),
             RecursionLimitError(e) => Self::RecursionLimit(e),
+            TransformError(mz_transform::TransformError::RecursionLimit(e)) => {
+                Self::RecursionLimit(e)
+            }
             EvalError(e) => Self::Eval(e),
             InternalUnsafeMfpPlan(e) => Self::Internal(e),
             Internal(e) => Self::Internal(e),

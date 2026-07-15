@@ -415,6 +415,7 @@ impl ShouldTerminateGracefully for TransformError {
     fn should_terminate_gracefully(&self) -> bool {
         match self {
             TransformError::Internal(_)
+            | TransformError::RecursionLimit(_)
             | TransformError::IdentifierMissing(_)
             | TransformError::CallerShouldPanic(_) => false,
         }
