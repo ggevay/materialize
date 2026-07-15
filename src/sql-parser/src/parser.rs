@@ -51,7 +51,7 @@ const RECURSION_LIMIT: usize = 128;
 // are how wide predicates and sums are legitimately written (500-term chains
 // appear in test/limits and production workloads), so they get a much larger
 // budget than `RECURSION_LIMIT`. The limit matches the planner's recursion
-// guard (`RecursionGuard::with_limit(1024)` in mz-sql), which is what bounds
+// guard (`PLANNER_RECURSION_LIMIT` in mz-sql), which is what bounds
 // such chains during planning; a depth-1024 AST is also still shallow enough
 // for the plain-recursive display/drop/visit paths that unbounded chains
 // overflowed (the parse_expr_roundtrip fuzz finding).

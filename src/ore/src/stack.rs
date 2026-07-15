@@ -107,6 +107,27 @@ where
     stacker::maybe_grow(STACK_RED_ZONE, STACK_SIZE, f)
 }
 
+/// The recursion limit used by optimizer (MIR) traversals, and the largest of
+/// the recursion limits in the query-processing pipeline.
+///
+/// The limits form deliberate tiers. Each layer of the pipeline may only
+/// produce trees that fit into the budget of the layers after it, so the
+/// limits grow along the pipeline:
+///
+/// * mz-sql-parser: 128 for nested expressions (crate-local
+///   `RECURSION_LIMIT`), 1024 for flat expression chains, which the parser
+///   handles iteratively but later layers recurse over.
+/// * mz-sql planning: 1024 (`PLANNER_RECURSION_LIMIT` in `mz_sql::plan`).
+/// * optimizer/MIR: 2048 (this constant, also re-exported as
+///   `mz_expr::RECURSION_LIMIT`).
+///
+/// The headroom of this last tier over the planner's exists because the
+/// linear representation of some frequently occurring query fragments makes
+/// MIR trees deeper than the HIR trees they are lowered from, for example
+/// long chains of `Let` bindings and of `CallBinary` calls with associative
+/// functions such as `+`.
+pub const RECURSION_LIMIT: usize = 2048;
+
 /// A trait for types which support bounded recursion to prevent stack overflow.
 ///
 /// The rather odd design of this trait allows checked recursion to be added to

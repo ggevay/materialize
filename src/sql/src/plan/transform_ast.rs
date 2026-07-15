@@ -25,7 +25,7 @@ use mz_sql_parser::ast::{
 use mz_sql_parser::ident;
 
 use crate::names::{Aug, PartialItemName, ResolvedDataType, ResolvedItemName};
-use crate::plan::{PlanError, StatementContext};
+use crate::plan::{PLANNER_RECURSION_LIMIT, PlanError, StatementContext};
 use crate::{ORDINALITY_COL_NAME, normalize};
 
 pub(crate) fn transform<N>(scx: &StatementContext, node: &mut N) -> Result<(), PlanError>
@@ -589,7 +589,7 @@ impl<'a> Desugarer<'a> {
             scx,
             status: Ok(()),
             id_gen: Default::default(),
-            recursion_guard: RecursionGuard::with_limit(1024), // chosen arbitrarily
+            recursion_guard: RecursionGuard::with_limit(PLANNER_RECURSION_LIMIT),
         }
     }
 

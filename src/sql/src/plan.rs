@@ -126,6 +126,14 @@ pub use statement::{
 };
 pub use with_options::TryFromValue;
 
+/// The recursion limit used by the recursive traversals of the planner, most
+/// notably HIR planning and AST desugaring.
+///
+/// See the documentation on `mz_ore::stack::RECURSION_LIMIT` for how this
+/// limit relates to the other recursion limits in the query-processing
+/// pipeline.
+pub(crate) const PLANNER_RECURSION_LIMIT: usize = 1024;
+
 use self::statement::ddl::ClusterAlterOptionExtracted;
 
 /// Instructions for executing a SQL query.

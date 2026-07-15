@@ -60,15 +60,10 @@ pub mod join_input_mapper;
 
 /// A recursion limit to be used for stack-safe traversals of [`MirRelationExpr`] trees.
 ///
-/// The recursion limit must be large enough to accommodate for the linear representation
-/// of some pathological but frequently occurring query fragments.
-///
-/// For example, in MIR we could have long chains of
-/// - (1) `Let` bindings,
-/// - (2) `CallBinary` calls with associative functions such as `+`
-///
-/// Until we fix those, we need to stick with the larger recursion limit.
-pub const RECURSION_LIMIT: usize = 2048;
+/// See the documentation on `mz_ore::stack::RECURSION_LIMIT` for how this
+/// limit relates to the other recursion limits in the query-processing
+/// pipeline.
+pub use mz_ore::stack::RECURSION_LIMIT;
 
 /// A trait for types that describe how to build a collection.
 pub trait CollectionPlan {

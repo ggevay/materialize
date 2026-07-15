@@ -91,6 +91,7 @@ use crate::func::{self, Func, FuncSpec, TableFuncImpl};
 use crate::names::{
     Aug, FullItemName, PartialItemName, ResolvedDataType, ResolvedItemName, SchemaSpecifier,
 };
+use crate::plan::PLANNER_RECURSION_LIMIT;
 use crate::plan::PlanError::InvalidWmrRecursionLimit;
 use crate::plan::error::PlanError;
 use crate::plan::hir::{
@@ -6728,7 +6729,7 @@ impl<'a> QueryContext<'a> {
             outer_relation_types: vec![],
             ctes: BTreeMap::new(),
             name_manager: Rc::new(RefCell::new(NameManager::new())),
-            recursion_guard: RecursionGuard::with_limit(1024), // chosen arbitrarily
+            recursion_guard: RecursionGuard::with_limit(PLANNER_RECURSION_LIMIT),
         }
     }
 
