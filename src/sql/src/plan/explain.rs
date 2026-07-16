@@ -14,6 +14,7 @@ use std::panic::AssertUnwindSafe;
 use mz_expr::explain::{ExplainContext, ExplainSinglePlan};
 use mz_expr::visit::{Visit, VisitChildren};
 use mz_expr::{Id, LocalId};
+use mz_ore::stack::CheckedBox;
 use mz_repr::SqlRelationType;
 use mz_repr::explain::{AnnotatedPlan, Explain, ExplainError, ScalarOps, UnsupportedFormat};
 
@@ -131,8 +132,8 @@ pub fn normalize_subqueries<'a>(expr: &'a mut HirRelationExpr) {
         for binding in bindings.drain(..) {
             let name = format!("subquery-{}", Into::<u64>::into(&binding.local_id));
             let id = binding.local_id;
-            let value = Box::new(binding.subquery);
-            let body = Box::new(expr.take());
+            let value = CheckedBox::new(binding.subquery);
+            let body = CheckedBox::new(expr.take());
             *expr = HirRelationExpr::Let {
                 name,
                 id,

@@ -28,6 +28,7 @@ pub use mz_expr::{
 };
 use mz_ore::collections::CollectionExt;
 use mz_ore::error::ErrorExt;
+use mz_ore::stack::{CheckedBox, CheckedVec};
 use mz_ore::str::separated;
 use mz_ore::treat_as_equal::TreatAsEqual;
 use mz_ore::{soft_assert_or_log, stack};
@@ -120,9 +121,9 @@ pub enum HirRelationExpr {
         /// Maximum number of iterations to evaluate. If None, then there is no limit.
         limit: Option<LetRecLimit>,
         /// List of bindings all of which are in scope of each other.
-        bindings: Vec<(String, mz_expr::LocalId, HirRelationExpr, SqlRelationType)>,
+        bindings: CheckedVec<(String, mz_expr::LocalId, HirRelationExpr, SqlRelationType)>,
         /// Result of the AST node.
-        body: Box<HirRelationExpr>,
+        body: CheckedBox<HirRelationExpr>,
     },
     /// CTE
     Let {
@@ -130,16 +131,16 @@ pub enum HirRelationExpr {
         /// The identifier to be used in `Get` variants to retrieve `value`.
         id: mz_expr::LocalId,
         /// The collection to be bound to `name`.
-        value: Box<HirRelationExpr>,
+        value: CheckedBox<HirRelationExpr>,
         /// The result of the `Let`, evaluated with `name` bound to `value`.
-        body: Box<HirRelationExpr>,
+        body: CheckedBox<HirRelationExpr>,
     },
     Project {
-        input: Box<HirRelationExpr>,
+        input: CheckedBox<HirRelationExpr>,
         outputs: Vec<usize>,
     },
     Map {
-        input: Box<HirRelationExpr>,
+        input: CheckedBox<HirRelationExpr>,
         scalars: Vec<HirScalarExpr>,
     },
     CallTable {
@@ -147,14 +148,14 @@ pub enum HirRelationExpr {
         exprs: Vec<HirScalarExpr>,
     },
     Filter {
-        input: Box<HirRelationExpr>,
+        input: CheckedBox<HirRelationExpr>,
         predicates: Vec<HirScalarExpr>,
     },
     /// Unlike MirRelationExpr, we haven't yet compiled LeftOuter/RightOuter/FullOuter
     /// joins away into more primitive exprs
     Join {
-        left: Box<HirRelationExpr>,
-        right: Box<HirRelationExpr>,
+        left: CheckedBox<HirRelationExpr>,
+        right: CheckedBox<HirRelationExpr>,
         on: HirScalarExpr,
         kind: JoinKind,
     },
@@ -162,18 +163,18 @@ pub enum HirRelationExpr {
     /// a single row with the aggregates evaluated over empty groups, rather than returning zero
     /// rows
     Reduce {
-        input: Box<HirRelationExpr>,
+        input: CheckedBox<HirRelationExpr>,
         group_key: Vec<usize>,
         aggregates: Vec<AggregateExpr>,
         expected_group_size: Option<u64>,
     },
     Distinct {
-        input: Box<HirRelationExpr>,
+        input: CheckedBox<HirRelationExpr>,
     },
     /// Groups and orders within each group, limiting output.
     TopK {
         /// The source collection.
-        input: Box<HirRelationExpr>,
+        input: CheckedBox<HirRelationExpr>,
         /// Column indices used to form groups.
         group_key: Vec<usize>,
         /// Column indices used to order rows within groups.
@@ -196,15 +197,15 @@ pub enum HirRelationExpr {
         expected_group_size: Option<u64>,
     },
     Negate {
-        input: Box<HirRelationExpr>,
+        input: CheckedBox<HirRelationExpr>,
     },
     /// Keep rows from a dataflow where the row counts are positive.
     Threshold {
-        input: Box<HirRelationExpr>,
+        input: CheckedBox<HirRelationExpr>,
     },
     Union {
-        base: Box<HirRelationExpr>,
-        inputs: Vec<HirRelationExpr>,
+        base: CheckedBox<HirRelationExpr>,
+        inputs: CheckedVec<HirRelationExpr>,
     },
 }
 
@@ -233,33 +234,33 @@ pub enum HirScalarExpr {
     CallUnmaterializable(UnmaterializableFunc, NameMetadata),
     CallUnary {
         func: UnaryFunc,
-        expr: Box<HirScalarExpr>,
+        expr: CheckedBox<HirScalarExpr>,
         name: NameMetadata,
     },
     CallBinary {
         func: BinaryFunc,
-        expr1: Box<HirScalarExpr>,
-        expr2: Box<HirScalarExpr>,
+        expr1: CheckedBox<HirScalarExpr>,
+        expr2: CheckedBox<HirScalarExpr>,
         name: NameMetadata,
     },
     CallVariadic {
         func: VariadicFunc,
-        exprs: Vec<HirScalarExpr>,
+        exprs: CheckedVec<HirScalarExpr>,
         name: NameMetadata,
     },
     If {
-        cond: Box<HirScalarExpr>,
-        then: Box<HirScalarExpr>,
-        els: Box<HirScalarExpr>,
+        cond: CheckedBox<HirScalarExpr>,
+        then: CheckedBox<HirScalarExpr>,
+        els: CheckedBox<HirScalarExpr>,
         name: NameMetadata,
     },
     /// Returns true if `expr` returns any rows
-    Exists(Box<HirRelationExpr>, NameMetadata),
+    Exists(CheckedBox<HirRelationExpr>, NameMetadata),
     /// Given `expr` with arity 1. If expr returns:
     /// * 0 rows, return NULL
     /// * 1 row, return the value of that row
     /// * >1 rows, we return an error
-    Select(Box<HirRelationExpr>, NameMetadata),
+    Select(CheckedBox<HirRelationExpr>, NameMetadata),
     Windowing(WindowExpr, NameMetadata),
 }
 
@@ -278,7 +279,7 @@ pub enum HirScalarExpr {
 /// order.
 pub struct WindowExpr {
     pub func: WindowExprType,
-    pub partition_by: Vec<HirScalarExpr>,
+    pub partition_by: CheckedVec<HirScalarExpr>,
     /// ORDER BY is represented in a complicated way: `plan_function_order_by` gave us two things:
     ///  - the `ColumnOrder`s we have put in the `order_by` fields in the `WindowExprType` in `func`
     ///    above,
@@ -289,7 +290,7 @@ pub struct WindowExpr {
     /// (`WindowExpr` exists only in HIR, but not in MIR.)
     /// Note that the `column` field in the `ColumnOrder`s point into the Row constructed in the
     /// lowering, and not to original input columns.
-    pub order_by: Vec<HirScalarExpr>,
+    pub order_by: CheckedVec<HirScalarExpr>,
 }
 
 impl WindowExpr {
@@ -671,7 +672,7 @@ pub struct ValueWindowExpr {
     /// e.g., `row(#1, 3, null)`.
     /// If it's a fused window function, then the arguments of each of the constituent function
     /// calls are wrapped in an outer record.
-    pub args: Box<HirScalarExpr>,
+    pub args: CheckedBox<HirScalarExpr>,
     /// See comment on `WindowExpr::order_by`.
     pub order_by: Vec<ColumnOrder>,
     pub window_frame: WindowFrame,
@@ -720,7 +721,7 @@ impl ValueWindowExpr {
     /// Converts into `mz_expr::AggregateFunc`.
     pub fn into_expr(self) -> (Box<HirScalarExpr>, mz_expr::AggregateFunc) {
         (
-            self.args,
+            self.args.into_box(),
             self.func
                 .into_expr(self.order_by, self.window_frame, self.ignore_nulls),
         )
@@ -886,7 +887,7 @@ impl AggregateWindowExpr {
     pub fn into_expr(self) -> (Box<HirScalarExpr>, mz_expr::AggregateFunc) {
         if let AggregateFunc::FusedWindowAgg { funcs } = &self.aggregate_expr.func {
             (
-                self.aggregate_expr.expr,
+                self.aggregate_expr.expr.into_box(),
                 FusedWindowAggregate {
                     wrapped_aggregates: funcs.iter().map(|f| f.clone().into_expr()).collect(),
                     order_by: self.order_by,
@@ -895,7 +896,7 @@ impl AggregateWindowExpr {
             )
         } else {
             (
-                self.aggregate_expr.expr,
+                self.aggregate_expr.expr.into_box(),
                 WindowAggregate {
                     wrapped_aggregate: Box::new(self.aggregate_expr.func.into_expr()),
                     order_by: self.order_by,
@@ -1269,7 +1270,7 @@ impl JoinKind {
 )]
 pub struct AggregateExpr {
     pub func: AggregateFunc,
-    pub expr: Box<HirScalarExpr>,
+    pub expr: CheckedBox<HirScalarExpr>,
     pub distinct: bool,
 }
 
@@ -1797,7 +1798,7 @@ impl HirRelationExpr {
             self
         } else {
             HirRelationExpr::Project {
-                input: Box::new(self),
+                input: CheckedBox::new(self),
                 outputs,
             }
         }
@@ -1817,7 +1818,7 @@ impl HirRelationExpr {
             self
         } else {
             HirRelationExpr::Map {
-                input: Box::new(self),
+                input: CheckedBox::new(self),
                 scalars,
             }
         }
@@ -1837,7 +1838,7 @@ impl HirRelationExpr {
             preds.sort();
             preds.dedup();
             HirRelationExpr::Filter {
-                input: Box::new(self),
+                input: CheckedBox::new(self),
                 predicates: preds,
             }
         }
@@ -1850,7 +1851,7 @@ impl HirRelationExpr {
         expected_group_size: Option<u64>,
     ) -> Self {
         HirRelationExpr::Reduce {
-            input: Box::new(self),
+            input: CheckedBox::new(self),
             group_key,
             aggregates,
             expected_group_size,
@@ -1866,7 +1867,7 @@ impl HirRelationExpr {
         expected_group_size: Option<u64>,
     ) -> Self {
         HirRelationExpr::TopK {
-            input: Box::new(self),
+            input: CheckedBox::new(self),
             group_key,
             order_key,
             limit,
@@ -1877,10 +1878,10 @@ impl HirRelationExpr {
 
     pub fn negate(self) -> Self {
         if let HirRelationExpr::Negate { input } = self {
-            *input
+            input.into_inner()
         } else {
             HirRelationExpr::Negate {
-                input: Box::new(self),
+                input: CheckedBox::new(self),
             }
         }
     }
@@ -1890,7 +1891,7 @@ impl HirRelationExpr {
             self
         } else {
             HirRelationExpr::Distinct {
-                input: Box::new(self),
+                input: CheckedBox::new(self),
             }
         }
     }
@@ -1900,7 +1901,7 @@ impl HirRelationExpr {
             self
         } else {
             HirRelationExpr::Threshold {
-                input: Box::new(self),
+                input: CheckedBox::new(self),
             }
         }
     }
@@ -1908,29 +1909,29 @@ impl HirRelationExpr {
     pub fn union(self, other: Self) -> Self {
         let mut terms = Vec::new();
         if let HirRelationExpr::Union { base, inputs } = self {
-            terms.push(*base);
+            terms.push(base.into_inner());
             terms.extend(inputs);
         } else {
             terms.push(self);
         }
         if let HirRelationExpr::Union { base, inputs } = other {
-            terms.push(*base);
+            terms.push(base.into_inner());
             terms.extend(inputs);
         } else {
             terms.push(other);
         }
         HirRelationExpr::Union {
-            base: Box::new(terms.remove(0)),
-            inputs: terms,
+            base: CheckedBox::new(terms.remove(0)),
+            inputs: terms.into(),
         }
     }
 
     pub fn exists(self) -> HirScalarExpr {
-        HirScalarExpr::Exists(Box::new(self), NameMetadata::default())
+        HirScalarExpr::Exists(CheckedBox::new(self), NameMetadata::default())
     }
 
     pub fn select(self) -> HirScalarExpr {
-        HirScalarExpr::Select(Box::new(self), NameMetadata::default())
+        HirScalarExpr::Select(CheckedBox::new(self), NameMetadata::default())
     }
 
     pub fn join(
@@ -1961,8 +1962,8 @@ impl HirRelationExpr {
             self
         } else {
             HirRelationExpr::Join {
-                left: Box::new(self),
-                right: Box::new(right),
+                left: CheckedBox::new(self),
+                right: CheckedBox::new(right),
                 on,
                 kind,
             }
@@ -3814,7 +3815,7 @@ impl HirScalarExpr {
     pub fn call_unary(self, func: UnaryFunc) -> Self {
         HirScalarExpr::CallUnary {
             func,
-            expr: Box::new(self),
+            expr: CheckedBox::new(self),
             name: NameMetadata::default(),
         }
     }
@@ -3822,8 +3823,8 @@ impl HirScalarExpr {
     pub fn call_binary<B: Into<BinaryFunc>>(self, other: Self, func: B) -> Self {
         HirScalarExpr::CallBinary {
             func: func.into(),
-            expr1: Box::new(self),
-            expr2: Box::new(other),
+            expr1: CheckedBox::new(self),
+            expr2: CheckedBox::new(other),
             name: NameMetadata::default(),
         }
     }
@@ -3835,16 +3836,16 @@ impl HirScalarExpr {
     pub fn call_variadic<V: Into<VariadicFunc>>(func: V, exprs: Vec<Self>) -> Self {
         HirScalarExpr::CallVariadic {
             func: func.into(),
-            exprs,
+            exprs: exprs.into(),
             name: NameMetadata::default(),
         }
     }
 
     pub fn if_then_else(cond: Self, then: Self, els: Self) -> Self {
         HirScalarExpr::If {
-            cond: Box::new(cond),
-            then: Box::new(then),
-            els: Box::new(els),
+            cond: CheckedBox::new(cond),
+            then: CheckedBox::new(then),
+            els: CheckedBox::new(els),
             name: NameMetadata::default(),
         }
     }

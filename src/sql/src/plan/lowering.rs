@@ -342,8 +342,13 @@ impl HirRelationExpr {
                     value,
                     body,
                 } => {
-                    let value =
-                        value.applied_to(id_gen, get_outer.clone(), col_map, cte_map, context)?;
+                    let value = value.into_inner().applied_to(
+                        id_gen,
+                        get_outer.clone(),
+                        col_map,
+                        cte_map,
+                        context,
+                    )?;
                     value.let_in(id_gen, |id_gen, get_value| {
                         let (new_id, typ) = if let MirRelationExpr::Get {
                             id: mz_expr::Id::Local(id),
@@ -368,7 +373,9 @@ impl HirRelationExpr {
                                 outer_relation: get_outer.clone(),
                             },
                         );
-                        let body = body.applied_to(id_gen, get_outer, col_map, cte_map, context);
+                        let body = body
+                            .into_inner()
+                            .applied_to(id_gen, get_outer, col_map, cte_map, context);
                         if let Some(old_value) = old_value {
                             cte_map.insert(id, old_value);
                         } else {
@@ -421,7 +428,9 @@ impl HirRelationExpr {
                         )?);
                     }
 
-                    let mir_body = body.applied_to(id_gen, get_outer, col_map, cte_map, context)?;
+                    let mir_body = body
+                        .into_inner()
+                        .applied_to(id_gen, get_outer, col_map, cte_map, context)?;
 
                     // Remove our bindings and reinstate any shadowed bindings.
                     for (id, shadowed) in shadowed_bindings {
@@ -443,8 +452,13 @@ impl HirRelationExpr {
                 Project { input, outputs } => {
                     // Projections should be applied to the decorrelated `inner`, and to its columns,
                     // which means rebasing `outputs` to start `get_outer.arity()` columns later.
-                    let input =
-                        input.applied_to(id_gen, get_outer.clone(), col_map, cte_map, context)?;
+                    let input = input.into_inner().applied_to(
+                        id_gen,
+                        get_outer.clone(),
+                        col_map,
+                        cte_map,
+                        context,
+                    )?;
                     let outputs = (0..get_outer.arity())
                         .chain(outputs.into_iter().map(|i| get_outer.arity() + i))
                         .collect::<Vec<_>>();
@@ -457,8 +471,9 @@ impl HirRelationExpr {
                     // arity of the HIR fragments lowered so far.
                     let mut lowered_arity = input.arity();
 
-                    let mut input =
-                        input.applied_to(id_gen, get_outer, col_map, cte_map, context)?;
+                    let mut input = input
+                        .into_inner()
+                        .applied_to(id_gen, get_outer, col_map, cte_map, context)?;
 
                     // Lower subqueries in maximally sized batches, such as no subquery in the current
                     // batch depends on columns from the same batch.
@@ -554,8 +569,9 @@ impl HirRelationExpr {
                     // Filter expressions may contain correlated subqueries.
                     // We extend `get_outer` with sufficient values to determine the value of the predicate,
                     // then filter the results, then strip off any columns that were added for this purpose.
-                    let mut input =
-                        input.applied_to(id_gen, get_outer, col_map, cte_map, context)?;
+                    let mut input = input
+                        .into_inner()
+                        .applied_to(id_gen, get_outer, col_map, cte_map, context)?;
                     for predicate in predicates {
                         let old_arity = input.arity();
                         let predicate = predicate
@@ -586,7 +602,9 @@ impl HirRelationExpr {
 
                     assert!(kind.can_be_correlated());
 
-                    let left = left.applied_to(id_gen, get_outer, col_map, cte_map, context)?;
+                    let left = left
+                        .into_inner()
+                        .applied_to(id_gen, get_outer, col_map, cte_map, context)?;
                     left.let_in(id_gen, |id_gen, get_left| {
                         let apply_requires_distinct_outer = false;
                         let mut join = branch(
@@ -594,7 +612,7 @@ impl HirRelationExpr {
                             get_left.clone(),
                             col_map,
                             cte_map,
-                            *right,
+                            right.into_inner(),
                             apply_requires_distinct_outer,
                             context,
                             |id_gen, right, get_left, col_map, cte_map, context| {
@@ -681,13 +699,18 @@ impl HirRelationExpr {
                     // against the records present in the left and right (decorrelated) inputs,
                     // depending on the type of join.
                     let oa = get_outer.arity();
-                    let left =
-                        left.applied_to(id_gen, get_outer.clone(), col_map, cte_map, context)?;
+                    let left = left.into_inner().applied_to(
+                        id_gen,
+                        get_outer.clone(),
+                        col_map,
+                        cte_map,
+                        context,
+                    )?;
                     let lt = left.typ().column_types.into_iter().skip(oa).collect_vec();
                     let la = lt.len();
                     left.let_in(id_gen, |id_gen, get_left| {
                         let right_col_map = col_map.enter_scope(0);
-                        let right = right.applied_to(
+                        let right = right.into_inner().applied_to(
                             id_gen,
                             get_outer.clone(),
                             &right_col_map,
@@ -810,7 +833,7 @@ impl HirRelationExpr {
                 Union { base, inputs } => {
                     // Union is uncomplicated.
                     SR::Union {
-                        base: CheckedBox::new(base.applied_to(
+                        base: CheckedBox::new(base.into_inner().applied_to(
                             id_gen,
                             get_outer.clone(),
                             col_map,
@@ -841,8 +864,13 @@ impl HirRelationExpr {
                     // Reduce may contain expressions with correlated subqueries.
                     // In addition, here an empty reduction key signifies that we need to supply default values
                     // in the case that there are no results (as in a SQL aggregation without an explicit GROUP BY).
-                    let mut input =
-                        input.applied_to(id_gen, get_outer.clone(), col_map, cte_map, context)?;
+                    let mut input = input.into_inner().applied_to(
+                        id_gen,
+                        get_outer.clone(),
+                        col_map,
+                        cte_map,
+                        context,
+                    )?;
                     let applied_group_key = (0..get_outer.arity())
                         .chain(group_key.iter().map(|i| get_outer.arity() + i))
                         .collect();
@@ -875,6 +903,7 @@ impl HirRelationExpr {
                 Distinct { input } => {
                     // Distinct is uncomplicated.
                     input
+                        .into_inner()
                         .applied_to(id_gen, get_outer, col_map, cte_map, context)?
                         .distinct()
                 }
@@ -887,8 +916,13 @@ impl HirRelationExpr {
                     expected_group_size,
                 } => {
                     // TopK is uncomplicated, except that we must group by the columns of `get_outer` as well.
-                    let mut input =
-                        input.applied_to(id_gen, get_outer.clone(), col_map, cte_map, context)?;
+                    let mut input = input.into_inner().applied_to(
+                        id_gen,
+                        get_outer.clone(),
+                        col_map,
+                        cte_map,
+                        context,
+                    )?;
                     let mut applied_group_key: Vec<_> = (0..get_outer.arity())
                         .chain(group_key.iter().map(|i| get_outer.arity() + i))
                         .collect();
@@ -939,12 +973,14 @@ impl HirRelationExpr {
                 Negate { input } => {
                     // Negate is uncomplicated.
                     input
+                        .into_inner()
                         .applied_to(id_gen, get_outer, col_map, cte_map, context)?
                         .negate()
                 }
                 Threshold { input } => {
                     // Threshold is uncomplicated.
                     input
+                        .into_inner()
                         .applied_to(id_gen, get_outer, col_map, cte_map, context)?
                         .threshold()
                 }
@@ -996,8 +1032,14 @@ impl HirScalarExpr {
                     expr,
                     name: _,
                 } => {
-                    let inner =
-                        expr.applied_to(id_gen, col_map, cte_map, inner, subquery_map, context)?;
+                    let inner = expr.into_inner().applied_to(
+                        id_gen,
+                        col_map,
+                        cte_map,
+                        inner,
+                        subquery_map,
+                        context,
+                    )?;
                     if context.config.enable_cast_elimination && func.is_eliminable_cast() {
                         inner
                     } else {
@@ -1014,7 +1056,7 @@ impl HirScalarExpr {
                     name: _,
                 } => SS::CallBinary {
                     func,
-                    expr1: CheckedBox::new(expr1.applied_to(
+                    expr1: CheckedBox::new(expr1.into_inner().applied_to(
                         id_gen,
                         col_map,
                         cte_map,
@@ -1022,7 +1064,7 @@ impl HirScalarExpr {
                         subquery_map,
                         context,
                     )?),
-                    expr2: CheckedBox::new(expr2.applied_to(
+                    expr2: CheckedBox::new(expr2.into_inner().applied_to(
                         id_gen,
                         col_map,
                         cte_map,
@@ -1071,8 +1113,14 @@ impl HirScalarExpr {
                     // and we would benefit from not introducing the complexity.
 
                     let inner_arity = inner.arity();
-                    let cond_expr =
-                        cond.applied_to(id_gen, col_map, cte_map, inner, subquery_map, context)?;
+                    let cond_expr = cond.into_inner().applied_to(
+                        id_gen,
+                        col_map,
+                        cte_map,
+                        inner,
+                        subquery_map,
+                        context,
+                    )?;
 
                     // Defensive copies, in case we mangle these in decorrelation.
                     let inner_clone = inner.clone();
@@ -1080,10 +1128,22 @@ impl HirScalarExpr {
                     let else_clone = els.clone();
 
                     let cond_arity = inner.arity();
-                    let then_expr =
-                        then.applied_to(id_gen, col_map, cte_map, inner, subquery_map, context)?;
-                    let else_expr =
-                        els.applied_to(id_gen, col_map, cte_map, inner, subquery_map, context)?;
+                    let then_expr = then.into_inner().applied_to(
+                        id_gen,
+                        col_map,
+                        cte_map,
+                        inner,
+                        subquery_map,
+                        context,
+                    )?;
+                    let else_expr = els.into_inner().applied_to(
+                        id_gen,
+                        col_map,
+                        cte_map,
+                        inner,
+                        subquery_map,
+                        context,
+                    )?;
 
                     if cond_arity == inner.arity() {
                         // If no additional columns were added, we simply return the
@@ -1102,7 +1162,7 @@ impl HirScalarExpr {
                         *inner = inner_clone.let_in(id_gen, |id_gen, get_inner| {
                             // Restrict to records satisfying `cond_expr` and apply `then` as a map.
                             let mut then_inner = get_inner.clone().filter(vec![cond_expr.clone()]);
-                            let then_expr = then_clone.applied_to(
+                            let then_expr = then_clone.into_inner().applied_to(
                                 id_gen,
                                 col_map,
                                 cte_map,
@@ -1123,7 +1183,7 @@ impl HirScalarExpr {
                                     cond_expr.clone().call_is_null(),
                                 ],
                             )]);
-                            let else_expr = else_clone.applied_to(
+                            let else_expr = else_clone.into_inner().applied_to(
                                 id_gen,
                                 col_map,
                                 cte_map,
@@ -1162,7 +1222,7 @@ impl HirScalarExpr {
                         inner.take_dangerous(),
                         col_map,
                         cte_map,
-                        *expr,
+                        expr.into_inner(),
                         apply_requires_distinct_outer,
                         context,
                     )?;
@@ -1176,15 +1236,15 @@ impl HirScalarExpr {
                         inner.take_dangerous(),
                         col_map,
                         cte_map,
-                        *expr,
+                        expr.into_inner(),
                         apply_requires_distinct_outer,
                         context,
                     )?;
                     SS::Column(inner.arity() - 1, name)
                 }
                 Windowing(expr, _name) => {
-                    let partition_by = expr.partition_by;
-                    let order_by = expr.order_by;
+                    let partition_by = expr.partition_by.into_inner();
+                    let order_by = expr.order_by.into_inner();
 
                     // argument lowering for scalar window functions
                     // (We need to specify the & _ in the arguments because of this problem:
@@ -1700,7 +1760,7 @@ impl HirScalarExpr {
                 expr,
                 name: _,
             } => {
-                let inner = expr.lower_uncorrelated(config)?;
+                let inner = expr.into_inner().lower_uncorrelated(config)?;
 
                 if config.enable_cast_elimination && func.is_eliminable_cast() {
                     inner
@@ -1718,8 +1778,8 @@ impl HirScalarExpr {
                 name: _,
             } => SS::CallBinary {
                 func,
-                expr1: CheckedBox::new(expr1.lower_uncorrelated(config)?),
-                expr2: CheckedBox::new(expr2.lower_uncorrelated(config)?),
+                expr1: CheckedBox::new(expr1.into_inner().lower_uncorrelated(config)?),
+                expr2: CheckedBox::new(expr2.into_inner().lower_uncorrelated(config)?),
             },
             CallVariadic {
                 func,
@@ -1738,9 +1798,9 @@ impl HirScalarExpr {
                 els,
                 name: _,
             } => SS::If {
-                cond: CheckedBox::new(cond.lower_uncorrelated(config)?),
-                then: CheckedBox::new(then.lower_uncorrelated(config)?),
-                els: CheckedBox::new(els.lower_uncorrelated(config)?),
+                cond: CheckedBox::new(cond.into_inner().lower_uncorrelated(config)?),
+                then: CheckedBox::new(then.into_inner().lower_uncorrelated(config)?),
+                els: CheckedBox::new(els.into_inner().lower_uncorrelated(config)?),
             },
             Select { .. } | Exists { .. } | Parameter(..) | Column(..) | Windowing(..) => {
                 sql_bail!(
@@ -2165,7 +2225,9 @@ impl AggregateExpr {
 
         Ok(mz_expr::AggregateExpr {
             func: func.into_expr(),
-            expr: expr.applied_to(id_gen, col_map, cte_map, inner, &None, context)?,
+            expr: expr
+                .into_inner()
+                .applied_to(id_gen, col_map, cte_map, inner, &None, context)?,
             distinct,
         })
     }

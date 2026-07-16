@@ -18,7 +18,7 @@ use mz_expr::WindowFrame;
 use mz_expr::func::variadic::RecordCreate;
 use mz_expr::visit::Visit;
 use mz_expr::{ColumnOrder, UnaryFunc, VariadicFunc};
-use mz_ore::stack::RecursionLimitError;
+use mz_ore::stack::{CheckedBox, RecursionLimitError};
 use mz_repr::{ColumnName, SqlColumnType, SqlRelationType, SqlScalarType};
 
 use crate::plan::hir::{
@@ -449,8 +449,8 @@ pub fn fuse_window_functions(
                 },
                 _name,
             ) => WindowFuncCallOptions::Value(ValueWindowFuncCallOptions {
-                partition_by: partition_by.clone(),
-                outer_order_by: outer_order_by.clone(),
+                partition_by: partition_by.to_vec(),
+                outer_order_by: outer_order_by.to_vec(),
                 inner_order_by: inner_order_by.clone(),
                 window_frame: window_frame.clone(),
                 ignore_nulls: ignore_nulls.clone(),
@@ -473,8 +473,8 @@ pub fn fuse_window_functions(
                 },
                 _name,
             ) => WindowFuncCallOptions::Agg(AggregateWindowFuncCallOptions {
-                partition_by: partition_by.clone(),
-                outer_order_by: outer_order_by.clone(),
+                partition_by: partition_by.to_vec(),
+                outer_order_by: outer_order_by.to_vec(),
                 inner_order_by: inner_order_by.clone(),
                 window_frame: window_frame.clone(),
                 distinct: distinct.clone(),
@@ -542,13 +542,13 @@ pub fn fuse_window_functions(
                     HirScalarExpr::windowing(WindowExpr {
                         func: WindowExprType::Value(ValueWindowExpr {
                             func: ValueWindowFunc::Fused(fused_funcs),
-                            args: Box::new(fused_args),
+                            args: CheckedBox::new(fused_args),
                             order_by: options.inner_order_by,
                             window_frame: options.window_frame,
                             ignore_nulls: options.ignore_nulls,
                         }),
-                        partition_by: options.partition_by,
-                        order_by: options.outer_order_by,
+                        partition_by: options.partition_by.into(),
+                        order_by: options.outer_order_by.into(),
                     })
                 }
                 WindowFuncCallOptions::Agg(options) => {
@@ -593,14 +593,14 @@ pub fn fuse_window_functions(
                         func: WindowExprType::Aggregate(AggregateWindowExpr {
                             aggregate_expr: AggregateExpr {
                                 func: AggregateFunc::FusedWindowAgg { funcs: fused_funcs },
-                                expr: Box::new(fused_args),
+                                expr: CheckedBox::new(fused_args),
                                 distinct: options.distinct,
                             },
                             order_by: options.inner_order_by,
                             window_frame: options.window_frame,
                         }),
-                        partition_by: options.partition_by,
-                        order_by: options.outer_order_by,
+                        partition_by: options.partition_by.into(),
+                        order_by: options.outer_order_by.into(),
                     })
                 }
             };

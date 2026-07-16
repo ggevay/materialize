@@ -59,7 +59,7 @@ use mz_ore::collections::CollectionExt;
 use mz_ore::error::ErrorExt;
 use mz_ore::id_gen::IdGen;
 use mz_ore::option::FallibleMapExt;
-use mz_ore::stack::{CheckedRecursion, RecursionGuard};
+use mz_ore::stack::{CheckedBox, CheckedRecursion, RecursionGuard};
 use mz_ore::str::StrExt;
 use mz_repr::adt::char::CharLength;
 use mz_repr::adt::numeric::{NUMERIC_DATUM_MAX_PRECISION, NumericMaxScale};
@@ -1560,8 +1560,8 @@ fn plan_query_inner(qcx: &mut QueryContext, q: &Query<Aug>) -> Result<PlannedQue
                     planned_query.expr = HirRelationExpr::Let {
                         name: cte.name,
                         id: id.clone(),
-                        value: Box::new(value),
-                        body: Box::new(planned_query.expr),
+                        value: CheckedBox::new(value),
+                        body: CheckedBox::new(planned_query.expr),
                     };
                 }
                 if let Some(shadowed_val) = shadowed_val {
@@ -1618,8 +1618,8 @@ fn plan_query_inner(qcx: &mut QueryContext, q: &Query<Aug>) -> Result<PlannedQue
             if !bindings.is_empty() {
                 planned_query.expr = HirRelationExpr::LetRec {
                     limit,
-                    bindings,
-                    body: Box::new(planned_query.expr),
+                    bindings: bindings.into(),
+                    body: CheckedBox::new(planned_query.expr),
                 }
             }
         }
@@ -3389,8 +3389,8 @@ fn plan_table_function_internal(
                                     func: ScalarWindowFunc::RowNumber,
                                     order_by: vec![],
                                 }),
-                                partition_by: vec![],
-                                order_by: vec![],
+                                partition_by: vec![].into(),
+                                order_by: vec![].into(),
                             })])
                         } else {
                             bail_unsupported!(format!(
@@ -4794,7 +4794,7 @@ where
             vec![],
             vec![AggregateExpr {
                 func: aggregate_concat(aggregation_order_by),
-                expr: Box::new(HirScalarExpr::call_variadic(
+                expr: CheckedBox::new(HirScalarExpr::call_variadic(
                     RecordCreate {
                         field_names: iter::repeat(ColumnName::from(""))
                             .take(aggregation_exprs.len())
@@ -4889,7 +4889,7 @@ fn plan_map_subquery(
                         .collect(),
                     value_type: value_type.clone(),
                 },
-                expr: Box::new(HirScalarExpr::call_variadic(
+                expr: CheckedBox::new(HirScalarExpr::call_variadic(
                     RecordCreate {
                         field_names: iter::repeat(ColumnName::from(""))
                             .take(aggregation_exprs.len())
@@ -5319,7 +5319,7 @@ fn plan_aggregate_common(
 
     Ok(AggregateExpr {
         func,
-        expr: Box::new(expr),
+        expr: CheckedBox::new(expr),
         distinct: *distinct,
     })
 }
@@ -5508,8 +5508,8 @@ fn plan_function<'a>(
                     func,
                     order_by: col_orders,
                 }),
-                partition_by,
-                order_by: order_by_exprs,
+                partition_by: partition_by.into(),
+                order_by: order_by_exprs.into(),
             }));
         }
         Func::ValueWindow(impls) => {
@@ -5530,13 +5530,13 @@ fn plan_function<'a>(
             return Ok(HirScalarExpr::windowing(WindowExpr {
                 func: WindowExprType::Value(ValueWindowExpr {
                     func,
-                    args: Box::new(args_encoded),
+                    args: CheckedBox::new(args_encoded),
                     order_by: col_orders,
                     window_frame,
                     ignore_nulls, // (RESPECT NULLS is the default)
                 }),
-                partition_by,
-                order_by: order_by_exprs,
+                partition_by: partition_by.into(),
+                order_by: order_by_exprs.into(),
             }));
         }
         Func::Aggregate(_) => {
@@ -5603,8 +5603,8 @@ fn plan_function<'a>(
                         order_by: col_orders,
                         window_frame,
                     }),
-                    partition_by,
-                    order_by: order_by_exprs,
+                    partition_by: partition_by.into(),
+                    order_by: order_by_exprs.into(),
                 }));
             }
         }
