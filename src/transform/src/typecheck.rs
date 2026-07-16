@@ -17,10 +17,9 @@ use itertools::Itertools;
 use mz_expr::explain::{HumanizedExplain, HumanizerMode};
 use mz_expr::{
     AggregateExpr, ColumnOrder, Id, JoinImplementation, LocalId, MirRelationExpr, MirScalarExpr,
-    RECURSION_LIMIT, non_nullable_columns,
+    non_nullable_columns,
 };
 use mz_ore::soft_panic_or_log;
-use mz_ore::stack::{CheckedRecursion, RecursionGuard, RecursionLimitError};
 use mz_repr::adt::range::Range;
 use mz_repr::explain::{DummyHumanizer, ExprHumanizer};
 use mz_repr::{
@@ -156,22 +155,11 @@ pub enum TypeError<'a> {
         /// The id that was shadowed
         id: Id,
     },
-    /// Recursion depth exceeded
-    Recursion {
-        /// The error that aborted recursion
-        error: RecursionLimitError,
-    },
     /// A dummy value was found
     DisallowedDummy {
         /// The expression with the dummy value
         source: &'a MirRelationExpr,
     },
-}
-
-impl<'a> From<RecursionLimitError> for TypeError<'a> {
-    fn from(error: RecursionLimitError) -> Self {
-        TypeError::Recursion { error }
-    }
 }
 
 type Context = BTreeMap<Id, Vec<ReprColumnType>>;
@@ -826,14 +814,6 @@ pub struct Typecheck {
     strict_join_equivalences: bool,
     /// Whether or not to disallow dummy values
     disallow_dummy: bool,
-    /// Recursion guard for checked recursion
-    recursion_guard: RecursionGuard,
-}
-
-impl CheckedRecursion for Typecheck {
-    fn recursion_guard(&self) -> &RecursionGuard {
-        &self.recursion_guard
-    }
 }
 
 impl Typecheck {
@@ -844,7 +824,6 @@ impl Typecheck {
             disallow_new_globals: false,
             strict_join_equivalences: false,
             disallow_dummy: false,
-            recursion_guard: RecursionGuard::with_limit(RECURSION_LIMIT),
         }
     }
 
@@ -888,27 +867,18 @@ impl Typecheck {
     ) -> Result<Vec<ReprColumnType>, TypeError<'a>> {
         use MirRelationExpr::*;
 
-        self.checked_recur(|tc| match expr {
+        mz_ore::stack::maybe_grow(|| match expr {
             Constant { typ, rows } => {
                 if let Ok(rows) = rows {
                     for (row, _id) in rows {
                         let datums = row.unpack();
 
-                        let col_types = typ
-                            .column_types
-                            .iter()
-                            .cloned()
-                            .collect_vec();
-                        row_difference_with_column_types(
-                            expr, &datums, &col_types,
-                        )?;
+                        let col_types = typ.column_types.iter().cloned().collect_vec();
+                        row_difference_with_column_types(expr, &datums, &col_types)?;
 
-                        if self.disallow_dummy
-                            && datums.iter().any(|d| d == &mz_repr::Datum::Dummy)
+                        if self.disallow_dummy && datums.iter().any(|d| d == &mz_repr::Datum::Dummy)
                         {
-                            return Err(TypeError::DisallowedDummy {
-                                source: expr,
-                            });
+                            return Err(TypeError::DisallowedDummy { source: expr });
                         }
                     }
                 }
@@ -950,7 +920,7 @@ impl Typecheck {
                 Ok(column_types)
             }
             Project { input, outputs } => {
-                let t_in = tc.typecheck(input, ctx)?;
+                let t_in = self.typecheck(input, ctx)?;
 
                 for x in outputs {
                     if *x >= t_in.len() {
@@ -965,43 +935,38 @@ impl Typecheck {
                 Ok(outputs.iter().map(|col| t_in[*col].clone()).collect())
             }
             Map { input, scalars } => {
-                let mut t_in = tc.typecheck(input, ctx)?;
+                let mut t_in = self.typecheck(input, ctx)?;
 
                 for scalar_expr in scalars.iter() {
-                    t_in.push(tc.typecheck_scalar(scalar_expr, expr, &t_in)?);
+                    t_in.push(self.typecheck_scalar(scalar_expr, expr, &t_in)?);
 
                     if self.disallow_dummy && scalar_expr.contains_dummy() {
-                        return Err(TypeError::DisallowedDummy {
-                            source: expr,
-                        });
+                        return Err(TypeError::DisallowedDummy { source: expr });
                     }
                 }
 
                 Ok(t_in)
             }
             FlatMap { input, func, exprs } => {
-                let mut t_in = tc.typecheck(input, ctx)?;
+                let mut t_in = self.typecheck(input, ctx)?;
 
                 for scalar_expr in exprs {
                     // TODO(mgree) check result agrees with `func`'s input type
-                    let _t_expr = tc.typecheck_scalar(scalar_expr, expr, &t_in)?;
+                    let _t_expr = self.typecheck_scalar(scalar_expr, expr, &t_in)?;
 
                     if self.disallow_dummy && scalar_expr.contains_dummy() {
-                        return Err(TypeError::DisallowedDummy {
-                            source: expr,
-                        });
+                        return Err(TypeError::DisallowedDummy { source: expr });
                     }
                 }
 
-                let t_out: Vec<ReprColumnType> = func
-                    .output_type().column_types;
+                let t_out: Vec<ReprColumnType> = func.output_type().column_types;
 
                 // FlatMap extends the existing columns
                 t_in.extend(t_out);
                 Ok(t_in)
             }
             Filter { input, predicates } => {
-                let mut t_in = tc.typecheck(input, ctx)?;
+                let mut t_in = self.typecheck(input, ctx)?;
 
                 // Set as nonnull any columns where null values would cause
                 // any predicate to evaluate to null.
@@ -1010,7 +975,7 @@ impl Typecheck {
                 }
 
                 for scalar_expr in predicates {
-                    let t = tc.typecheck_scalar(scalar_expr, expr, &t_in)?;
+                    let t = self.typecheck_scalar(scalar_expr, expr, &t_in)?;
 
                     // filter condition must be boolean
                     // ignoring nullability: null is treated as false
@@ -1034,9 +999,7 @@ impl Typecheck {
                     }
 
                     if self.disallow_dummy && scalar_expr.contains_dummy() {
-                        return Err(TypeError::DisallowedDummy {
-                            source: expr,
-                        });
+                        return Err(TypeError::DisallowedDummy { source: expr });
                     }
                 }
 
@@ -1051,7 +1014,7 @@ impl Typecheck {
                 let mut t_in_local = vec![Vec::new(); inputs.len()];
 
                 for (i, input) in inputs.iter().enumerate() {
-                    let input_t = tc.typecheck(input, ctx)?;
+                    let input_t = self.typecheck(input, ctx)?;
                     t_in_global.extend(input_t.clone());
                     t_in_local[i] = input_t;
                 }
@@ -1063,7 +1026,7 @@ impl Typecheck {
 
                     for scalar_expr in eq_class {
                         // Note: the equivalences have global column references
-                        let t_expr = tc.typecheck_scalar(scalar_expr, expr, &t_in_global)?;
+                        let t_expr = self.typecheck_scalar(scalar_expr, expr, &t_in_global)?;
 
                         if !t_expr.nullable {
                             all_nullable = false;
@@ -1073,7 +1036,10 @@ impl Typecheck {
                             let diffs = scalar_subtype_difference(
                                 &t_expr.scalar_type,
                                 &t_first.scalar_type,
-                            ).into_iter().filter_map(|d| d.ignore_nullability()).collect_vec();
+                            )
+                            .into_iter()
+                            .filter_map(|d| d.ignore_nullability())
+                            .collect_vec();
                             if !diffs.is_empty() {
                                 return Err(TypeError::MismatchColumn {
                                     source: expr,
@@ -1098,9 +1064,10 @@ impl Typecheck {
                                         source: expr,
                                         got: t_expr.clone(),
                                         expected: t_first.clone(),
-                                        diffs: vec![
-                                            ReprColumnTypeDifference::Nullability { sub, sup },
-                                        ],
+                                        diffs: vec![ReprColumnTypeDifference::Nullability {
+                                            sub,
+                                            sup,
+                                        }],
                                         message: "equivalence class members have \
                                             different nullability (and join \
                                             equivalence checking is strict)"
@@ -1114,9 +1081,7 @@ impl Typecheck {
                         }
 
                         if self.disallow_dummy && scalar_expr.contains_dummy() {
-                            return Err(TypeError::DisallowedDummy {
-                                source: expr,
-                            });
+                            return Err(TypeError::DisallowedDummy { source: expr });
                         }
 
                         t_exprs.push(t_expr);
@@ -1139,13 +1104,13 @@ impl Typecheck {
                     JoinImplementation::Differential((start_idx, first_key, _), others) => {
                         if let Some(key) = first_key {
                             for k in key {
-                                let _ = tc.typecheck_scalar(k, expr, &t_in_local[*start_idx])?;
+                                let _ = self.typecheck_scalar(k, expr, &t_in_local[*start_idx])?;
                             }
                         }
 
                         for (idx, key, _) in others {
                             for k in key {
-                                let _ = tc.typecheck_scalar(k, expr, &t_in_local[*idx])?;
+                                let _ = self.typecheck_scalar(k, expr, &t_in_local[*idx])?;
                             }
                         }
                     }
@@ -1153,7 +1118,7 @@ impl Typecheck {
                         for plan in plans {
                             for (idx, key, _) in plan {
                                 for k in key {
-                                    let _ = tc.typecheck_scalar(k, expr, &t_in_local[*idx])?;
+                                    let _ = self.typecheck_scalar(k, expr, &t_in_local[*idx])?;
                                 }
                             }
                         }
@@ -1161,7 +1126,7 @@ impl Typecheck {
                     JoinImplementation::IndexedFilter(_coll_id, _idx_id, key, consts) => {
                         let typ: Vec<ReprColumnType> = key
                             .iter()
-                            .map(|k| tc.typecheck_scalar(k, expr, &t_in_global))
+                            .map(|k| self.typecheck_scalar(k, expr, &t_in_global))
                             .collect::<Result<Vec<ReprColumnType>, TypeError>>()?;
 
                         for row in consts {
@@ -1182,25 +1147,23 @@ impl Typecheck {
                 monotonic: _,
                 expected_group_size: _,
             } => {
-                let t_in = tc.typecheck(input, ctx)?;
+                let t_in = self.typecheck(input, ctx)?;
 
                 let mut t_out = group_key
                     .iter()
-                    .map(|scalar_expr| tc.typecheck_scalar(scalar_expr, expr, &t_in))
+                    .map(|scalar_expr| self.typecheck_scalar(scalar_expr, expr, &t_in))
                     .collect::<Result<Vec<_>, _>>()?;
 
-                    if self.disallow_dummy
-                        && group_key
-                            .iter()
-                            .any(|scalar_expr| scalar_expr.contains_dummy())
-                    {
-                        return Err(TypeError::DisallowedDummy {
-                            source: expr,
-                        });
-                    }
+                if self.disallow_dummy
+                    && group_key
+                        .iter()
+                        .any(|scalar_expr| scalar_expr.contains_dummy())
+                {
+                    return Err(TypeError::DisallowedDummy { source: expr });
+                }
 
                 for agg in aggregates {
-                    t_out.push(tc.typecheck_aggregate(agg, expr, &t_in)?);
+                    t_out.push(self.typecheck_aggregate(agg, expr, &t_in)?);
                 }
 
                 Ok(t_out)
@@ -1214,7 +1177,7 @@ impl Typecheck {
                 monotonic: _,
                 expected_group_size: _,
             } => {
-                let t_in = tc.typecheck(input, ctx)?;
+                let t_in = self.typecheck(input, ctx)?;
 
                 for &k in group_key {
                     if k >= t_in.len() {
@@ -1238,13 +1201,13 @@ impl Typecheck {
 
                 Ok(t_in)
             }
-            Negate { input } => tc.typecheck(input, ctx),
-            Threshold { input } => tc.typecheck(input, ctx),
+            Negate { input } => self.typecheck(input, ctx),
+            Threshold { input } => self.typecheck(input, ctx),
             Union { base, inputs } => {
-                let mut t_base = tc.typecheck(base, ctx)?;
+                let mut t_base = self.typecheck(base, ctx)?;
 
                 for input in inputs {
-                    let t_input = tc.typecheck(input, ctx)?;
+                    let t_input = self.typecheck(input, ctx)?;
 
                     let len_sub = t_base.len();
                     let len_sup = t_input.len();
@@ -1253,10 +1216,7 @@ impl Typecheck {
                             source: expr,
                             got: t_base.clone(),
                             expected: t_input,
-                            diffs: vec![ReprRelationTypeDifference::Length {
-                                len_sub,
-                                len_sup,
-                            }],
+                            diffs: vec![ReprRelationTypeDifference::Length { len_sub, len_sup }],
                             message: "Union branches have different numbers of columns".to_string(),
                         });
                     }
@@ -1265,23 +1225,21 @@ impl Typecheck {
                         let diffs = column_union(base_col, &input_col);
                         if !diffs.is_empty() {
                             return Err(TypeError::MismatchColumn {
-                                    source: expr,
-                                    got: input_col,
-                                    expected: base_col.clone(),
-                                    diffs,
-                                    message:
-                                        "couldn't compute union of column types in Union"
+                                source: expr,
+                                got: input_col,
+                                expected: base_col.clone(),
+                                diffs,
+                                message: "couldn't compute union of column types in Union"
                                     .to_string(),
                             });
                         }
-
                     }
                 }
 
                 Ok(t_base)
             }
             Let { id, value, body } => {
-                let t_value = tc.typecheck(value, ctx)?;
+                let t_value = self.typecheck(value, ctx)?;
 
                 let binding = Id::Local(*id);
                 if ctx.contains_key(&binding) {
@@ -1294,9 +1252,14 @@ impl Typecheck {
                 let mut body_ctx = ctx.clone();
                 body_ctx.insert(Id::Local(*id), t_value);
 
-                tc.typecheck(body, &body_ctx)
+                self.typecheck(body, &body_ctx)
             }
-            LetRec { ids, values, body, limits: _ } => {
+            LetRec {
+                ids,
+                values,
+                body,
+                limits: _,
+            } => {
                 if ids.len() != values.len() {
                     return Err(TypeError::BadLetRecBindings { source: expr });
                 }
@@ -1304,13 +1267,13 @@ impl Typecheck {
                 // temporary hack: steal info from the Gets inside to learn the expected types
                 // if no get occurs in any definition or the body, that means that relation is dead code (which is okay)
                 let mut ctx = ctx.clone();
-                // calling tc.collect_recursive_variable_types(expr, ...) triggers a panic due to nested letrecs with shadowing IDs
+                // calling self.collect_recursive_variable_types(expr, ...) triggers a panic due to nested letrecs with shadowing IDs
                 for inner_expr in values.iter().chain(std::iter::once(body.as_ref())) {
-                    tc.collect_recursive_variable_types(inner_expr, ids, &mut ctx)?;
+                    self.collect_recursive_variable_types(inner_expr, ids, &mut ctx)?;
                 }
 
                 for (id, value) in ids.iter().zip_eq(values.iter()) {
-                    let typ = tc.typecheck(value, &ctx)?;
+                    let typ = self.typecheck(value, &ctx)?;
 
                     let id = Id::Local(id.clone());
                     if let Some(ctx_typ) = ctx.get_mut(&id) {
@@ -1318,15 +1281,14 @@ impl Typecheck {
                             // we expect an EXACT match, but don't care about nullability
                             let diffs = column_union(base_col, &input_col);
                             if !diffs.is_empty() {
-                                 return Err(TypeError::MismatchColumn {
-                                        source: expr,
-                                        got: input_col,
-                                        expected: base_col.clone(),
-                                        diffs,
-                                        message:
-                                            "couldn't compute union of column types in LetRec"
+                                return Err(TypeError::MismatchColumn {
+                                    source: expr,
+                                    got: input_col,
+                                    expected: base_col.clone(),
+                                    diffs,
+                                    message: "couldn't compute union of column types in LetRec"
                                         .to_string(),
-                                    })
+                                });
                             }
                         }
                     } else {
@@ -1335,14 +1297,14 @@ impl Typecheck {
                     }
                 }
 
-                tc.typecheck(body, &ctx)
+                self.typecheck(body, &ctx)
             }
             ArrangeBy { input, keys } => {
-                let t_in = tc.typecheck(input, ctx)?;
+                let t_in = self.typecheck(input, ctx)?;
 
                 for key in keys {
                     for k in key {
-                        let _ = tc.typecheck_scalar(k, expr, &t_in)?;
+                        let _ = self.typecheck_scalar(k, expr, &t_in)?;
                     }
                 }
 
@@ -1362,7 +1324,7 @@ impl Typecheck {
     ) -> Result<(), TypeError<'a>> {
         use MirRelationExpr::*;
 
-        self.checked_recur(|tc| {
+        mz_ore::stack::maybe_grow(|| {
             match expr {
                 Get {
                     id: Id::Local(id),
@@ -1413,7 +1375,7 @@ impl Typecheck {
                 }
                 | Constant { .. } => (),
                 Let { id, value, body } => {
-                    tc.collect_recursive_variable_types(value, ids, ctx)?;
+                    self.collect_recursive_variable_types(value, ids, ctx)?;
 
                     // we've shadowed the id
                     if ids.contains(id) {
@@ -1423,7 +1385,7 @@ impl Typecheck {
                         });
                     }
 
-                    tc.collect_recursive_variable_types(body, ids, ctx)?;
+                    self.collect_recursive_variable_types(body, ids, ctx)?;
                 }
                 LetRec {
                     ids: inner_ids,
@@ -1441,10 +1403,10 @@ impl Typecheck {
                     }
 
                     for value in values {
-                        tc.collect_recursive_variable_types(value, ids, ctx)?;
+                        self.collect_recursive_variable_types(value, ids, ctx)?;
                     }
 
-                    tc.collect_recursive_variable_types(body, ids, ctx)?;
+                    self.collect_recursive_variable_types(body, ids, ctx)?;
                 }
                 Project { input, .. }
                 | Map { input, .. }
@@ -1455,18 +1417,18 @@ impl Typecheck {
                 | Negate { input }
                 | Threshold { input }
                 | ArrangeBy { input, .. } => {
-                    tc.collect_recursive_variable_types(input, ids, ctx)?;
+                    self.collect_recursive_variable_types(input, ids, ctx)?;
                 }
                 Join { inputs, .. } => {
                     for input in inputs {
-                        tc.collect_recursive_variable_types(input, ids, ctx)?;
+                        self.collect_recursive_variable_types(input, ids, ctx)?;
                     }
                 }
                 Union { base, inputs } => {
-                    tc.collect_recursive_variable_types(base, ids, ctx)?;
+                    self.collect_recursive_variable_types(base, ids, ctx)?;
 
                     for input in inputs {
-                        tc.collect_recursive_variable_types(input, ids, ctx)?;
+                        self.collect_recursive_variable_types(input, ids, ctx)?;
                     }
                 }
             }
@@ -1483,7 +1445,7 @@ impl Typecheck {
     ) -> Result<ReprColumnType, TypeError<'a>> {
         use MirScalarExpr::*;
 
-        self.checked_recur(|tc| match expr {
+        mz_ore::stack::maybe_grow(|| match expr {
             Column(i, _) => match column_types.get(*i) {
                 Some(ty) => Ok(ty.clone()),
                 None => Err(TypeError::NoSuchColumn {
@@ -1504,24 +1466,24 @@ impl Typecheck {
             }
             CallUnmaterializable(func) => Ok(func.output_type()),
             CallUnary { expr, func } => {
-                let typ_in = tc.typecheck_scalar(expr, source, column_types)?;
+                let typ_in = self.typecheck_scalar(expr, source, column_types)?;
                 let typ_out = func.output_type(typ_in);
                 Ok(typ_out)
             }
             CallBinary { expr1, expr2, func } => {
-                let typ_in1 = tc.typecheck_scalar(expr1, source, column_types)?;
-                let typ_in2 = tc.typecheck_scalar(expr2, source, column_types)?;
+                let typ_in1 = self.typecheck_scalar(expr1, source, column_types)?;
+                let typ_in2 = self.typecheck_scalar(expr2, source, column_types)?;
                 let typ_out = func.output_type(&[typ_in1, typ_in2]);
                 Ok(typ_out)
             }
             CallVariadic { exprs, func } => Ok(func.output_type(
                 exprs
                     .iter()
-                    .map(|e| tc.typecheck_scalar(e, source, column_types))
+                    .map(|e| self.typecheck_scalar(e, source, column_types))
                     .collect::<Result<Vec<_>, TypeError>>()?,
             )),
             If { cond, then, els } => {
-                let cond_type = tc.typecheck_scalar(cond, source, column_types)?;
+                let cond_type = self.typecheck_scalar(cond, source, column_types)?;
 
                 // condition must be boolean
                 // ignoring nullability: null is treated as false
@@ -1544,8 +1506,8 @@ impl Typecheck {
                     });
                 }
 
-                let mut then_type = tc.typecheck_scalar(then, source, column_types)?;
-                let else_type = tc.typecheck_scalar(els, source, column_types)?;
+                let mut then_type = self.typecheck_scalar(then, source, column_types)?;
+                let else_type = self.typecheck_scalar(els, source, column_types)?;
 
                 let diffs = column_union(&mut then_type, &else_type);
                 if !diffs.is_empty() {
@@ -1570,8 +1532,8 @@ impl Typecheck {
         source: &'a MirRelationExpr,
         column_types: &[ReprColumnType],
     ) -> Result<ReprColumnType, TypeError<'a>> {
-        self.checked_recur(|tc| {
-            let t_in = tc.typecheck_scalar(&expr.expr, source, column_types)?;
+        mz_ore::stack::maybe_grow(|| {
+            let t_in = self.typecheck_scalar(&expr.expr, source, column_types)?;
 
             // TODO check that t_in is actually acceptable for `func`
 
@@ -1656,16 +1618,6 @@ impl crate::Transform for Typecheck {
                 if let Some(id) = transform_ctx.global_id {
                     typecheck_ctx.insert(Id::Global(id), got);
                 }
-            }
-            (Err(TypeError::Recursion { error }), _) => {
-                // The plan is too deep for the typechecker's recursion limit. This is a
-                // resource limit, not evidence of a type inconsistency, so the check is
-                // inconclusive rather than severe. Skip it instead of failing a query that
-                // works fine when typechecking is disabled (as in production, where this
-                // transform doesn't run).
-                // NOTE: When changing this, manually run the ignored test
-                // `typecheck_recursion_limit_is_inconclusive` in this file.
-                ::tracing::warn!("typechecking inconclusive: {error}");
             }
             (Err(err), _) => {
                 let (expected, binding) = match expected {
@@ -1902,7 +1854,6 @@ impl<'a> TypeError<'a> {
             | BadLetRecBindings { source }
             | Shadowing { source, .. }
             | DisallowedDummy { source, .. } => Some(source),
-            Recursion { .. } => None,
         }
     }
 
@@ -2053,7 +2004,6 @@ impl<'a> TypeError<'a> {
             }
             Shadowing { source: _, id } => writeln!(f, "id {id} is shadowed")?,
             DisallowedDummy { source: _ } => writeln!(f, "contains a dummy value")?,
-            Recursion { error } => writeln!(f, "{error}")?,
         }
 
         Ok(())
@@ -2167,34 +2117,18 @@ mod tests {
         assert_err!(diff);
     }
 
-    /// A plan too deep to typecheck must be treated as inconclusive (`Ok`), not as a
-    /// severe type error (which would soft-panic, and thus fail queries in CI that
-    /// work in production, where the `Typecheck` transform doesn't run).
-    ///
-    /// Ignored because of its runtime. Run it manually when changing the
-    /// `TypeError::Recursion` handling in `actually_perform_transform`:
-    /// `bin/cargo-test -p mz-transform -- --run-ignored=ignored-only typecheck_recursion_limit_is_inconclusive`
+    /// Typechecking a plan deeper than the optimizer recursion limit must succeed: the
+    /// typechecker grows the stack as needed and applies no limit of its own. (The
+    /// uniform `optimizer_plan_depth_limit`, disabled here, is what bounds plan depth,
+    /// and it runs before the typechecker's traversal.)
     #[mz_ore::test]
-    #[ignore = "manual test, run when changing the TypeError::Recursion handling"]
-    fn typecheck_recursion_limit_is_inconclusive() {
-        // Unguarded recursive walks over the plan outside the typechecker (e.g. hashing
-        // in `Transform::transform`, dropping the plan) need more stack than a default
-        // test thread has for a plan this deep.
-        std::thread::Builder::new()
-            .stack_size(512 << 20)
-            .spawn(typecheck_recursion_limit_is_inconclusive_inner)
-            .expect("thread spawns")
-            .join()
-            .expect("no panic");
-    }
-
-    fn typecheck_recursion_limit_is_inconclusive_inner() {
+    fn typecheck_deep_plan() {
+        use mz_expr::RECURSION_LIMIT;
         use mz_ore::cast::CastFrom;
 
         let empty = || MirRelationExpr::constant(vec![vec![]], ReprRelationType::new(vec![]));
 
-        // A Let chain 2x deeper than the recursion limit, so that the typechecker's
-        // recursion guard trips with a comfortable margin.
+        // Build iteratively, a recursive builder would recurse as deep as the plan.
         let mut relation = empty();
         for i in 0..2 * RECURSION_LIMIT {
             relation = MirRelationExpr::Let {
@@ -2211,6 +2145,9 @@ mod tests {
         let mut transform_ctx =
             crate::TransformCtx::local(&features, &typecheck_ctx, &mut df_meta, None, None);
         crate::Transform::transform(&typecheck, &mut relation, &mut transform_ctx)
-            .expect("typechecking a too-deep plan is inconclusive, not an error");
+            .expect("typechecking a deep plan succeeds");
+
+        // Dismantle iteratively, the derived `Drop` would recurse.
+        relation.destroy_carefully();
     }
 }

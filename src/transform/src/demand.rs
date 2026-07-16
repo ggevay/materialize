@@ -15,9 +15,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use mz_expr::{
     AggregateExpr, AggregateFunc, Columns, Id, JoinInputMapper, MirRelationExpr, MirScalarExpr,
-    RECURSION_LIMIT,
 };
-use mz_ore::stack::{CheckedRecursion, RecursionGuard};
 use mz_repr::{Datum, Row};
 
 use crate::TransformCtx;
@@ -53,24 +51,8 @@ use crate::TransformCtx;
 ///
 /// After the last run of `Demand`, there should always be a `ProjectionPushdown`, so that dummies
 /// are eliminated from plans.
-#[derive(Debug)]
-pub struct Demand {
-    recursion_guard: RecursionGuard,
-}
-
-impl Default for Demand {
-    fn default() -> Demand {
-        Demand {
-            recursion_guard: RecursionGuard::with_limit(RECURSION_LIMIT),
-        }
-    }
-}
-
-impl CheckedRecursion for Demand {
-    fn recursion_guard(&self) -> &RecursionGuard {
-        &self.recursion_guard
-    }
-}
+#[derive(Debug, Default)]
+pub struct Demand;
 
 impl crate::Transform for Demand {
     fn name(&self) -> &'static str {
@@ -105,7 +87,7 @@ impl Demand {
         mut columns: BTreeSet<usize>,
         gets: &mut BTreeMap<Id, BTreeSet<usize>>,
     ) -> Result<(), crate::TransformError> {
-        self.checked_recur(|_| {
+        mz_ore::stack::maybe_grow(|| {
             // A valid relation type is only needed for Maps, but we can't borrow
             // the relation in the corresponding branch of the match statement, since
             // it is already borrowed mutably.

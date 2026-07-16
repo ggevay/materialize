@@ -20,10 +20,9 @@ use itertools::Itertools;
 use mz_compute_types::dataflows::{BuildDesc, DataflowDesc, DataflowDescription, IndexImport};
 use mz_expr::{
     AccessStrategy, CollectionPlan, Id, JoinImplementation, LocalId, MapFilterProject,
-    MirRelationExpr, MirScalarExpr, RECURSION_LIMIT,
+    MirRelationExpr, MirScalarExpr,
 };
 use mz_ore::stack::CheckedBox;
-use mz_ore::stack::{CheckedRecursion, RecursionGuard, RecursionLimitError};
 use mz_ore::{assert_none, soft_assert_eq_or_log, soft_assert_or_log, soft_panic_or_log};
 use mz_repr::GlobalId;
 use mz_repr::explain::{DeltaJoinIndexUsageType, IndexUsageType, UsedIndexes};
@@ -573,7 +572,7 @@ fn prune_and_annotate_dataflow_index_imports(
     // for which we also have an available index.
     for build_desc in dataflow.objects_to_build.iter_mut() {
         CollectIndexRequests::new(&source_keys, indexes, &mut index_reqs_by_id)
-            .collect_index_reqs(build_desc.plan.as_inner_mut())?;
+            .collect_index_reqs(build_desc.plan.as_inner_mut());
     }
 
     // Collect index usages by `sink_exports`.
@@ -876,13 +875,6 @@ struct CollectIndexRequests<'a> {
     /// `context_across_lets` will keep track of the contexts that reached each use of a LocalId
     /// added together.
     context_across_lets: BTreeMap<LocalId, Vec<IndexUsageContext>>,
-    recursion_guard: RecursionGuard,
-}
-
-impl<'a> CheckedRecursion for CollectIndexRequests<'a> {
-    fn recursion_guard(&self) -> &RecursionGuard {
-        &self.recursion_guard
-    }
 }
 
 impl<'a> CollectIndexRequests<'a> {
@@ -899,19 +891,15 @@ impl<'a> CollectIndexRequests<'a> {
             indexes_available,
             index_reqs_by_id,
             context_across_lets: BTreeMap::new(),
-            recursion_guard: RecursionGuard::with_limit(RECURSION_LIMIT),
         }
     }
 
-    pub fn collect_index_reqs(
-        &mut self,
-        expr: &mut MirRelationExpr,
-    ) -> Result<(), RecursionLimitError> {
+    pub fn collect_index_reqs(&mut self, expr: &mut MirRelationExpr) {
         assert!(self.context_across_lets.is_empty());
         self.collect_index_reqs_inner(
             expr,
             &IndexUsageContext::from_usage_type(IndexUsageType::PlanRootNoArrangement),
-        )?;
+        );
         assert!(self.context_across_lets.is_empty());
         // Sanity check that we don't have any `DeltaJoinIndexUsageType::Unknown` remaining.
         for (_id, index_reqs) in self.index_reqs_by_id.iter() {
@@ -925,23 +913,26 @@ impl<'a> CollectIndexRequests<'a> {
                 );
             }
         }
-        Ok(())
     }
 
     fn collect_index_reqs_inner(
         &mut self,
         expr: &mut MirRelationExpr,
         contexts: &Vec<IndexUsageContext>,
-    ) -> Result<(), RecursionLimitError> {
-        self.checked_recur_mut(|this| {
+    ) {
+        // Recurses per tree level. Grow the stack as needed. The plan depth is
+        // bounded by the uniform optimizer_plan_depth_limit check (when enabled),
+        // which the plans of a dataflow have already passed in the per-object
+        // optimization pipelines.
+        mz_ore::stack::maybe_grow(|| {
             // If an index exists on `on_id`, this function picks an index to be fully scanned.
             let pick_index_for_full_scan = |on_id: &GlobalId| {
                 // Note that the choice we make here might be modified later at the
                 // "Adjust FullScans to not introduce a new index dependency".
                 choose_index(
-                    this.source_keys,
+                    self.source_keys,
                     on_id,
-                    &this
+                    &self
                         .indexes_available
                         .indexes_on(*on_id)
                         .map(|(idx_id, key)| (idx_id, key.iter().cloned().collect_vec()))
@@ -950,7 +941,7 @@ impl<'a> CollectIndexRequests<'a> {
             };
 
             // See comment on `IndexUsageContext`.
-            Ok(match expr {
+            match expr {
                 MirRelationExpr::Join {
                     inputs,
                     implementation,
@@ -959,40 +950,40 @@ impl<'a> CollectIndexRequests<'a> {
                     match implementation {
                         JoinImplementation::Differential(..) => {
                             for input in inputs {
-                                this.collect_index_reqs_inner(
+                                self.collect_index_reqs_inner(
                                     input,
                                     &IndexUsageContext::from_usage_type(
                                         IndexUsageType::DifferentialJoin,
                                     ),
-                                )?;
+                                );
                             }
                         }
                         JoinImplementation::DeltaQuery(..) => {
                             // For Delta joins, the first input is special, see
                             // https://github.com/MaterializeInc/database-issues/issues/2115
-                            this.collect_index_reqs_inner(
+                            self.collect_index_reqs_inner(
                                 &mut inputs[0],
                                 &IndexUsageContext::from_usage_type(IndexUsageType::DeltaJoin(
                                     DeltaJoinIndexUsageType::Unknown,
                                 )),
-                            )?;
+                            );
                             for input in &mut inputs[1..] {
-                                this.collect_index_reqs_inner(
+                                self.collect_index_reqs_inner(
                                     input,
                                     &IndexUsageContext::from_usage_type(IndexUsageType::DeltaJoin(
                                         DeltaJoinIndexUsageType::Lookup,
                                     )),
-                                )?;
+                                );
                             }
                         }
                         JoinImplementation::IndexedFilter(_coll_id, idx_id, ..) => {
                             for input in inputs {
-                                this.collect_index_reqs_inner(
+                                self.collect_index_reqs_inner(
                                     input,
                                     &IndexUsageContext::from_usage_type(IndexUsageType::Lookup(
                                         *idx_id,
                                     )),
-                                )?;
+                                );
                             }
                         }
                         JoinImplementation::Unimplemented => {
@@ -1004,14 +995,14 @@ impl<'a> CollectIndexRequests<'a> {
                 }
                 MirRelationExpr::ArrangeBy { input, keys } => {
                     let ctx = &IndexUsageContext::add_keys(contexts, keys);
-                    this.collect_index_reqs_inner(input, ctx)?;
+                    self.collect_index_reqs_inner(input, ctx);
                 }
                 MirRelationExpr::Get {
                     id: Id::Global(global_id),
                     access_strategy: persist_or_index,
                     ..
                 } => {
-                    this.index_reqs_by_id
+                    self.index_reqs_by_id
                         .entry(*global_id)
                         .or_insert_with(Vec::new);
                     // If the context is empty, it means we didn't see an operator that would
@@ -1070,7 +1061,7 @@ impl<'a> CollectIndexRequests<'a> {
                             }
                             Some(requested_keys) => {
                                 for requested_key in requested_keys {
-                                    match this.indexes_available.indexes_on(*global_id).find(
+                                    match self.indexes_available.indexes_on(*global_id).find(
                                         |(available_idx_id, available_key)| {
                                             match context.usage_type {
                                                 IndexUsageType::Lookup(req_idx_id) => {
@@ -1088,7 +1079,7 @@ impl<'a> CollectIndexRequests<'a> {
                                     ) {
                                         Some((idx_id, key)) => {
                                             let usage = context.usage_type.clone();
-                                            this.index_reqs_by_id
+                                            self.index_reqs_by_id
                                                 .get_mut(global_id)
                                                 .unwrap()
                                                 .push((idx_id, key.to_owned(), usage.clone()));
@@ -1120,7 +1111,7 @@ impl<'a> CollectIndexRequests<'a> {
                         // Also note that currently we are deduplicating index usage types when
                         // printing index usages in EXPLAIN.
                         if let Some((idx_id, key)) = pick_index_for_full_scan(global_id) {
-                            this.index_reqs_by_id.get_mut(global_id).unwrap().push((
+                            self.index_reqs_by_id.get_mut(global_id).unwrap().push((
                                 idx_id,
                                 key.to_owned(),
                                 IndexUsageType::FullScan,
@@ -1141,24 +1132,24 @@ impl<'a> CollectIndexRequests<'a> {
                     // Add the current context to the vector of contexts of `local_id`.
                     // (The unwrap is safe, because the Let and LetRec cases start with inserting an
                     // empty entry.)
-                    this.context_across_lets
+                    self.context_across_lets
                         .get_mut(local_id)
                         .unwrap()
                         .extend(contexts.iter().cloned());
                     // No recursive call here, because Get has no inputs.
                 }
                 MirRelationExpr::Let { id, value, body } => {
-                    let shadowed_context = this.context_across_lets.insert(id.clone(), Vec::new());
+                    let shadowed_context = self.context_across_lets.insert(id.clone(), Vec::new());
                     // No shadowing in MIR
                     assert_none!(shadowed_context);
                     // We go backwards: Recurse on the body and then the value.
-                    this.collect_index_reqs_inner(body, contexts)?;
+                    self.collect_index_reqs_inner(body, contexts);
                     // The above call filled in the entry for `id` in `context_across_lets` (if it
                     // was referenced). Anyhow, at least an empty entry should exist, because we started
                     // above with inserting it.
-                    this.collect_index_reqs_inner(value, &this.context_across_lets[id].clone())?;
+                    self.collect_index_reqs_inner(value, &self.context_across_lets[id].clone());
                     // Clean up the id from the saved contexts.
-                    this.context_across_lets.remove(id);
+                    self.context_across_lets.remove(id);
                 }
                 MirRelationExpr::LetRec {
                     ids,
@@ -1168,30 +1159,27 @@ impl<'a> CollectIndexRequests<'a> {
                 } => {
                     for id in ids.iter() {
                         let shadowed_context =
-                            this.context_across_lets.insert(id.clone(), Vec::new());
+                            self.context_across_lets.insert(id.clone(), Vec::new());
                         // No shadowing in MIR
                         assert_none!(shadowed_context);
                     }
                     // We go backwards: Recurse on the body first.
-                    this.collect_index_reqs_inner(body, contexts)?;
+                    self.collect_index_reqs_inner(body, contexts);
                     // Reset the contexts of the ids (of the current LetRec), because an arrangement
                     // from a value can't be used in the body.
                     for id in ids.iter() {
-                        *this.context_across_lets.get_mut(id).unwrap() = Vec::new();
+                        *self.context_across_lets.get_mut(id).unwrap() = Vec::new();
                     }
                     // Recurse on the values in reverse order.
                     // Note that we do only one pass, i.e., we won't see context through a Get that
                     // refers to the previous iteration. But this is ok, because we can't reuse
                     // arrangements across iterations anyway.
                     for (id, value) in ids.iter().rev().zip_eq(values.iter_mut().rev()) {
-                        this.collect_index_reqs_inner(
-                            value,
-                            &this.context_across_lets[id].clone(),
-                        )?;
+                        self.collect_index_reqs_inner(value, &self.context_across_lets[id].clone());
                     }
                     // Clean up the ids from the saved contexts.
                     for id in ids {
-                        this.context_across_lets.remove(id);
+                        self.context_across_lets.remove(id);
                     }
                 }
                 _ => {
@@ -1199,10 +1187,10 @@ impl<'a> CollectIndexRequests<'a> {
                     // what context we got from above).
                     let empty_context = Vec::new();
                     for child in expr.children_mut() {
-                        this.collect_index_reqs_inner(child, &empty_context)?;
+                        self.collect_index_reqs_inner(child, &empty_context);
                     }
                 }
-            })
+            }
         })
     }
 }

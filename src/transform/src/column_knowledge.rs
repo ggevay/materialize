@@ -14,35 +14,16 @@ use std::collections::BTreeMap;
 use itertools::{Itertools, zip_eq};
 use mz_expr::JoinImplementation::IndexedFilter;
 use mz_expr::visit::Visit;
-use mz_expr::{
-    EvalError, LetRecLimit, MirRelationExpr, MirScalarExpr, RECURSION_LIMIT, UnaryFunc, func,
-};
+use mz_expr::{EvalError, LetRecLimit, MirRelationExpr, MirScalarExpr, UnaryFunc, func};
 use mz_ore::cast::CastFrom;
-use mz_ore::stack::{CheckedRecursion, RecursionGuard};
 use mz_ore::{assert_none, soft_panic_or_log};
 use mz_repr::{Datum, ReprColumnType, ReprScalarType, Row};
 
 use crate::{TransformCtx, TransformError};
 
 /// Harvest and act upon per-column information.
-#[derive(Debug)]
-pub struct ColumnKnowledge {
-    recursion_guard: RecursionGuard,
-}
-
-impl Default for ColumnKnowledge {
-    fn default() -> ColumnKnowledge {
-        ColumnKnowledge {
-            recursion_guard: RecursionGuard::with_limit(RECURSION_LIMIT),
-        }
-    }
-}
-
-impl CheckedRecursion for ColumnKnowledge {
-    fn recursion_guard(&self) -> &RecursionGuard {
-        &self.recursion_guard
-    }
-}
+#[derive(Debug, Default)]
+pub struct ColumnKnowledge;
 
 impl crate::Transform for ColumnKnowledge {
     fn name(&self) -> &'static str {
@@ -79,7 +60,7 @@ impl ColumnKnowledge {
         knowledge: &mut BTreeMap<mz_expr::Id, Vec<DatumKnowledge>>,
         knowledge_stack: &mut Vec<DatumKnowledge>,
     ) -> Result<Vec<DatumKnowledge>, TransformError> {
-        self.checked_recur(|_| {
+        mz_ore::stack::maybe_grow(|| {
             let result = match expr {
                 MirRelationExpr::ArrangeBy { input, .. } => {
                     self.harvest(input, knowledge, knowledge_stack)

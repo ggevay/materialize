@@ -29,33 +29,14 @@ use itertools::Itertools;
 use mz_repr::ReprRelationType;
 use std::collections::BTreeMap;
 
-use mz_expr::{
-    Columns, Id, JoinInputMapper, LocalId, MirRelationExpr, MirScalarExpr, RECURSION_LIMIT,
-};
+use mz_expr::{Columns, Id, JoinInputMapper, LocalId, MirRelationExpr, MirScalarExpr};
 use mz_ore::id_gen::IdGen;
-use mz_ore::stack::{CheckedRecursion, RecursionGuard};
 
 use crate::TransformCtx;
 
 /// Remove redundant semijoin operators
-#[derive(Debug)]
-pub struct SemijoinIdempotence {
-    recursion_guard: RecursionGuard,
-}
-
-impl Default for SemijoinIdempotence {
-    fn default() -> SemijoinIdempotence {
-        SemijoinIdempotence {
-            recursion_guard: RecursionGuard::with_limit(RECURSION_LIMIT),
-        }
-    }
-}
-
-impl CheckedRecursion for SemijoinIdempotence {
-    fn recursion_guard(&self) -> &RecursionGuard {
-        &self.recursion_guard
-    }
-}
+#[derive(Debug, Default)]
+pub struct SemijoinIdempotence;
 
 impl crate::Transform for SemijoinIdempotence {
     fn name(&self) -> &'static str {
@@ -95,7 +76,7 @@ impl SemijoinIdempotence {
         gets_behind_gets: &mut BTreeMap<LocalId, Vec<(Id, Vec<MirScalarExpr>)>>,
     ) -> Result<(), crate::TransformError> {
         // At each node, either gather info about Let bindings or attempt to simplify a join.
-        self.checked_recur(move |_| {
+        mz_ore::stack::maybe_grow(move || {
             match expr {
                 MirRelationExpr::Let { id, value, body } => {
                     let_replacements.insert(

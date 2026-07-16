@@ -25,31 +25,14 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use itertools::{Either, Itertools, zip_eq};
-use mz_expr::{Id, JoinInputMapper, MirRelationExpr, MirScalarExpr, RECURSION_LIMIT};
+use mz_expr::{Id, JoinInputMapper, MirRelationExpr, MirScalarExpr};
 use mz_ore::assert_none;
-use mz_ore::stack::{CheckedRecursion, RecursionGuard};
 
 use crate::TransformCtx;
 
 /// Push non-null requirements toward sources.
-#[derive(Debug)]
-pub struct NonNullRequirements {
-    recursion_guard: RecursionGuard,
-}
-
-impl Default for NonNullRequirements {
-    fn default() -> NonNullRequirements {
-        NonNullRequirements {
-            recursion_guard: RecursionGuard::with_limit(RECURSION_LIMIT),
-        }
-    }
-}
-
-impl CheckedRecursion for NonNullRequirements {
-    fn recursion_guard(&self) -> &RecursionGuard {
-        &self.recursion_guard
-    }
-}
+#[derive(Debug, Default)]
+pub struct NonNullRequirements;
 
 impl crate::Transform for NonNullRequirements {
     fn name(&self) -> &'static str {
@@ -86,7 +69,7 @@ impl NonNullRequirements {
         mut columns: BTreeSet<usize>,
         gets: &mut BTreeMap<Id, Vec<BTreeSet<usize>>>,
     ) -> Result<(), crate::TransformError> {
-        self.checked_recur(|_| {
+        mz_ore::stack::maybe_grow(|| {
             match relation {
                 MirRelationExpr::Constant { rows, .. } => {
                     if let Ok(rows) = rows {

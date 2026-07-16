@@ -23,9 +23,8 @@ use mz_expr::JoinImplementation::{Differential, IndexedFilter, Unimplemented};
 use mz_expr::visit::{Visit, VisitChildren};
 use mz_expr::{
     Columns, FilterCharacteristics, Id, JoinInputCharacteristics, JoinInputMapper,
-    MapFilterProject, MirRelationExpr, MirScalarExpr, RECURSION_LIMIT,
+    MapFilterProject, MirRelationExpr, MirScalarExpr,
 };
-use mz_ore::stack::{CheckedRecursion, RecursionGuard};
 use mz_ore::{soft_assert_or_log, soft_panic_or_log};
 use mz_repr::optimize::OptimizerFeatures;
 
@@ -35,26 +34,8 @@ use crate::predicate_pushdown::PredicatePushdown;
 use crate::{StatisticsOracle, TransformCtx, TransformError};
 
 /// Determines the join implementation for join operators.
-#[derive(Debug)]
-pub struct JoinImplementation {
-    recursion_guard: RecursionGuard,
-}
-
-impl Default for JoinImplementation {
-    /// Construct a new [`JoinImplementation`] where `recursion_guard`
-    /// is initialized with [`RECURSION_LIMIT`] as limit.
-    fn default() -> JoinImplementation {
-        JoinImplementation {
-            recursion_guard: RecursionGuard::with_limit(RECURSION_LIMIT),
-        }
-    }
-}
-
-impl CheckedRecursion for JoinImplementation {
-    fn recursion_guard(&self) -> &RecursionGuard {
-        &self.recursion_guard
-    }
-}
+#[derive(Debug, Default)]
+pub struct JoinImplementation;
 
 impl crate::Transform for JoinImplementation {
     fn name(&self) -> &'static str {
@@ -94,7 +75,7 @@ impl JoinImplementation {
         stats: &dyn StatisticsOracle,
         features: &OptimizerFeatures,
     ) -> Result<(), TransformError> {
-        self.checked_recur(|_| {
+        mz_ore::stack::maybe_grow(|| {
             if let MirRelationExpr::Let { id, value, body } = relation {
                 self.action_recursive(value, indexes, stats, features)?;
                 match &**value {

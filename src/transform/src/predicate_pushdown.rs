@@ -95,33 +95,17 @@ use mz_expr::func::variadic::And;
 use mz_expr::visit::{Visit, VisitChildren};
 use mz_expr::{
     AggregateFunc, Columns, Id, JoinInputMapper, LocalId, MirRelationExpr, MirScalarExpr,
-    RECURSION_LIMIT, VariadicFunc, func,
+    VariadicFunc, func,
 };
 use mz_ore::soft_assert_eq_no_log;
-use mz_ore::stack::{CheckedBox, CheckedRecursion, RecursionGuard};
+use mz_ore::stack::CheckedBox;
 use mz_repr::{Datum, ReprColumnType, ReprScalarType};
 
 use crate::{TransformCtx, TransformError};
 
 /// Pushes predicates down through other operators.
-#[derive(Debug)]
-pub struct PredicatePushdown {
-    recursion_guard: RecursionGuard,
-}
-
-impl Default for PredicatePushdown {
-    fn default() -> PredicatePushdown {
-        PredicatePushdown {
-            recursion_guard: RecursionGuard::with_limit(RECURSION_LIMIT),
-        }
-    }
-}
-
-impl CheckedRecursion for PredicatePushdown {
-    fn recursion_guard(&self) -> &RecursionGuard {
-        &self.recursion_guard
-    }
-}
+#[derive(Debug, Default)]
+pub struct PredicatePushdown;
 
 impl crate::Transform for PredicatePushdown {
     fn name(&self) -> &'static str {
@@ -161,7 +145,7 @@ impl PredicatePushdown {
         relation: &mut MirRelationExpr,
         get_predicates: &mut BTreeMap<Id, BTreeSet<MirScalarExpr>>,
     ) -> Result<(), TransformError> {
-        self.checked_recur(|_| {
+        mz_ore::stack::maybe_grow(|| {
             // In the case of Filter or Get we have specific work to do;
             // otherwise we should recursively descend.
             match relation {

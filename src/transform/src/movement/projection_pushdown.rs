@@ -34,11 +34,10 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use itertools::{Itertools, zip_eq};
 use mz_expr::{
-    Columns, Id, JoinImplementation, JoinInputMapper, MirRelationExpr, MirScalarExpr,
-    RECURSION_LIMIT, TableFunc, func,
+    Columns, Id, JoinImplementation, JoinInputMapper, MirRelationExpr, MirScalarExpr, TableFunc,
+    func,
 };
 use mz_ore::assert_none;
-use mz_ore::stack::{CheckedRecursion, RecursionGuard};
 use mz_repr::{Datum, ReprRelationType, ReprScalarType};
 
 use crate::{TransformCtx, TransformError};
@@ -46,14 +45,12 @@ use crate::{TransformCtx, TransformError};
 /// Pushes projections down through other operators.
 #[derive(Debug)]
 pub struct ProjectionPushdown {
-    recursion_guard: RecursionGuard,
     include_joins: bool,
 }
 
 impl Default for ProjectionPushdown {
     fn default() -> Self {
         Self {
-            recursion_guard: RecursionGuard::with_limit(RECURSION_LIMIT),
             include_joins: true,
         }
     }
@@ -64,15 +61,8 @@ impl ProjectionPushdown {
     /// descend into join inputs).
     pub fn skip_joins() -> Self {
         Self {
-            recursion_guard: RecursionGuard::with_limit(RECURSION_LIMIT),
             include_joins: false,
         }
-    }
-}
-
-impl CheckedRecursion for ProjectionPushdown {
-    fn recursion_guard(&self) -> &RecursionGuard {
-        &self.recursion_guard
     }
 }
 
@@ -115,7 +105,7 @@ impl ProjectionPushdown {
         desired_projection: &Vec<usize>,
         gets: &mut BTreeMap<Id, BTreeSet<usize>>,
     ) -> Result<(), TransformError> {
-        self.checked_recur(|_| {
+        mz_ore::stack::maybe_grow(|| {
             // First, try to push the desired projection down through `relation`.
             // In the process `relation` is transformed to a `MirRelationExpr`
             // equivalent to `relation.project(actual_projection)`.
@@ -260,7 +250,11 @@ impl ProjectionPushdown {
                     columns_to_pushdown.into_iter().collect()
                 }
                 // Skip joins if `self.include_joins` is turned off.
-                MirRelationExpr::Join { inputs, equivalences: _, implementation: _ } => {
+                MirRelationExpr::Join {
+                    inputs,
+                    equivalences: _,
+                    implementation: _,
+                } => {
                     let input_mapper = JoinInputMapper::new(inputs);
 
                     // Include all columns.

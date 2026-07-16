@@ -15,31 +15,14 @@ use std::collections::BTreeMap;
 use std::mem;
 
 use itertools::zip_eq;
-use mz_expr::{AccessStrategy, Columns, Id, MirRelationExpr, RECURSION_LIMIT};
-use mz_ore::stack::{CheckedRecursion, RecursionGuard};
+use mz_expr::{AccessStrategy, Columns, Id, MirRelationExpr};
 use mz_repr::ReprRelationType;
 
 use crate::TransformCtx;
 
 /// Hoist projections through operators.
-#[derive(Debug)]
-pub struct ProjectionLifting {
-    recursion_guard: RecursionGuard,
-}
-
-impl Default for ProjectionLifting {
-    fn default() -> ProjectionLifting {
-        ProjectionLifting {
-            recursion_guard: RecursionGuard::with_limit(RECURSION_LIMIT),
-        }
-    }
-}
-
-impl CheckedRecursion for ProjectionLifting {
-    fn recursion_guard(&self) -> &RecursionGuard {
-        &self.recursion_guard
-    }
-}
+#[derive(Debug, Default)]
+pub struct ProjectionLifting;
 
 impl crate::Transform for ProjectionLifting {
     fn name(&self) -> &'static str {
@@ -70,7 +53,7 @@ impl ProjectionLifting {
         // Map from names to new get type and projection required at use.
         gets: &mut BTreeMap<Id, (ReprRelationType, Vec<usize>)>,
     ) -> Result<(), crate::TransformError> {
-        self.checked_recur(|_| {
+        mz_ore::stack::maybe_grow(|| {
             match relation {
                 MirRelationExpr::Constant { .. } => Ok(()),
                 MirRelationExpr::Get {

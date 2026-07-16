@@ -26,34 +26,15 @@ use std::collections::BTreeMap;
 
 use itertools::Itertools;
 use mz_expr::visit::Visit;
-use mz_expr::{
-    Columns, Id, JoinInputMapper, LocalId, MirRelationExpr, MirScalarExpr, RECURSION_LIMIT,
-};
+use mz_expr::{Columns, Id, JoinInputMapper, LocalId, MirRelationExpr, MirScalarExpr};
 use mz_ore::stack::CheckedBox;
-use mz_ore::stack::{CheckedRecursion, RecursionGuard};
 use mz_ore::{assert_none, soft_panic_or_log};
 
 use crate::{TransformCtx, all};
 
 /// Remove redundant collections of distinct elements from joins.
-#[derive(Debug)]
-pub struct RedundantJoin {
-    recursion_guard: RecursionGuard,
-}
-
-impl Default for RedundantJoin {
-    fn default() -> RedundantJoin {
-        RedundantJoin {
-            recursion_guard: RecursionGuard::with_limit(RECURSION_LIMIT),
-        }
-    }
-}
-
-impl CheckedRecursion for RedundantJoin {
-    fn recursion_guard(&self) -> &RecursionGuard {
-        &self.recursion_guard
-    }
-}
+#[derive(Debug, Default)]
+pub struct RedundantJoin;
 
 impl crate::Transform for RedundantJoin {
     fn name(&self) -> &'static str {
@@ -97,7 +78,7 @@ impl RedundantJoin {
         relation: &mut MirRelationExpr,
         ctx: &mut ProvInfoCtx,
     ) -> Result<Vec<ProvInfo>, crate::TransformError> {
-        let mut result = self.checked_recur(|_| {
+        let mut result = mz_ore::stack::maybe_grow(|| {
             match relation {
                 MirRelationExpr::Let { id, value, body } => {
                     // Recursively determine provenance of the value.

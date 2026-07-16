@@ -25,31 +25,14 @@ use std::collections::BTreeMap;
 use itertools::{Itertools, zip_eq};
 use mz_expr::JoinImplementation::IndexedFilter;
 use mz_expr::visit::Visit;
-use mz_expr::{Eval, Id, JoinInputMapper, MirRelationExpr, MirScalarExpr, RECURSION_LIMIT};
-use mz_ore::stack::{CheckedRecursion, RecursionGuard};
+use mz_expr::{Eval, Id, JoinInputMapper, MirRelationExpr, MirScalarExpr};
 use mz_repr::{Row, RowPacker};
 
 use crate::TransformCtx;
 
 /// Hoist literal values from maps wherever possible.
-#[derive(Debug)]
-pub struct LiteralLifting {
-    recursion_guard: RecursionGuard,
-}
-
-impl Default for LiteralLifting {
-    fn default() -> LiteralLifting {
-        LiteralLifting {
-            recursion_guard: RecursionGuard::with_limit(RECURSION_LIMIT),
-        }
-    }
-}
-
-impl CheckedRecursion for LiteralLifting {
-    fn recursion_guard(&self) -> &RecursionGuard {
-        &self.recursion_guard
-    }
-}
+#[derive(Debug, Default)]
+pub struct LiteralLifting;
 
 impl crate::Transform for LiteralLifting {
     fn name(&self) -> &'static str {
@@ -136,7 +119,7 @@ impl LiteralLifting {
         // Map from names to literals required for appending.
         gets: &mut BTreeMap<Id, Vec<MirScalarExpr>>,
     ) -> Result<Vec<MirScalarExpr>, crate::TransformError> {
-        self.checked_recur(|_| {
+        mz_ore::stack::maybe_grow(|| {
             match relation {
                 MirRelationExpr::Constant { rows, typ } => {
                     // From the back to the front, check if all values are identical.
