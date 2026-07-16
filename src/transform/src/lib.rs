@@ -1053,3 +1053,39 @@ impl Optimizer {
         Ok(())
     }
 }
+
+/// Shared scaffolding for tests that exercise stack safety on very deep plans.
+#[cfg(test)]
+pub(crate) mod deep_plan_test_support {
+    use mz_expr::MirRelationExpr;
+    use mz_repr::{Datum, ReprColumnType, ReprRelationType, ReprScalarType};
+
+    /// Runs `f` on a thread with a small (4 MiB) stack, so that an unguarded per-level
+    /// recursion over a deep plan reliably overflows instead of fitting into the
+    /// generously sized default test stack.
+    pub(crate) fn on_small_stack(f: impl FnOnce() + Send + 'static) {
+        std::thread::Builder::new()
+            .stack_size(4 << 20)
+            .spawn(f)
+            .expect("thread spawns")
+            .join()
+            .expect("no crash")
+    }
+
+    /// A chain of `depth` nodes produced by `wrap`, over a single-row boolean constant.
+    /// Built iteratively, a recursive builder would overflow the small test stack.
+    pub(crate) fn deep_chain(
+        depth: usize,
+        mut wrap: impl FnMut(MirRelationExpr) -> MirRelationExpr,
+    ) -> MirRelationExpr {
+        let typ = ReprRelationType::new(vec![ReprColumnType {
+            scalar_type: ReprScalarType::Bool,
+            nullable: false,
+        }]);
+        let mut expr = MirRelationExpr::constant(vec![vec![Datum::True]], typ);
+        for _ in 0..depth {
+            expr = wrap(expr);
+        }
+        expr
+    }
+}

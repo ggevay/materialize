@@ -61,19 +61,23 @@ impl crate::Transform for CanonicalizeMfp {
 impl CanonicalizeMfp {
     /// Extract and optimize MFPs.
     pub fn action(&self, relation: &mut MirRelationExpr) -> Result<(), crate::TransformError> {
-        let mut mfp = MapFilterProject::extract_non_errors_from_expr_mut(relation);
-        // Optimize MFP, e.g., perform CSE Push MFPs through `Negate` operators,
-        // if encountered. This is a first steps toward a `CanonicalizeLinear`,
-        // which puts linear operators in a canonical representation.
-        mfp.optimize();
-        if let MirRelationExpr::Negate { input } = relation {
-            Self::rebuild_mfp(mfp, &mut **input);
-            relation.try_visit_mut_children(|e| self.action(e))?;
-        } else {
-            relation.try_visit_mut_children(|e| self.action(e))?;
-            Self::rebuild_mfp(mfp, relation);
-        }
-        Ok(())
+        // This method recurses per tree level (through the `try_visit_mut_children`
+        // closures), so grow the stack as needed instead of overflowing on deep plans.
+        mz_ore::stack::maybe_grow(|| {
+            let mut mfp = MapFilterProject::extract_non_errors_from_expr_mut(relation);
+            // Optimize MFP, e.g., perform CSE Push MFPs through `Negate` operators,
+            // if encountered. This is a first steps toward a `CanonicalizeLinear`,
+            // which puts linear operators in a canonical representation.
+            mfp.optimize();
+            if let MirRelationExpr::Negate { input } = relation {
+                Self::rebuild_mfp(mfp, &mut **input);
+                relation.try_visit_mut_children(|e| self.action(e))?;
+            } else {
+                relation.try_visit_mut_children(|e| self.action(e))?;
+                Self::rebuild_mfp(mfp, relation);
+            }
+            Ok(())
+        })
     }
 
     /// Canonicalize the MapFilterProject to Map-Filter-Project, in that order.
@@ -92,5 +96,34 @@ impl CanonicalizeMfp {
                 *relation = relation.take_dangerous().project(project);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `CanonicalizeMfp::action` recurses per tree level (a `Negate` chain defeats the
+    /// MFP extraction, so every node is a recursion step) and used to overflow the stack
+    /// on very deep plans. The recursion is guarded by `maybe_grow`, so this must succeed
+    /// even on a small thread stack.
+    #[mz_ore::test]
+    #[cfg_attr(miri, ignore)] // too slow, and stacker is unsupported under miri
+    fn canonicalize_mfp_deep_plan() {
+        crate::deep_plan_test_support::on_small_stack(canonicalize_mfp_deep_plan_inner);
+    }
+
+    fn canonicalize_mfp_deep_plan_inner() {
+        let mut expr =
+            crate::deep_plan_test_support::deep_chain(10_000, |input| MirRelationExpr::Negate {
+                input: mz_ore::stack::CheckedBox::new(input),
+            });
+
+        CanonicalizeMfp
+            .action(&mut expr)
+            .expect("action must succeed");
+
+        // Dismantle iteratively, the derived `Drop` would recurse.
+        expr.destroy_carefully();
     }
 }

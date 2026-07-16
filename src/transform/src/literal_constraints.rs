@@ -67,6 +67,18 @@ impl LiteralConstraints {
         relation: &mut MirRelationExpr,
         transform_ctx: &mut TransformCtx,
     ) -> Result<(), crate::TransformError> {
+        // This method recurses per tree level (through the `try_visit_mut_children`
+        // closure), so grow the stack as needed instead of overflowing on deep plans.
+        mz_ore::stack::maybe_grow(|| self.action_inner(relation, transform_ctx))
+    }
+
+    /// The body of [`Self::action`]. Must only be called through `action`, which ensures
+    /// sufficient stack space for the recursion.
+    fn action_inner(
+        &self,
+        relation: &mut MirRelationExpr,
+        transform_ctx: &mut TransformCtx,
+    ) -> Result<(), crate::TransformError> {
         let mut mfp = MapFilterProject::extract_non_errors_from_expr_mut(relation);
         relation.try_visit_mut_children(|e| self.action(e, transform_ctx))?;
 

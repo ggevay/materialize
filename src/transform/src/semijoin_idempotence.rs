@@ -340,6 +340,20 @@ fn list_replacements(
     let_replacements: &BTreeMap<LocalId, Vec<Replacement>>,
     gets_behind_gets: &BTreeMap<LocalId, Vec<(Id, Vec<MirScalarExpr>)>>,
 ) -> Vec<Replacement> {
+    // This function recurses per tree level (down Project/Reduce/ArrangeBy chains), so
+    // grow the stack as needed instead of overflowing on deep plans.
+    mz_ore::stack::maybe_grow(|| {
+        list_replacements_inner(expr, let_replacements, gets_behind_gets)
+    })
+}
+
+/// The body of [`list_replacements`]. Must only be called through it, which ensures
+/// sufficient stack space for the recursion.
+fn list_replacements_inner(
+    expr: &MirRelationExpr,
+    let_replacements: &BTreeMap<LocalId, Vec<Replacement>>,
+    gets_behind_gets: &BTreeMap<LocalId, Vec<(Id, Vec<MirScalarExpr>)>>,
+) -> Vec<Replacement> {
     let mut results = Vec::new();
     match expr {
         MirRelationExpr::Get {

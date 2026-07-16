@@ -154,6 +154,14 @@ impl UnionBranchCancellation {
     /// Negate operators may appear interleaved with Map, Filter and Project
     /// operators, but these operators must appear in the same order in both branches.
     fn compare_branches(relation: &MirRelationExpr, other: &MirRelationExpr) -> BranchCmp {
+        // This method recurses per tree level, so grow the stack as needed instead of
+        // overflowing on deep plans.
+        mz_ore::stack::maybe_grow(|| Self::compare_branches_inner(relation, other))
+    }
+
+    /// The body of [`Self::compare_branches`]. Must only be called through
+    /// `compare_branches`, which ensures sufficient stack space for the recursion.
+    fn compare_branches_inner(relation: &MirRelationExpr, other: &MirRelationExpr) -> BranchCmp {
         match (relation, other) {
             (
                 MirRelationExpr::Negate { input: input1 },

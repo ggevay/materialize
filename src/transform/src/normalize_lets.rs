@@ -509,8 +509,16 @@ mod let_motion {
 
     /// Performs a post-order traversal of the `LetRec` nodes at the root of an expression.
     ///
-    /// The traversal is only of the `LetRec` nodes, for which fear of stack exhaustion is nominal.
+    /// The traversal is only of the `LetRec` nodes, so the recursion depth is bounded by
+    /// the `LetRec` nesting depth rather than the total plan depth. `maybe_grow` guards
+    /// against pathologically deep `LetRec` nesting anyway.
     fn post_order_harvest_lets(expr: &mut MirRelationExpr) {
+        mz_ore::stack::maybe_grow(|| post_order_harvest_lets_inner(expr))
+    }
+
+    /// The body of [`post_order_harvest_lets`]. Must only be called through it, which
+    /// ensures sufficient stack space for the recursion.
+    fn post_order_harvest_lets_inner(expr: &mut MirRelationExpr) {
         if let MirRelationExpr::LetRec {
             ids,
             values,

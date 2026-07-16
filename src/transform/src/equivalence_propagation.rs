@@ -125,6 +125,23 @@ impl EquivalencePropagation {
         &self,
         expr: &mut MirRelationExpr,
         derived: DerivedView,
+        outer_equivalences: EquivalenceClasses,
+        get_equivalences: &mut BTreeMap<Id, EquivalenceClasses>,
+        ctx: &mut TransformCtx,
+    ) {
+        // This method recurses per tree level, so grow the stack as needed instead of
+        // overflowing on deep plans.
+        mz_ore::stack::maybe_grow(|| {
+            self.apply_inner(expr, derived, outer_equivalences, get_equivalences, ctx)
+        })
+    }
+
+    /// The body of [`Self::apply`]. Must only be called through `apply`, which ensures
+    /// sufficient stack space for the recursion.
+    fn apply_inner(
+        &self,
+        expr: &mut MirRelationExpr,
+        derived: DerivedView,
         mut outer_equivalences: EquivalenceClasses,
         get_equivalences: &mut BTreeMap<Id, EquivalenceClasses>,
         ctx: &mut TransformCtx,
@@ -800,4 +817,54 @@ fn literal_domination(old: &MirScalarExpr, new: &MirScalarExpr) -> bool {
         }
     }
     true
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::typecheck::empty_typechecking_context;
+
+    /// Regression test for materialize#DB-167: `EquivalencePropagation::apply` recurses
+    /// per tree level and used to overflow the stack on very deep plans. The recursion
+    /// is guarded by `maybe_grow`, so this must succeed even on a small thread stack.
+    /// Building, analyzing, and dismantling the plan is all iterative, so the recursion
+    /// in `apply` is the only deep stack user.
+    #[mz_ore::test]
+    #[cfg_attr(miri, ignore)] // too slow, and stacker is unsupported under miri
+    fn equivalence_propagation_deep_plan() {
+        crate::deep_plan_test_support::on_small_stack(equivalence_propagation_deep_plan_inner);
+    }
+
+    fn equivalence_propagation_deep_plan_inner() {
+        // A chain over a non-empty constant, so that the `Equivalences` analysis doesn't
+        // prune the whole expression (which would skip the recursion entirely).
+        let mut expr =
+            crate::deep_plan_test_support::deep_chain(10_000, |input| MirRelationExpr::Filter {
+                input: mz_ore::stack::CheckedBox::new(input),
+                predicates: vec![MirScalarExpr::column(0)],
+            });
+
+        let typecheck_ctx = empty_typechecking_context();
+        let features = mz_repr::optimize::OptimizerFeatures::default();
+        let mut df_meta = crate::dataflow::DataflowMetainfo::default();
+        let mut ctx = TransformCtx::local(&features, &typecheck_ctx, &mut df_meta, None, None);
+
+        use crate::analysis::DerivedBuilder;
+        let mut builder = DerivedBuilder::new(ctx.features);
+        builder.require(Equivalences);
+        builder.require(ReprRelationType);
+        let derived = builder.visit(&expr);
+
+        let mut get_equivalences = BTreeMap::default();
+        EquivalencePropagation.apply(
+            &mut expr,
+            derived.as_view(),
+            EquivalenceClasses::default(),
+            &mut get_equivalences,
+            &mut ctx,
+        );
+
+        // Dismantle iteratively, the derived `Drop` would recurse.
+        expr.destroy_carefully();
+    }
 }

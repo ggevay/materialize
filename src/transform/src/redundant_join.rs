@@ -482,6 +482,14 @@ impl ProvInfo {
     /// Rewrite `expr` so it refers to the columns of the original source instead
     /// of the columns of the projected source.
     fn dereference(&self, expr: &MirScalarExpr) -> Option<MirScalarExpr> {
+        // This method recurses per scalar expression level, so grow the stack as needed
+        // instead of overflowing on deep expressions (e.g. the If chain of a big CASE).
+        mz_ore::stack::maybe_grow(|| self.dereference_inner(expr))
+    }
+
+    /// The body of [`Self::dereference`]. Must only be called through `dereference`,
+    /// which ensures sufficient stack space for the recursion.
+    fn dereference_inner(&self, expr: &MirScalarExpr) -> Option<MirScalarExpr> {
         match expr {
             MirScalarExpr::Column(c, _) => {
                 if let Some(expr) = &self.dereferenced_projection[*c] {
@@ -697,6 +705,21 @@ fn find_redundancy(
 
 /// Tries to build `root_expr` using elements from other's projection.
 fn try_build_expression_using_other(
+    root_expr: &MirScalarExpr,
+    other: usize,
+    other_prov: &ProvInfo,
+    input_mapper: &JoinInputMapper,
+) -> Option<MirScalarExpr> {
+    // This function recurses per scalar expression level, so grow the stack as needed
+    // instead of overflowing on deep expressions.
+    mz_ore::stack::maybe_grow(|| {
+        try_build_expression_using_other_inner(root_expr, other, other_prov, input_mapper)
+    })
+}
+
+/// The body of [`try_build_expression_using_other`]. Must only be called through it,
+/// which ensures sufficient stack space for the recursion.
+fn try_build_expression_using_other_inner(
     root_expr: &MirScalarExpr,
     other: usize,
     other_prov: &ProvInfo,
