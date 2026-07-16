@@ -129,6 +129,13 @@ steps:
           args:
             - --cleanup
             - --target=cloud-staging
+            # Benchmark-only branch: no-op the expensive scenario groups so
+            # only the QPS scenarios do real work. (The trigger UI's extra
+            # args cannot reach this step: mkpipeline suffixes the shard keys
+            # with -<index>, so the plugin's CI_EXTRA_ARGS lookup by step key
+            # misses.)
+            - --envd-objects-scalability-sizes=
+            - --cluster-object-limits-sizes=
             - envd_qps_scalability
             - envd_objects_scalability
             - cluster_object_limits
