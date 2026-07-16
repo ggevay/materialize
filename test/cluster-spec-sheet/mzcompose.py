@@ -3875,7 +3875,12 @@ class CloudTarget(BenchTarget):
             "-database",
             "materialize",
             "-params",
-            "sslmode=require&cluster=c",
+            # statement_logging_sample_rate is forwarded by lib/pq as a pgwire
+            # startup parameter (like cluster), so every dbbench session runs
+            # with statement logging disabled. The session var wins over the
+            # LaunchDarkly-controlled default, and the max-rate clamp is
+            # min(), so 0 is always effective.
+            "sslmode=require&cluster=c&statement_logging_sample_rate=0",
         ]
 
     def initialize(self) -> None:
