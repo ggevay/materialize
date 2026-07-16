@@ -372,7 +372,9 @@ impl Eval for LirScalarExpr {
     /// True iff evaluation could possibly error on non-error input `Datum`.
     fn could_error(&self) -> bool {
         use LirScalarExpr::*;
-        match self {
+        // Recurses per scalar nesting level, and runs on lowered plans whose depth can
+        // reach the optimizer's scalar depth limit (8192), so grow the stack as needed.
+        mz_ore::stack::maybe_grow(|| match self {
             Column(_col, _name) => false,
             Literal(row, ..) => row.is_err(),
             CallUnary { func, expr } => func.could_error() || expr.could_error(),
@@ -383,7 +385,7 @@ impl Eval for LirScalarExpr {
                 func.could_error() || exprs.iter().any(|e| e.could_error())
             }
             If { cond, then, els } => cond.could_error() || then.could_error() || els.could_error(),
-        }
+        })
     }
 }
 
@@ -606,7 +608,9 @@ impl std::fmt::Display for LirScalarExpr {
 impl From<&LirScalarExpr> for MirScalarExpr {
     fn from(value: &LirScalarExpr) -> Self {
         use LirScalarExpr::*;
-        match value {
+        // This conversion recurses per scalar nesting level, like the `TryFrom` below,
+        // so grow the stack as needed instead of overflowing on deep expressions.
+        mz_ore::stack::maybe_grow(|| match value {
             Column(c, treat_as_equal) => MirScalarExpr::Column(c.clone(), treat_as_equal.clone()),
             Literal(row, repr_column_type) => {
                 MirScalarExpr::Literal(row.clone(), repr_column_type.clone())
@@ -629,7 +633,7 @@ impl From<&LirScalarExpr> for MirScalarExpr {
                 then: CheckedBox::new(MirScalarExpr::from(then.as_ref())),
                 els: CheckedBox::new(MirScalarExpr::from(els.as_ref())),
             },
-        }
+        })
     }
 }
 
@@ -639,7 +643,10 @@ impl TryFrom<&MirScalarExpr> for LirScalarExpr {
 
     fn try_from(value: &MirScalarExpr) -> Result<Self, Self::Error> {
         use MirScalarExpr::*;
-        match value {
+        // This conversion recurses per scalar nesting level, and the optimizer's scalar
+        // depth limit admits expressions up to 8192 levels deep, so grow the stack as
+        // needed instead of overflowing.
+        mz_ore::stack::maybe_grow(|| match value {
             Column(c, treat_as_equal) => Ok(LirScalarExpr::Column(*c, treat_as_equal.clone())),
             Literal(row, repr_column_type) => Ok(LirScalarExpr::Literal(
                 row.clone(),
@@ -709,7 +716,7 @@ impl TryFrom<&MirScalarExpr> for LirScalarExpr {
                 }
             }
             CallUnmaterializable(f) => Err(vec![f.clone()]),
-        }
+        })
     }
 }
 
@@ -802,5 +809,50 @@ pub(crate) fn lses_from_mses<'a>(
                 separated(", ", &funcs)
             )
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The MIR<->LIR scalar conversions (and `could_error`) recurse per scalar nesting
+    /// level, and the optimizer's scalar depth limit admits expressions up to 8192
+    /// levels deep (e.g. the If chain of a big CASE), so they must not overflow the
+    /// stack. The recursions are guarded by `maybe_grow`, so this must succeed even on
+    /// a small thread stack.
+    #[mz_ore::test]
+    #[cfg_attr(miri, ignore)] // too slow, and stacker is unsupported under miri
+    fn deep_if_chain_conversion() {
+        std::thread::Builder::new()
+            .stack_size(8 << 20)
+            .spawn(deep_if_chain_conversion_inner)
+            .expect("thread spawns")
+            .join()
+            .expect("no crash");
+    }
+
+    fn deep_if_chain_conversion_inner() {
+        use mz_repr::{Datum, ReprScalarType};
+
+        // Build iteratively, a recursive builder would overflow the small test stack.
+        let mut expr = MirScalarExpr::literal_ok(Datum::Int64(0), ReprScalarType::Int64);
+        for _ in 0..10_000 {
+            expr = MirScalarExpr::If {
+                cond: CheckedBox::new(MirScalarExpr::literal_true()),
+                then: CheckedBox::new(MirScalarExpr::literal_ok(
+                    Datum::Int64(1),
+                    ReprScalarType::Int64,
+                )),
+                els: CheckedBox::new(expr),
+            };
+        }
+
+        let lir = LirScalarExpr::try_from(&expr).expect("no unmaterializable functions");
+        assert!(!lir.could_error());
+        let roundtripped = MirScalarExpr::from(&lir);
+        assert!(expr == roundtripped, "roundtrip differs from the original");
+        // NB: dropping `lir` recurses over its plain `Box` fields (unguarded, unlike the
+        // MirScalarExpr drops), which the small stack accommodates at this depth.
     }
 }
