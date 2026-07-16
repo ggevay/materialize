@@ -208,6 +208,62 @@ impl<'a> TransformCtx<'a> {
         }
         hash
     }
+
+    /// Enforces `features.optimizer_plan_depth_limit` on the relation nesting depth and
+    /// `features.optimizer_scalar_expr_depth_limit` on the scalar expression nesting
+    /// depth of the given plan.
+    ///
+    /// Returns a [`TransformError::RecursionLimit`] error (surfaced to users as "query is
+    /// too complex") if either depth exceeds its limit. A limit of 0 disables that
+    /// dimension's check.
+    ///
+    /// `context` names the transform (or pipeline stage) that produced the plan, for the
+    /// internal log only.
+    ///
+    /// Besides keeping degenerately deep plans from reaching rendering, the uniform check
+    /// bounds the recursion depth of every plan traversal that runs between two checks,
+    /// so those traversals can use bare `maybe_grow` instead of a counted recursion
+    /// guard. It also acts as a bug detector for transforms that blow up the depth of a
+    /// reasonable plan.
+    fn enforce_plan_depth_limits(
+        &self,
+        relation: &MirRelationExpr,
+        context: &str,
+    ) -> Result<(), TransformError> {
+        let relation_limit = self.features.optimizer_plan_depth_limit;
+        let scalar_limit = self.features.optimizer_scalar_expr_depth_limit;
+        if relation_limit == 0 && scalar_limit == 0 {
+            return Ok(());
+        }
+        // TODO: This walk visits the whole plan once per transform application. Fuse it
+        // into the (then iterative) hashing walk in `Transform::transform` to avoid the
+        // extra pass.
+        let depths = relation.depths();
+        let tripped_limit = if relation_limit != 0 && depths.relation_depth > relation_limit {
+            tracing::info!(
+                context,
+                relation_depth = depths.relation_depth,
+                limit = relation_limit,
+                global_id = ?self.global_id,
+                "plan exceeds the optimizer plan depth limit",
+            );
+            relation_limit
+        } else if scalar_limit != 0 && depths.scalar_depth > scalar_limit {
+            tracing::info!(
+                context,
+                scalar_depth = depths.scalar_depth,
+                limit = scalar_limit,
+                global_id = ?self.global_id,
+                "plan exceeds the optimizer scalar expression depth limit",
+            );
+            scalar_limit
+        } else {
+            return Ok(());
+        };
+        Err(TransformError::RecursionLimit(RecursionLimitError::new(
+            tripped_limit,
+        )))
+    }
 }
 
 /// Types capable of transforming relation expressions.
@@ -232,14 +288,21 @@ pub trait Transform: fmt::Debug {
         let res = self.actually_perform_transform(relation, args);
         let duration = start.elapsed();
 
-        let hash_after = args.update_last_hash(relation);
         if let Some(metrics) = &mut args.metrics {
-            let transform_name = self.name();
-            metrics.observe_transform_time(transform_name, duration);
-            metrics.inc_transform(hash_before != hash_after, transform_name);
+            metrics.observe_transform_time(self.name(), duration);
         }
 
-        res
+        // On failure (of the transform or of the depth check), return without hashing
+        // the plan: the hash walk is what the depth limit protects.
+        res?;
+        args.enforce_plan_depth_limits(relation, self.name())?;
+
+        let hash_after = args.update_last_hash(relation);
+        if let Some(metrics) = &mut args.metrics {
+            metrics.inc_transform(hash_before != hash_after, self.name());
+        }
+
+        Ok(())
     }
 
     /// Transform a relation into a functionally equivalent relation.
@@ -1044,6 +1107,12 @@ impl Optimizer {
         relation: &mut MirRelationExpr,
         args: &mut TransformCtx,
     ) -> Result<(), TransformError> {
+        // Enforce the plan depth limit on the incoming plan, before the hashing below
+        // and the transforms recurse over it. Plans this deep can arrive here from
+        // lowering, whose own recursion limit counts HIR nodes, while e.g. `Let` chains
+        // make the corresponding MIR tree deeper.
+        args.enforce_plan_depth_limits(relation, self.name)?;
+
         args.update_last_hash(relation);
 
         for transform in self.transforms.iter() {
@@ -1087,5 +1156,143 @@ pub(crate) mod deep_plan_test_support {
             expr = wrap(expr);
         }
         expr
+    }
+}
+
+#[cfg(test)]
+mod plan_depth_limit_tests {
+    use mz_expr::MirScalarExpr;
+    use mz_ore::cast::CastFrom;
+    use mz_repr::{Datum, ReprColumnType, ReprRelationType, ReprScalarType};
+
+    use super::*;
+    use crate::typecheck::empty_typechecking_context;
+
+    /// A transform that does nothing, so that tests exercise only the depth check in the
+    /// `Transform::transform` wrapper.
+    #[derive(Debug)]
+    struct NoopTransform;
+
+    impl Transform for NoopTransform {
+        fn name(&self) -> &'static str {
+            "NoopTransform"
+        }
+
+        fn actually_perform_transform(
+            &self,
+            _relation: &mut MirRelationExpr,
+            _ctx: &mut TransformCtx,
+        ) -> Result<(), TransformError> {
+            Ok(())
+        }
+    }
+
+    fn bool_typ() -> ReprRelationType {
+        ReprRelationType::new(vec![ReprColumnType {
+            scalar_type: ReprScalarType::Bool,
+            nullable: false,
+        }])
+    }
+
+    /// A `Let` chain of the given depth (relation depth `depth + 1`).
+    fn deep_relation(depth: usize) -> MirRelationExpr {
+        let mut relation = MirRelationExpr::constant(vec![vec![Datum::True]], bool_typ());
+        for i in 0..depth {
+            relation = MirRelationExpr::Let {
+                id: mz_expr::LocalId::new(u64::cast_from(i)),
+                value: mz_ore::stack::CheckedBox::new(MirRelationExpr::constant(
+                    vec![vec![Datum::True]],
+                    bool_typ(),
+                )),
+                body: mz_ore::stack::CheckedBox::new(relation),
+            };
+        }
+        relation
+    }
+
+    /// A plan of small relation depth carrying a scalar expression of the given depth.
+    fn deep_scalar_relation(depth: usize) -> MirRelationExpr {
+        let mut scalar = MirScalarExpr::column(0);
+        for _ in 0..depth {
+            scalar = scalar.not();
+        }
+        MirRelationExpr::constant(vec![vec![Datum::True]], bool_typ()).filter(vec![scalar])
+    }
+
+    fn apply_noop(
+        relation: &mut MirRelationExpr,
+        relation_limit: usize,
+        scalar_limit: usize,
+    ) -> Result<(), TransformError> {
+        let typecheck_ctx = empty_typechecking_context();
+        let mut features = mz_repr::optimize::OptimizerFeatures::default();
+        features.optimizer_plan_depth_limit = relation_limit;
+        features.optimizer_scalar_expr_depth_limit = scalar_limit;
+        let mut df_meta = DataflowMetainfo::default();
+        let mut ctx = TransformCtx::local(&features, &typecheck_ctx, &mut df_meta, None, None);
+        NoopTransform.transform(relation, &mut ctx)
+    }
+
+    #[mz_ore::test]
+    fn depth_limit_trips_on_deep_relation() {
+        let res = apply_noop(&mut deep_relation(100), 50, 50);
+        assert!(
+            matches!(res, Err(TransformError::RecursionLimit(_))),
+            "expected RecursionLimit, got {res:?}",
+        );
+    }
+
+    #[mz_ore::test]
+    fn depth_limit_trips_on_deep_scalar() {
+        let res = apply_noop(&mut deep_scalar_relation(100), 50, 50);
+        assert!(
+            matches!(res, Err(TransformError::RecursionLimit(_))),
+            "expected RecursionLimit, got {res:?}",
+        );
+    }
+
+    #[mz_ore::test]
+    fn depth_limit_allows_plans_at_the_limit() {
+        // `deep_relation(depth)` has relation depth `depth + 1`, and
+        // `deep_scalar_relation(depth)` has scalar depth `depth + 1`.
+        apply_noop(&mut deep_relation(99), 100, 100).expect("at the limit");
+        apply_noop(&mut deep_scalar_relation(99), 100, 100).expect("at the limit");
+    }
+
+    #[mz_ore::test]
+    fn depth_limits_are_independent() {
+        // A deep relation passes when only the scalar limit is enabled, and vice versa.
+        apply_noop(&mut deep_relation(100), 0, 50).expect("relation check disabled");
+        apply_noop(&mut deep_scalar_relation(100), 50, 0).expect("scalar check disabled");
+        // Each still trips its own dimension when the other's limit is disabled.
+        let res = apply_noop(&mut deep_relation(100), 50, 0);
+        assert!(matches!(res, Err(TransformError::RecursionLimit(_))));
+        let res = apply_noop(&mut deep_scalar_relation(100), 0, 50);
+        assert!(matches!(res, Err(TransformError::RecursionLimit(_))));
+    }
+
+    #[mz_ore::test]
+    fn depth_limit_zero_disables_the_check() {
+        apply_noop(&mut deep_relation(100), 0, 0).expect("check disabled");
+        apply_noop(&mut deep_scalar_relation(100), 0, 0).expect("check disabled");
+    }
+
+    #[mz_ore::test]
+    fn depth_limit_enforced_at_optimizer_entry() {
+        let typecheck_ctx = empty_typechecking_context();
+        let mut features = mz_repr::optimize::OptimizerFeatures::default();
+        features.optimizer_plan_depth_limit = 50;
+        let mut df_meta = DataflowMetainfo::default();
+        let mut ctx = TransformCtx::local(&features, &typecheck_ctx, &mut df_meta, None, None);
+        // An optimizer with no transforms, so only the entry check can reject the plan.
+        let optimizer = Optimizer {
+            name: "test",
+            transforms: vec![],
+        };
+        let res = optimizer.optimize(deep_relation(100), &mut ctx);
+        assert!(
+            matches!(res, Err(TransformError::RecursionLimit(_))),
+            "expected RecursionLimit, got {res:?}",
+        );
     }
 }

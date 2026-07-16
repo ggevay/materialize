@@ -654,6 +654,29 @@ pub static PERSIST_FAST_PATH_LIMIT: VarDefinition = VarDefinition::new(
     false,
 );
 
+pub static OPTIMIZER_PLAN_DEPTH_LIMIT: VarDefinition = VarDefinition::new(
+    "optimizer_plan_depth_limit",
+    value!(usize; mz_ore::stack::RECURSION_LIMIT),
+    "The maximum nesting depth of relation operators that the optimizer accepts in a \
+    plan, checked at optimizer entry and after each transform. Queries whose plans \
+    exceed it fail with a 'query is too complex' error. Setting this to 0 disables \
+    the check (Materialize).",
+    false,
+);
+
+pub static OPTIMIZER_SCALAR_EXPR_DEPTH_LIMIT: VarDefinition = VarDefinition::new(
+    "optimizer_scalar_expr_depth_limit",
+    // 4x the plan depth limit: covers deep CASE chains and stacked-view scalar
+    // inlining, while staying far below the stack ceiling of the remaining
+    // recursive derived scalar walks.
+    value!(usize; 8192),
+    "The maximum nesting depth of scalar expressions that the optimizer accepts in a \
+    plan, checked at optimizer entry and after each transform. Queries whose plans \
+    exceed it fail with a 'query is too complex' error. Setting this to 0 disables \
+    the check (Materialize).",
+    false,
+);
+
 /// Controls `mz_adapter::coord::timestamp_oracle::postgres_oracle::DynamicConfig::pg_connection_pool_max_size`.
 pub static PG_TIMESTAMP_ORACLE_CONNECTION_POOL_MAX_SIZE: VarDefinition = VarDefinition::new(
     "pg_timestamp_oracle_connection_pool_max_size",
@@ -2356,6 +2379,8 @@ impl From<&super::SystemVars> for OptimizerFeatures {
             enable_coalesce_case_transform: vars.enable_coalesce_case_transform(),
             enable_will_distinct_propagation: vars.enable_will_distinct_propagation(),
             enable_fixed_correlated_cte_lowering: vars.enable_fixed_correlated_cte_lowering(),
+            optimizer_plan_depth_limit: vars.optimizer_plan_depth_limit(),
+            optimizer_scalar_expr_depth_limit: vars.optimizer_scalar_expr_depth_limit(),
         }
     }
 }
@@ -2399,6 +2424,8 @@ mod tests {
             enable_coalesce_case_transform,
             enable_will_distinct_propagation,
             enable_fixed_correlated_cte_lowering,
+            optimizer_plan_depth_limit,
+            optimizer_scalar_expr_depth_limit,
         } = false_features;
 
         let mut vars = SystemVars::new();
@@ -2430,6 +2457,8 @@ mod tests {
         set_var!(enable_coalesce_case_transform);
         set_var!(enable_will_distinct_propagation);
         set_var!(enable_fixed_correlated_cte_lowering);
+        set_var!(optimizer_plan_depth_limit);
+        set_var!(optimizer_scalar_expr_depth_limit);
 
         // Enable for item parsing, then ensure we still get the same optimizer features.
         vars.enable_for_item_parsing();

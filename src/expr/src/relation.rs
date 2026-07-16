@@ -1951,6 +1951,38 @@ impl MirRelationExpr {
         }
     }
 
+    /// Computes the maximum nesting depth of this relation expression tree, and the
+    /// maximum nesting depth of the scalar expressions it contains.
+    ///
+    /// The relation depth counts `MirRelationExpr` nodes along a root-to-leaf path, so a
+    /// single node has depth 1. The scalar depth similarly counts `MirScalarExpr` nodes
+    /// within each scalar expression directly owned by any node of the tree; a plan
+    /// without scalar expressions has scalar depth 0.
+    ///
+    /// The walk is iterative, so it is safe to call on plans of any depth.
+    pub fn depths(&self) -> PlanDepths {
+        let mut relation_depth = 0;
+        let mut scalar_depth = 0;
+        let mut todo = vec![(self, 1)];
+        while let Some((expr, depth)) = todo.pop() {
+            relation_depth = max(relation_depth, depth);
+            expr.try_visit_scalars_1(&mut |s| {
+                let mut scalar_todo = vec![(s, 1)];
+                while let Some((s, depth)) = scalar_todo.pop() {
+                    scalar_depth = max(scalar_depth, depth);
+                    scalar_todo.extend(s.children().map(|c| (c, depth + 1)));
+                }
+                Ok::<_, RecursionLimitError>(())
+            })
+            .expect("infallible");
+            todo.extend(expr.children().map(|c| (c, depth + 1)));
+        }
+        PlanDepths {
+            relation_depth,
+            scalar_depth,
+        }
+    }
+
     /// Computes the size (total number of nodes) and maximum depth of a MirRelationExpr for
     /// debug printing purposes.
     pub fn debug_size_and_depth(&self) -> (usize, usize) {
@@ -2004,6 +2036,16 @@ impl MirRelationExpr {
         self.hash(&mut h);
         h.finish()
     }
+}
+
+/// Maximum nesting depths of a plan, as computed by [`MirRelationExpr::depths`].
+#[derive(Clone, Copy, Debug)]
+pub struct PlanDepths {
+    /// The maximum number of `MirRelationExpr` nodes along a root-to-leaf path.
+    pub relation_depth: usize,
+    /// The maximum number of `MirScalarExpr` nodes along a root-to-leaf path of any
+    /// scalar expression directly owned by a node of the tree.
+    pub scalar_depth: usize,
 }
 
 // `LetRec` helpers

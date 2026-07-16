@@ -1221,6 +1221,8 @@ impl SystemVars {
             &STORAGE_SHRINK_UPSERT_UNUSED_BUFFERS_BY_RATIO,
             &STORAGE_RECORD_SOURCE_SINK_NAMESPACED_ERRORS,
             &PERSIST_FAST_PATH_LIMIT,
+            &OPTIMIZER_PLAN_DEPTH_LIMIT,
+            &OPTIMIZER_SCALAR_EXPR_DEPTH_LIMIT,
             &METRICS_RETENTION,
             &UNSAFE_MOCK_AUDIT_EVENT_TIMESTAMP,
             &ENABLE_RBAC_CHECKS,
@@ -1825,6 +1827,14 @@ impl SystemVars {
 
     pub fn persist_fast_path_limit(&self) -> usize {
         *self.expect_value(&PERSIST_FAST_PATH_LIMIT)
+    }
+
+    pub fn optimizer_plan_depth_limit(&self) -> usize {
+        *self.expect_value(&OPTIMIZER_PLAN_DEPTH_LIMIT)
+    }
+
+    pub fn optimizer_scalar_expr_depth_limit(&self) -> usize {
+        *self.expect_value(&OPTIMIZER_SCALAR_EXPR_DEPTH_LIMIT)
     }
 
     /// Returns the `pg_source_connect_timeout` configuration parameter.

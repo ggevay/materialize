@@ -139,6 +139,18 @@ optimizer_feature_flags!({
     enable_will_distinct_propagation: bool,
     // See the feature flag of the same name.
     enable_fixed_correlated_cte_lowering: bool,
+    // Bound from `SystemVars::optimizer_plan_depth_limit`.
+    //
+    // The maximum nesting depth of relation operators that the optimizer accepts
+    // in a plan, checked at optimizer entry and after each transform. 0 disables
+    // the check. Note that the derived `Default` is therefore "no limit". The
+    // production default comes from the system var.
+    optimizer_plan_depth_limit: usize,
+    // Bound from `SystemVars::optimizer_scalar_expr_depth_limit`.
+    //
+    // Like `optimizer_plan_depth_limit`, but bounding the nesting depth of the
+    // scalar expressions within the plan's relation operators.
+    optimizer_scalar_expr_depth_limit: usize,
 });
 
 /// A trait used to implement layered config construction.

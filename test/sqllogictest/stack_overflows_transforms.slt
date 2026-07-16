@@ -1,0 +1,111 @@
+# Copyright Materialize, Inc. and contributors. All rights reserved.
+#
+# Use of this software is governed by the Business Source License
+# included in the LICENSE file at the root of this repository.
+#
+# As of the Change Date specified in that file, in accordance with
+# the Business Source License, use of this software will be governed
+# by the Apache License, Version 2.0.
+
+# Regression tests for stack overflows in the MIR transform pipeline.
+#
+# Each `format_type` call expands into a sizeable expression, and CSE turns the
+# repetitions into a `Let` chain whose depth grows with the number of rows
+# (roughly 82 per row). Before the uniform `optimizer_plan_depth_limit` check,
+# enough rows crashed environmentd with a stack overflow in `Fixpoint`'s
+# per-iteration plan clone (observed with 120 rows). Now the plan depth is
+# checked at optimizer entry and after every transform application, so the
+# too-deep plan fails with a graceful "query is too complex" error instead.
+#
+# NOTE: These queries spend a few seconds each in the optimizer (the plans are
+# large, and some transforms are quadratic in plan size). Do not grow the row
+# counts without checking the runtime.
+
+# 40 rows: the plan exceeds the depth limit (2048) during optimization.
+query error db error: ERROR: query is too complex
+VALUES
+  (format_type('bool'::regtype,-1)),
+  (format_type('bool'::regtype,-1)),
+  (format_type('bool'::regtype,-1)),
+  (format_type('bool'::regtype,-1)),
+  (format_type('bool'::regtype,-1)),
+  (format_type('bool'::regtype,-1)),
+  (format_type('bool'::regtype,-1)),
+  (format_type('bool'::regtype,-1)),
+  (format_type('bool'::regtype,-1)),
+  (format_type('bool'::regtype,-1)),
+  (format_type('bool'::regtype,-1)),
+  (format_type('bool'::regtype,-1)),
+  (format_type('bool'::regtype,-1)),
+  (format_type('bool'::regtype,-1)),
+  (format_type('bool'::regtype,-1)),
+  (format_type('bool'::regtype,-1)),
+  (format_type('bool'::regtype,-1)),
+  (format_type('bool'::regtype,-1)),
+  (format_type('bool'::regtype,-1)),
+  (format_type('bool'::regtype,-1)),
+  (format_type('bool'::regtype,-1)),
+  (format_type('bool'::regtype,-1)),
+  (format_type('bool'::regtype,-1)),
+  (format_type('bool'::regtype,-1)),
+  (format_type('bool'::regtype,-1)),
+  (format_type('bool'::regtype,-1)),
+  (format_type('bool'::regtype,-1)),
+  (format_type('bool'::regtype,-1)),
+  (format_type('bool'::regtype,-1)),
+  (format_type('bool'::regtype,-1)),
+  (format_type('bool'::regtype,-1)),
+  (format_type('bool'::regtype,-1)),
+  (format_type('bool'::regtype,-1)),
+  (format_type('bool'::regtype,-1)),
+  (format_type('bool'::regtype,-1)),
+  (format_type('bool'::regtype,-1)),
+  (format_type('bool'::regtype,-1)),
+  (format_type('bool'::regtype,-1)),
+  (format_type('bool'::regtype,-1)),
+  (format_type('bool'::regtype,-1));
+
+# 20 rows: the plan stays under the depth limit and must succeed.
+query T
+VALUES
+  (format_type('bool'::regtype,-1)),
+  (format_type('bool'::regtype,-1)),
+  (format_type('bool'::regtype,-1)),
+  (format_type('bool'::regtype,-1)),
+  (format_type('bool'::regtype,-1)),
+  (format_type('bool'::regtype,-1)),
+  (format_type('bool'::regtype,-1)),
+  (format_type('bool'::regtype,-1)),
+  (format_type('bool'::regtype,-1)),
+  (format_type('bool'::regtype,-1)),
+  (format_type('bool'::regtype,-1)),
+  (format_type('bool'::regtype,-1)),
+  (format_type('bool'::regtype,-1)),
+  (format_type('bool'::regtype,-1)),
+  (format_type('bool'::regtype,-1)),
+  (format_type('bool'::regtype,-1)),
+  (format_type('bool'::regtype,-1)),
+  (format_type('bool'::regtype,-1)),
+  (format_type('bool'::regtype,-1)),
+  (format_type('bool'::regtype,-1))
+----
+boolean
+boolean
+boolean
+boolean
+boolean
+boolean
+boolean
+boolean
+boolean
+boolean
+boolean
+boolean
+boolean
+boolean
+boolean
+boolean
+boolean
+boolean
+boolean
+boolean

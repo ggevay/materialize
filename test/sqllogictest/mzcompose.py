@@ -683,6 +683,9 @@ def compileFastSltConfig() -> SltRunConfig:
         "test/sqllogictest/record.slt",
         "test/sqllogictest/recursion_limit.slt",
         "test/sqllogictest/recursive_type_unioning.slt",
+        # Optimizer-heavy deep-plan queries. Wrapping them in indexed views
+        # would double the multi-second optimization time for no extra signal.
+        "test/sqllogictest/stack_overflows_transforms.slt",
         "test/sqllogictest/regclass.slt",
         "test/sqllogictest/regproc.slt",
         "test/sqllogictest/regressions.slt",
@@ -997,6 +1000,9 @@ def compileSlowSltConfig() -> SltRunConfig:
         "test/sqllogictest/temporal.slt",
         # The extra statements make it more flaky from timing issues, when expecting a refresh to not yet have happened.
         "test/sqllogictest/materialized_views.slt",
+        # Optimizer-heavy deep-plan queries. Wrapping them in indexed views
+        # would double the multi-second optimization time for no extra signal.
+        "test/sqllogictest/stack_overflows_transforms.slt",
     }
 
     tests = file_util.resolve_paths_with_wildcard(tests)

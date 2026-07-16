@@ -644,6 +644,8 @@ impl TryFrom<ExplainPlanOptionExtracted> for ExplainConfig {
                 enable_coalesce_case_transform: Default::default(),
                 enable_will_distinct_propagation: Default::default(),
                 enable_fixed_correlated_cte_lowering: v.enable_fixed_correlated_cte_lowering,
+                optimizer_plan_depth_limit: Default::default(),
+                optimizer_scalar_expr_depth_limit: Default::default(),
             },
         })
     }
