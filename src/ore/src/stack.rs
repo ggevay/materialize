@@ -18,11 +18,16 @@
 #[cfg(feature = "tracing")]
 use std::backtrace::Backtrace;
 use std::cell::RefCell;
+use std::cmp::Ordering as CmpOrdering;
 use std::error::Error;
 use std::fmt;
+use std::hash::{Hash, Hasher};
+use std::mem::ManuallyDrop;
+use std::ops::{Deref, DerefMut};
 #[cfg(feature = "tracing")]
 use std::sync::atomic::{AtomicU64, Ordering};
 
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 #[cfg(feature = "tracing")]
 use tracing::error;
 
@@ -316,3 +321,322 @@ impl fmt::Display for RecursionLimitError {
 }
 
 impl Error for RecursionLimitError {}
+
+/// A drop-in replacement for `Box<T>` whose derivable trait implementations
+/// are stack-safe.
+///
+/// Recursive tree types such as IR expressions must use `CheckedBox` (and
+/// [`CheckedVec`]) instead of plain `Box`/`Vec` for their recursive fields.
+/// The derived implementations of `Clone`, `PartialEq`, `Hash`, `Debug`,
+/// `Serialize`, `Deserialize`, and the compiler-generated drop glue recurse
+/// over the tree, and on a deep tree a plain `Box` or `Vec` edge overflows
+/// the stack. `CheckedBox` delegates each of these operations to the wrapped
+/// value inside [`maybe_grow`], so every recursion level crossing a
+/// `CheckedBox` edge gets a stack-space check. A recursive field declared as
+/// a plain `Box` or `Vec` silently reopens the overflow hole, so deep-tree
+/// types should carry a regression test that exercises these operations on a
+/// deep instance.
+///
+/// The wrapper behaves exactly like `Box<T>` for equality, ordering,
+/// hashing, debug formatting, and serde serialization, so switching a field
+/// between `Box<T>` and `CheckedBox<T>` never changes observable behavior,
+/// only stack usage.
+#[repr(transparent)]
+pub struct CheckedBox<T>(ManuallyDrop<Box<T>>);
+
+impl<T> CheckedBox<T> {
+    /// Allocates a new `CheckedBox` holding `value`.
+    pub fn new(value: T) -> Self {
+        CheckedBox(ManuallyDrop::new(Box::new(value)))
+    }
+
+    /// Returns the wrapped value, consuming the box.
+    pub fn into_inner(self) -> T {
+        *self.into_box()
+    }
+
+    /// Returns the wrapped allocation as a plain `Box`.
+    ///
+    /// The caller becomes responsible for stack-safe teardown of the result.
+    pub fn into_box(self) -> Box<T> {
+        // Disarm our Drop impl, then move the box out. The inner value is
+        // taken exactly once because `this` is never dropped.
+        let mut this = ManuallyDrop::new(self);
+        unsafe { ManuallyDrop::take(&mut this.0) }
+    }
+}
+
+impl<T> From<T> for CheckedBox<T> {
+    fn from(value: T) -> Self {
+        CheckedBox::new(value)
+    }
+}
+
+impl<T> From<Box<T>> for CheckedBox<T> {
+    fn from(boxed: Box<T>) -> Self {
+        CheckedBox(ManuallyDrop::new(boxed))
+    }
+}
+
+impl<T> AsRef<T> for CheckedBox<T> {
+    fn as_ref(&self) -> &T {
+        self
+    }
+}
+
+impl<T> AsMut<T> for CheckedBox<T> {
+    fn as_mut(&mut self) -> &mut T {
+        self
+    }
+}
+
+impl<T> Deref for CheckedBox<T> {
+    type Target = T;
+
+    fn deref(&self) -> &T {
+        &self.0
+    }
+}
+
+impl<T> DerefMut for CheckedBox<T> {
+    fn deref_mut(&mut self) -> &mut T {
+        &mut self.0
+    }
+}
+
+impl<T: Default> Default for CheckedBox<T> {
+    fn default() -> Self {
+        CheckedBox::new(T::default())
+    }
+}
+
+/// A drop-in replacement for `Vec<T>` whose derivable trait implementations
+/// are stack-safe.
+///
+/// The companion of [`CheckedBox`] for recursive fields that hold a sequence
+/// of children. See the `CheckedBox` documentation for the convention that
+/// recursive fields of deep-tree types must use these wrappers.
+///
+/// Elements are stored inline in the wrapped `Vec`, so there is no
+/// per-element indirection or allocation, and the memory layout matches a
+/// plain `Vec<T>`. The stack-safety guard wraps each whole per-element
+/// operation loop once. This suffices as long as every recursion cycle in
+/// the wrapped type crosses at least one `CheckedBox` or `CheckedVec` edge,
+/// and the bounded number of unguarded hops between two guarded edges fits
+/// in the [`STACK_RED_ZONE`].
+///
+/// `Deref`/`DerefMut` to `Vec<T>` hands back the entire `Vec` API, and the
+/// wrapper behaves exactly like `Vec<T>` for equality, ordering, hashing,
+/// debug formatting, and serde serialization.
+#[repr(transparent)]
+pub struct CheckedVec<T>(ManuallyDrop<Vec<T>>);
+
+impl<T> CheckedVec<T> {
+    /// Creates a new empty `CheckedVec`.
+    pub fn new() -> Self {
+        CheckedVec(ManuallyDrop::new(Vec::new()))
+    }
+
+    /// Returns the wrapped `Vec`, consuming the wrapper.
+    ///
+    /// The caller becomes responsible for stack-safe teardown of the result.
+    pub fn into_inner(self) -> Vec<T> {
+        // Disarm our Drop impl, then move the vec out. The inner value is
+        // taken exactly once because `this` is never dropped.
+        let mut this = ManuallyDrop::new(self);
+        unsafe { ManuallyDrop::take(&mut this.0) }
+    }
+}
+
+impl<T> From<Vec<T>> for CheckedVec<T> {
+    fn from(vec: Vec<T>) -> Self {
+        CheckedVec(ManuallyDrop::new(vec))
+    }
+}
+
+impl<T> FromIterator<T> for CheckedVec<T> {
+    fn from_iter<I: IntoIterator<Item = T>>(iter: I) -> Self {
+        Self::from(Vec::from_iter(iter))
+    }
+}
+
+impl<T> IntoIterator for CheckedVec<T> {
+    type Item = T;
+    type IntoIter = std::vec::IntoIter<T>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.into_inner().into_iter()
+    }
+}
+
+impl<'a, T> IntoIterator for &'a CheckedVec<T> {
+    type Item = &'a T;
+    type IntoIter = std::slice::Iter<'a, T>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter()
+    }
+}
+
+impl<'a, T> IntoIterator for &'a mut CheckedVec<T> {
+    type Item = &'a mut T;
+    type IntoIter = std::slice::IterMut<'a, T>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter_mut()
+    }
+}
+
+impl<T> Extend<T> for CheckedVec<T> {
+    fn extend<I: IntoIterator<Item = T>>(&mut self, iter: I) {
+        (**self).extend(iter)
+    }
+}
+
+impl<T> Deref for CheckedVec<T> {
+    type Target = Vec<T>;
+
+    fn deref(&self) -> &Vec<T> {
+        &self.0
+    }
+}
+
+impl<T> DerefMut for CheckedVec<T> {
+    fn deref_mut(&mut self) -> &mut Vec<T> {
+        &mut self.0
+    }
+}
+
+impl<T> Default for CheckedVec<T> {
+    fn default() -> Self {
+        CheckedVec::new()
+    }
+}
+
+/// Generates the stack-safe trait implementations shared by [`CheckedBox`]
+/// and [`CheckedVec`].
+///
+/// Every generated impl delegates the operation to the wrapped value (the
+/// wrapper's `Deref` target) inside [`maybe_grow`]. Generating both sets
+/// from one list keeps the safety-critical set of guarded operations in
+/// sync between the two wrappers.
+macro_rules! checked_impls {
+    ($wrapper:ident, $target:ty) => {
+        impl<T> Clone for $wrapper<T>
+        where
+            $target: Clone,
+        {
+            fn clone(&self) -> Self {
+                maybe_grow(|| Self::from((**self).clone()))
+            }
+        }
+
+        impl<T> PartialEq for $wrapper<T>
+        where
+            $target: PartialEq,
+        {
+            fn eq(&self, other: &Self) -> bool {
+                maybe_grow(|| **self == **other)
+            }
+        }
+
+        impl<T> Eq for $wrapper<T> where $target: Eq {}
+
+        impl<T> PartialOrd for $wrapper<T>
+        where
+            $target: PartialOrd,
+        {
+            fn partial_cmp(&self, other: &Self) -> Option<CmpOrdering> {
+                maybe_grow(|| (**self).partial_cmp(other))
+            }
+        }
+
+        impl<T> Ord for $wrapper<T>
+        where
+            $target: Ord,
+        {
+            fn cmp(&self, other: &Self) -> CmpOrdering {
+                maybe_grow(|| (**self).cmp(other))
+            }
+        }
+
+        impl<T> Hash for $wrapper<T>
+        where
+            $target: Hash,
+        {
+            fn hash<H: Hasher>(&self, state: &mut H) {
+                maybe_grow(|| (**self).hash(state))
+            }
+        }
+
+        impl<T> fmt::Debug for $wrapper<T>
+        where
+            $target: fmt::Debug,
+        {
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                maybe_grow(|| (**self).fmt(f))
+            }
+        }
+
+        // NOTE: the CheckedVec instantiation of this impl is inert, because
+        // Vec<T> never implements Display. It is generated anyway to keep
+        // the guarded operation list identical for both wrappers.
+        impl<T> fmt::Display for $wrapper<T>
+        where
+            $target: fmt::Display,
+        {
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                maybe_grow(|| (**self).fmt(f))
+            }
+        }
+
+        impl<T> Serialize for $wrapper<T>
+        where
+            $target: Serialize,
+        {
+            fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+                maybe_grow(|| (**self).serialize(serializer))
+            }
+        }
+
+        impl<'de, T> Deserialize<'de> for $wrapper<T>
+        where
+            $target: Deserialize<'de>,
+        {
+            fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+                maybe_grow(|| <$target>::deserialize(deserializer).map(Self::from))
+            }
+        }
+
+        impl<T> Drop for $wrapper<T> {
+            fn drop(&mut self) {
+                // ManuallyDrop lets us run the inner teardown inside
+                // maybe_grow. Plain drop glue would recurse before we get a
+                // chance to check the remaining stack space.
+                maybe_grow(|| unsafe { ManuallyDrop::drop(&mut self.0) })
+            }
+        }
+    };
+}
+
+checked_impls!(CheckedBox, T);
+checked_impls!(CheckedVec, Vec<T>);
+
+/// Test support: runs `f` on a freshly spawned thread with a stack of
+/// `stack_bytes` bytes and returns the result of joining it, so a panic in
+/// `f` is propagated to the caller as an `Err`.
+///
+/// Deep-tree regression tests use this to prove that an operation is
+/// stack-safe: the operation must complete on a stack much smaller than the
+/// tree is deep.
+pub fn run_on_small_stack<F>(stack_bytes: usize, f: F) -> std::thread::Result<()>
+where
+    F: FnOnce() + Send + 'static,
+{
+    std::thread::Builder::new()
+        .name("small-stack".into())
+        .stack_size(stack_bytes)
+        .spawn(f)
+        .expect("thread spawns")
+        .join()
+}
