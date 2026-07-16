@@ -203,15 +203,29 @@ impl<'a> TransformCtx<'a> {
     /// Returns the hash.
     fn update_last_hash(&mut self, plan: &MirRelationExpr) -> u64 {
         let hash = plan.hash_to_u64();
+        self.record_last_hash(hash);
+        hash
+    }
+
+    /// Records the given hash as the last hash of the plan of `self.global_id`.
+    fn record_last_hash(&mut self, hash: u64) {
         if let Some(id) = self.global_id {
             self.last_hash.insert(id, hash);
         }
-        hash
+    }
+
+    /// Whether the scalar expression depth of plans needs to be measured for
+    /// [`Self::enforce_plan_depth_limits`]. Callers of the fused hash-and-depth walk use
+    /// this to skip the scalar measurement (the costly part of the walk) when the scalar
+    /// limit is disabled.
+    fn measure_scalar_depth(&self) -> bool {
+        self.features.optimizer_scalar_expr_depth_limit != 0
     }
 
     /// Enforces `features.optimizer_plan_depth_limit` on the relation nesting depth and
     /// `features.optimizer_scalar_expr_depth_limit` on the scalar expression nesting
-    /// depth of the given plan.
+    /// depth of a plan, given the depths that the caller obtains from the fused
+    /// hash-and-depth walk ([`MirRelationExpr::hash_and_depths_to_u64`]).
     ///
     /// Returns a [`TransformError::RecursionLimit`] error (surfaced to users as "query is
     /// too complex") if either depth exceeds its limit. A limit of 0 disables that
@@ -227,18 +241,11 @@ impl<'a> TransformCtx<'a> {
     /// reasonable plan.
     fn enforce_plan_depth_limits(
         &self,
-        relation: &MirRelationExpr,
+        depths: mz_expr::PlanDepths,
         context: &str,
     ) -> Result<(), TransformError> {
         let relation_limit = self.features.optimizer_plan_depth_limit;
         let scalar_limit = self.features.optimizer_scalar_expr_depth_limit;
-        if relation_limit == 0 && scalar_limit == 0 {
-            return Ok(());
-        }
-        // TODO: This walk visits the whole plan once per transform application. Fuse it
-        // into the (then iterative) hashing walk in `Transform::transform` to avoid the
-        // extra pass.
-        let depths = relation.depths();
         let tripped_limit = if relation_limit != 0 && depths.relation_depth > relation_limit {
             tracing::info!(
                 context,
@@ -292,12 +299,16 @@ pub trait Transform: fmt::Debug {
             metrics.observe_transform_time(self.name(), duration);
         }
 
-        // On failure (of the transform or of the depth check), return without hashing
-        // the plan: the hash walk is what the depth limit protects.
+        // On failure, return without hashing the plan: the hash walk is what the depth
+        // limit protects.
         res?;
-        args.enforce_plan_depth_limits(relation, self.name())?;
 
-        let hash_after = args.update_last_hash(relation);
+        // One fused iterative walk computes both the new plan hash and the depths for
+        // the limit checks.
+        let (hash_after, depths) = relation.hash_and_depths_to_u64(args.measure_scalar_depth());
+        args.enforce_plan_depth_limits(depths, self.name())?;
+        args.record_last_hash(hash_after);
+
         if let Some(metrics) = &mut args.metrics {
             metrics.inc_transform(hash_before != hash_after, self.name());
         }
@@ -1107,13 +1118,13 @@ impl Optimizer {
         relation: &mut MirRelationExpr,
         args: &mut TransformCtx,
     ) -> Result<(), TransformError> {
-        // Enforce the plan depth limit on the incoming plan, before the hashing below
-        // and the transforms recurse over it. Plans this deep can arrive here from
-        // lowering, whose own recursion limit counts HIR nodes, while e.g. `Let` chains
-        // make the corresponding MIR tree deeper.
-        args.enforce_plan_depth_limits(relation, self.name)?;
-
-        args.update_last_hash(relation);
+        // Enforce the plan depth limit on the incoming plan, before the transforms
+        // recurse over it. Plans this deep can arrive here from lowering, whose own
+        // recursion limit counts HIR nodes, while e.g. `Let` chains make the
+        // corresponding MIR tree deeper. The depths come for free with the hash walk.
+        let (hash, depths) = relation.hash_and_depths_to_u64(args.measure_scalar_depth());
+        args.enforce_plan_depth_limits(depths, self.name)?;
+        args.record_last_hash(hash);
 
         for transform in self.transforms.iter() {
             transform.transform(relation, args)?;
@@ -1138,7 +1149,7 @@ pub(crate) mod deep_plan_test_support {
             .spawn(f)
             .expect("thread spawns")
             .join()
-            .expect("no crash")
+            .expect("no crash");
     }
 
     /// A chain of `depth` nodes produced by `wrap`, over a single-row boolean constant.

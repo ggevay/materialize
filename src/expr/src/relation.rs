@@ -85,13 +85,11 @@ pub trait CollectionPlan {
 /// The AST is meant to reflect the capabilities of the `differential_dataflow::Collection` type,
 /// written generically enough to avoid run-time compilation work.
 ///
-/// `derived_hash_with_manual_eq` was complaining for the wrong reason: This lint exists because
-/// it's bad when `Eq` doesn't agree with `Hash`, which is often quite likely if one of them is
-/// implemented manually. However, our manual implementation of `Eq` _will_ agree with the derived
-/// one. This is because the reason for the manual implementation is not to change the semantics
-/// from the derived one, but to avoid stack overflows.
-#[allow(clippy::derived_hash_with_manual_eq)]
-#[derive(Clone, Debug, Ord, PartialOrd, Serialize, Deserialize, MzReflect, Hash)]
+/// There is deliberately no `Hash` implementation: nothing needs one (the guarded
+/// `CheckedBox`/`CheckedVec` fields would make a derived one stack-safe). The canonical
+/// plan hash is [`MirRelationExpr::hash_to_u64`], an iterative walk that can also
+/// measure the plan's nesting depths in the same pass.
+#[derive(Clone, Debug, Ord, PartialOrd, Serialize, Deserialize, MzReflect)]
 pub enum MirRelationExpr {
     /// A constant relation containing specified rows.
     ///
@@ -318,6 +316,7 @@ impl PartialEq for MirRelationExpr {
     }
 }
 impl Eq for MirRelationExpr {}
+
 
 impl MirRelationExpr {
     /// Reports the schema of the relation.
@@ -1951,38 +1950,6 @@ impl MirRelationExpr {
         }
     }
 
-    /// Computes the maximum nesting depth of this relation expression tree, and the
-    /// maximum nesting depth of the scalar expressions it contains.
-    ///
-    /// The relation depth counts `MirRelationExpr` nodes along a root-to-leaf path, so a
-    /// single node has depth 1. The scalar depth similarly counts `MirScalarExpr` nodes
-    /// within each scalar expression directly owned by any node of the tree; a plan
-    /// without scalar expressions has scalar depth 0.
-    ///
-    /// The walk is iterative, so it is safe to call on plans of any depth.
-    pub fn depths(&self) -> PlanDepths {
-        let mut relation_depth = 0;
-        let mut scalar_depth = 0;
-        let mut todo = vec![(self, 1)];
-        while let Some((expr, depth)) = todo.pop() {
-            relation_depth = max(relation_depth, depth);
-            expr.try_visit_scalars_1(&mut |s| {
-                let mut scalar_todo = vec![(s, 1)];
-                while let Some((s, depth)) = scalar_todo.pop() {
-                    scalar_depth = max(scalar_depth, depth);
-                    scalar_todo.extend(s.children().map(|c| (c, depth + 1)));
-                }
-                Ok::<_, RecursionLimitError>(())
-            })
-            .expect("infallible");
-            todo.extend(expr.children().map(|c| (c, depth + 1)));
-        }
-        PlanDepths {
-            relation_depth,
-            scalar_depth,
-        }
-    }
-
     /// Computes the size (total number of nodes) and maximum depth of a MirRelationExpr for
     /// debug printing purposes.
     pub fn debug_size_and_depth(&self) -> (usize, usize) {
@@ -2032,13 +1999,162 @@ impl MirRelationExpr {
     /// Hash to an u64 using Rust's default Hasher. (Which is a somewhat slower, but better Hasher
     /// than what `Hashable::hashed` would give us.)
     pub fn hash_to_u64(&self) -> u64 {
+        self.hash_and_depths_to_u64(false).0
+    }
+
+    /// Like [`Self::hash_to_u64`], but additionally computes the plan's nesting depths
+    /// (see [`PlanDepths`]) in the same walk.
+    ///
+    /// The scalar depth measurement costs an extra walk over every scalar expression, so
+    /// callers that don't need it pass `measure_scalar_depth: false` (`scalar_depth` is
+    /// then reported as 0).
+    ///
+    /// The walk over the relation tree is iterative, so it is safe to call on plans of
+    /// any relation depth. (The scalar expressions of each node are still hashed with the
+    /// derived recursive `Hash`, from a near-empty stack.)
+    ///
+    /// The hash is process-local (it is never persisted), so its exact algorithm may
+    /// change freely. Equal plans hash equal: the fed node content is exactly the content
+    /// that `PartialEq` compares, and feeding each node's depth along with its content
+    /// makes the tree shape unambiguous (a DFS sequence of nodes annotated with their
+    /// depths uniquely determines the tree).
+    pub fn hash_and_depths_to_u64(&self, measure_scalar_depth: bool) -> (u64, PlanDepths) {
         let mut h = DefaultHasher::new();
-        self.hash(&mut h);
-        h.finish()
+        let mut relation_depth = 0;
+        let mut scalar_depth = 0;
+        let mut todo = vec![(self, 1)];
+        while let Some((expr, depth)) = todo.pop() {
+            relation_depth = max(relation_depth, depth);
+            depth.hash(&mut h);
+            expr.hash_local(&mut h);
+            if measure_scalar_depth {
+                expr.try_visit_scalars_1(&mut |s| {
+                    scalar_depth = max(scalar_depth, s.depth());
+                    Ok::<_, RecursionLimitError>(())
+                })
+                .expect("infallible");
+            }
+            todo.extend(expr.children().map(|c| (c, depth + 1)));
+        }
+        (
+            h.finish(),
+            PlanDepths {
+                relation_depth,
+                scalar_depth,
+            },
+        )
+    }
+
+    /// Hashes this node's discriminant and all its fields except the child
+    /// `MirRelationExpr`s.
+    ///
+    /// Must stay in sync with the `MirRelationExpr` field list (the exhaustive
+    /// destructuring below enforces this at compile time) and with what `PartialEq`
+    /// compares, so that equal plans produce equal [`Self::hash_and_depths_to_u64`]
+    /// hashes.
+    fn hash_local<H: Hasher>(&self, state: &mut H) {
+        use MirRelationExpr::*;
+        std::mem::discriminant(self).hash(state);
+        match self {
+            Constant { rows, typ } => {
+                rows.hash(state);
+                typ.hash(state);
+            }
+            Get {
+                id,
+                typ,
+                access_strategy,
+            } => {
+                id.hash(state);
+                typ.hash(state);
+                access_strategy.hash(state);
+            }
+            Let {
+                id,
+                value: _,
+                body: _,
+            } => {
+                id.hash(state);
+            }
+            LetRec {
+                ids,
+                values: _,
+                limits,
+                body: _,
+            } => {
+                ids.hash(state);
+                limits.hash(state);
+            }
+            Project { input: _, outputs } => {
+                outputs.hash(state);
+            }
+            Map { input: _, scalars } => {
+                scalars.hash(state);
+            }
+            FlatMap {
+                input: _,
+                func,
+                exprs,
+            } => {
+                func.hash(state);
+                exprs.hash(state);
+            }
+            Filter {
+                input: _,
+                predicates,
+            } => {
+                predicates.hash(state);
+            }
+            Join {
+                inputs,
+                equivalences,
+                implementation,
+            } => {
+                inputs.len().hash(state);
+                equivalences.hash(state);
+                implementation.hash(state);
+            }
+            Reduce {
+                input: _,
+                group_key,
+                aggregates,
+                monotonic,
+                expected_group_size,
+            } => {
+                group_key.hash(state);
+                aggregates.hash(state);
+                monotonic.hash(state);
+                expected_group_size.hash(state);
+            }
+            TopK {
+                input: _,
+                group_key,
+                order_key,
+                limit,
+                offset,
+                monotonic,
+                expected_group_size,
+            } => {
+                group_key.hash(state);
+                order_key.hash(state);
+                limit.hash(state);
+                offset.hash(state);
+                monotonic.hash(state);
+                expected_group_size.hash(state);
+            }
+            Negate { input: _ } | Threshold { input: _ } => {}
+            Union { base: _, inputs } => {
+                inputs.len().hash(state);
+            }
+            ArrangeBy { input: _, keys } => {
+                keys.hash(state);
+            }
+        }
     }
 }
 
-/// Maximum nesting depths of a plan, as computed by [`MirRelationExpr::depths`].
+/// Maximum nesting depths of a plan, as computed by
+/// [`MirRelationExpr::hash_and_depths_to_u64`].
 #[derive(Clone, Copy, Debug)]
 pub struct PlanDepths {
     /// The maximum number of `MirRelationExpr` nodes along a root-to-leaf path.
@@ -4160,6 +4276,106 @@ mod tests {
     use crate::explain::HumanizedExplain;
 
     use super::*;
+
+    /// A plan exercising several variants, for the clone/hash/depth tests below.
+    fn sample_plan() -> MirRelationExpr {
+        let typ = ReprRelationType::new(vec![ReprColumnType {
+            scalar_type: ReprScalarType::Int64,
+            nullable: false,
+        }]);
+        let base = MirRelationExpr::constant(vec![vec![Datum::Int64(1)]], typ.clone());
+        let filtered = base
+            .clone()
+            .filter(vec![MirScalarExpr::column(0).call_is_null().not()]);
+        MirRelationExpr::Let {
+            id: LocalId::new(0),
+            value: CheckedBox::new(filtered),
+            body: CheckedBox::new(
+                MirRelationExpr::Get {
+                    id: Id::Local(LocalId::new(0)),
+                    typ,
+                    access_strategy: AccessStrategy::UnknownOrLocal,
+                }
+                .map(vec![MirScalarExpr::column(0)])
+                .union(base.negate())
+                .threshold()
+                .project(vec![0]),
+            ),
+        }
+    }
+
+    /// The manual (iterative) `Clone` must agree with structural equality.
+    #[mz_ore::test]
+    fn clone_roundtrips() {
+        let plan = sample_plan();
+        assert_eq!(plan.clone(), plan);
+    }
+
+    /// Equal plans must produce equal hashes, and structurally different plans should
+    /// (with overwhelming probability) produce different hashes and correct depths.
+    #[mz_ore::test]
+    fn hash_and_depths() {
+        let plan = sample_plan();
+        let (hash1, depths1) = plan.hash_and_depths_to_u64(true);
+        let (hash2, depths2) = plan.clone().hash_and_depths_to_u64(true);
+        assert_eq!(hash1, hash2);
+        assert_eq!(depths1.relation_depth, depths2.relation_depth);
+        assert_eq!(depths1.scalar_depth, depths2.scalar_depth);
+
+        // Let -> Project -> Threshold -> Union -> Map -> Get.
+        assert_eq!(depths1.relation_depth, 6);
+        // IsNull(#0) wrapped in Not.
+        assert_eq!(depths1.scalar_depth, 3);
+
+        let mutated = sample_plan().project(vec![0]);
+        assert_ne!(hash1, mutated.hash_to_u64());
+    }
+
+    /// Cloning, hashing, and dropping a very deep plan must not overflow the stack.
+    /// Regression test for the stack overflow in `Fixpoint::actually_perform_transform`'s
+    /// per-iteration `relation.clone()` on ~27k-deep plans.
+    #[mz_ore::test]
+    #[cfg_attr(miri, ignore)] // too slow
+    fn deep_plan_clone_and_hash() {
+        std::thread::Builder::new()
+            .stack_size(4 << 20)
+            .spawn(deep_plan_clone_and_hash_inner)
+            .expect("thread spawns")
+            .join()
+            .expect("no crash");
+    }
+
+    fn deep_plan_clone_and_hash_inner() {
+        let typ = ReprRelationType::new(vec![ReprColumnType {
+            scalar_type: ReprScalarType::Bool,
+            nullable: false,
+        }]);
+        // Build iteratively, a recursive builder would overflow the small test stack.
+        let mut plan = MirRelationExpr::constant(vec![vec![Datum::True]], typ);
+        for _ in 0..50_000 {
+            plan = MirRelationExpr::Filter {
+                input: CheckedBox::new(plan),
+                predicates: vec![MirScalarExpr::column(0)],
+            };
+        }
+
+        let mut cloned = plan.clone();
+        assert_eq!(plan.hash_to_u64(), cloned.hash_to_u64());
+        let (_hash, depths) = plan.hash_and_depths_to_u64(true);
+        assert_eq!(depths.relation_depth, 50_001);
+        assert_eq!(depths.scalar_depth, 1);
+        // NB: not `plan == cloned`, because `PartialEq` soft-asserts agreement with the
+        // derived (recursive) `Ord`, which would overflow this small stack.
+        assert!(
+            structured_diff::MreDiff::new(&plan, &cloned)
+                .next()
+                .is_none()
+        );
+
+        // Dismantle iteratively, the derived `Drop` would recurse.
+        plan.destroy_carefully();
+        cloned.destroy_carefully();
+    }
 
     #[mz_ore::test]
     fn test_row_set_finishing_as_text() {

@@ -1397,6 +1397,16 @@ impl VisitChildren<Self> for MirScalarExpr {
 }
 
 impl MirScalarExpr {
+    /// The maximum number of `MirScalarExpr` nodes along a root-to-leaf path, so 1 for a
+    /// single node.
+    ///
+    /// Recursive, but growing the stack as needed, so safe on expressions of any depth.
+    /// Deliberately not worklist-based: this runs once per scalar expression per
+    /// transform application, and the recursion avoids a heap allocation per call.
+    pub fn depth(&self) -> usize {
+        mz_ore::stack::maybe_grow(|| 1 + self.children().map(|c| c.depth()).max().unwrap_or(0))
+    }
+
     /// Iterates through references to child expressions.
     pub fn children(&self) -> impl DoubleEndedIterator<Item = &Self> {
         let mut first = None;
