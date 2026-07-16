@@ -1099,10 +1099,6 @@ impl Optimizer {
                 Ok(mz_expr::OptimizedMirRelationExpr(relation))
             }
             Err(e) => {
-                // Without this, the dropping of `relation` (which happens automatically when
-                // returning from this function) might run into a stack overflow, see
-                // https://github.com/MaterializeInc/database-issues/issues/4043
-                relation.destroy_carefully();
                 error!("Optimizer::optimize(): {}", e);
                 Err(e)
             }

@@ -2146,8 +2146,5 @@ mod tests {
             crate::TransformCtx::local(&features, &typecheck_ctx, &mut df_meta, None, None);
         crate::Transform::transform(&typecheck, &mut relation, &mut transform_ctx)
             .expect("typechecking a deep plan succeeds");
-
-        // Dismantle iteratively, the derived `Drop` would recurse.
-        relation.destroy_carefully();
     }
 }

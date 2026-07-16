@@ -323,9 +323,7 @@ fn list_replacements(
 ) -> Vec<Replacement> {
     // This function recurses per tree level (down Project/Reduce/ArrangeBy chains), so
     // grow the stack as needed instead of overflowing on deep plans.
-    mz_ore::stack::maybe_grow(|| {
-        list_replacements_inner(expr, let_replacements, gets_behind_gets)
-    })
+    mz_ore::stack::maybe_grow(|| list_replacements_inner(expr, let_replacements, gets_behind_gets))
 }
 
 /// The body of [`list_replacements`]. Must only be called through it, which ensures

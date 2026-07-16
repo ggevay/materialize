@@ -317,7 +317,6 @@ impl PartialEq for MirRelationExpr {
 }
 impl Eq for MirRelationExpr {}
 
-
 impl MirRelationExpr {
     /// Reports the schema of the relation.
     ///
@@ -1931,23 +1930,6 @@ impl MirRelationExpr {
             Ok::<_, RecursionLimitError>(())
         })
         .expect("Unexpected error in `visit_scalars` call");
-    }
-
-    /// Eagerly and iteratively dismantles `self`.
-    ///
-    /// This predates the guarded `Drop` of the recursive `CheckedBox`/`CheckedVec` fields and is
-    /// no longer needed for stack safety, since plainly dropping a deep `MirRelationExpr` is safe.
-    /// It is kept for callers that want an eager iterative teardown.
-    ///
-    /// Leaves `self` in an unusable state, so this should only be used if `self` is about to be
-    /// dropped or otherwise overwritten.
-    pub fn destroy_carefully(&mut self) {
-        let mut todo = vec![self.take_dangerous()];
-        while let Some(mut expr) = todo.pop() {
-            for child in expr.children_mut() {
-                todo.push(child.take_dangerous());
-            }
-        }
     }
 
     /// Computes the size (total number of nodes) and maximum depth of a MirRelationExpr for
@@ -4359,22 +4341,14 @@ mod tests {
             };
         }
 
-        let mut cloned = plan.clone();
+        let cloned = plan.clone();
         assert_eq!(plan.hash_to_u64(), cloned.hash_to_u64());
         let (_hash, depths) = plan.hash_and_depths_to_u64(true);
         assert_eq!(depths.relation_depth, 50_001);
         assert_eq!(depths.scalar_depth, 1);
-        // NB: not `plan == cloned`, because `PartialEq` soft-asserts agreement with the
-        // derived (recursive) `Ord`, which would overflow this small stack.
-        assert!(
-            structured_diff::MreDiff::new(&plan, &cloned)
-                .next()
-                .is_none()
-        );
-
-        // Dismantle iteratively, the derived `Drop` would recurse.
-        plan.destroy_carefully();
-        cloned.destroy_carefully();
+        // The comparison (including the guarded `Ord` walk in `PartialEq`'s soft
+        // assertion) and the implicit drops of both plans must also fit the small stack.
+        assert!(plan == cloned, "clone differs from the original");
     }
 
     #[mz_ore::test]

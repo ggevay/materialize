@@ -863,8 +863,5 @@ mod tests {
             &mut get_equivalences,
             &mut ctx,
         );
-
-        // Dismantle iteratively, the derived `Drop` would recurse.
-        expr.destroy_carefully();
     }
 }

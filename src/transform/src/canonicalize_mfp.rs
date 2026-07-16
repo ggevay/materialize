@@ -122,8 +122,5 @@ mod tests {
         CanonicalizeMfp
             .action(&mut expr)
             .expect("action must succeed");
-
-        // Dismantle iteratively, the derived `Drop` would recurse.
-        expr.destroy_carefully();
     }
 }
