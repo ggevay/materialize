@@ -98,7 +98,7 @@ use mz_expr::{
     RECURSION_LIMIT, VariadicFunc, func,
 };
 use mz_ore::soft_assert_eq_no_log;
-use mz_ore::stack::{CheckedRecursion, RecursionGuard};
+use mz_ore::stack::{CheckedBox, CheckedRecursion, RecursionGuard};
 use mz_repr::{Datum, ReprColumnType, ReprScalarType};
 
 use crate::{TransformCtx, TransformError};
@@ -249,14 +249,14 @@ impl PredicatePushdown {
                                         // information.
                                         if expr1.typ(&input_type.column_types).nullable {
                                             pred_not_translated.push(
-                                                expr1
+                                                (**expr1)
                                                     .clone()
                                                     .call_unary(UnaryFunc::IsNull(func::IsNull))
                                                     .call_unary(UnaryFunc::Not(func::Not)),
                                             );
                                         } else if expr2.typ(&input_type.column_types).nullable {
                                             pred_not_translated.push(
-                                                expr2
+                                                (**expr2)
                                                     .clone()
                                                     .call_unary(UnaryFunc::IsNull(func::IsNull))
                                                     .call_unary(UnaryFunc::Not(func::Not)),
@@ -619,13 +619,13 @@ impl PredicatePushdown {
                                     let pred = if constant.is_literal_null() {
                                         MirScalarExpr::CallUnary {
                                             func: mz_expr::UnaryFunc::IsNull(func::IsNull),
-                                            expr: Box::new(expr.clone()),
+                                            expr: CheckedBox::new(expr.clone()),
                                         }
                                     } else {
                                         MirScalarExpr::CallBinary {
                                             func: mz_expr::func::Eq.into(),
-                                            expr1: Box::new(expr.clone()),
-                                            expr2: Box::new(constant.clone()),
+                                            expr1: CheckedBox::new(expr.clone()),
+                                            expr2: CheckedBox::new(constant.clone()),
                                         }
                                     };
                                     equality_preds.push(pred);
@@ -742,8 +742,8 @@ impl PredicatePushdown {
                                         push_downs[input].push(
                                             MirScalarExpr::CallBinary {
                                                 func: func::Eq.into(),
-                                                expr1: Box::new(expr2.clone()),
-                                                expr2: Box::new(expr1.clone()),
+                                                expr1: CheckedBox::new(expr2.clone()),
+                                                expr2: CheckedBox::new(expr1.clone()),
                                             }
                                             .or(expr2
                                                 .clone()
@@ -1164,7 +1164,7 @@ impl PredicatePushdown {
             exprs,
         } = s
         {
-            if let &[ref or_lhs, ref or_rhs] = &**exprs {
+            if let [or_lhs, or_rhs] = exprs.as_slice() {
                 // Check both orders of operands of the OR
                 return Self::extract_equal_or_both_null_inner(or_lhs, or_rhs, column_types)
                     .or_else(|| {
@@ -1187,8 +1187,8 @@ impl PredicatePushdown {
             expr2: eq_rhs,
         } = &or_arg2
         {
-            let isnull1 = eq_lhs.clone().call_is_null();
-            let isnull2 = eq_rhs.clone().call_is_null();
+            let isnull1 = (**eq_lhs).clone().call_is_null();
+            let isnull2 = (**eq_rhs).clone().call_is_null();
             let both_null = MirScalarExpr::call_variadic(And, vec![isnull1, isnull2]);
 
             if Self::extract_reduced_conjunction_terms(both_null, column_types)
@@ -1212,7 +1212,7 @@ impl PredicatePushdown {
             exprs,
         } = s
         {
-            exprs
+            exprs.into_inner()
         } else {
             vec![s]
         }

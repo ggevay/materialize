@@ -17,7 +17,7 @@ use mz_lowertest::MzReflect;
 use mz_ore::cast::CastFrom;
 use mz_ore::iter::IteratorExt;
 use mz_ore::soft_assert_or_log;
-use mz_ore::stack::RecursionLimitError;
+use mz_ore::stack::{CheckedBox, CheckedVec, RecursionLimitError};
 use mz_ore::str::StrExt;
 use mz_ore::treat_as_equal::TreatAsEqual;
 use mz_ore::vec::swap_remove_multiple;
@@ -80,18 +80,18 @@ pub enum MirScalarExpr {
     /// A function call that takes one expression as an argument.
     CallUnary {
         func: UnaryFunc,
-        expr: Box<MirScalarExpr>,
+        expr: CheckedBox<MirScalarExpr>,
     },
     /// A function call that takes two expressions as arguments.
     CallBinary {
         func: BinaryFunc,
-        expr1: Box<MirScalarExpr>,
-        expr2: Box<MirScalarExpr>,
+        expr1: CheckedBox<MirScalarExpr>,
+        expr2: CheckedBox<MirScalarExpr>,
     },
     /// A function call that takes an arbitrary number of arguments.
     CallVariadic {
         func: VariadicFunc,
-        exprs: Vec<MirScalarExpr>,
+        exprs: CheckedVec<MirScalarExpr>,
     },
     /// Conditionally evaluated expressions.
     ///
@@ -100,9 +100,9 @@ pub enum MirScalarExpr {
     /// users can guard execution (other logical operator do not
     /// short-circuit) and we need to preserve that.
     If {
-        cond: Box<MirScalarExpr>,
-        then: Box<MirScalarExpr>,
-        els: Box<MirScalarExpr>,
+        cond: CheckedBox<MirScalarExpr>,
+        then: CheckedBox<MirScalarExpr>,
+        els: CheckedBox<MirScalarExpr>,
     },
 }
 
@@ -193,15 +193,15 @@ impl MirScalarExpr {
     pub fn call_unary<U: Into<UnaryFunc>>(self, func: U) -> Self {
         MirScalarExpr::CallUnary {
             func: func.into(),
-            expr: Box::new(self),
+            expr: CheckedBox::new(self),
         }
     }
 
     pub fn call_binary<B: Into<BinaryFunc>>(self, other: Self, func: B) -> Self {
         MirScalarExpr::CallBinary {
             func: func.into(),
-            expr1: Box::new(self),
-            expr2: Box::new(other),
+            expr1: CheckedBox::new(self),
+            expr2: CheckedBox::new(other),
         }
     }
 
@@ -209,15 +209,15 @@ impl MirScalarExpr {
     pub fn call_variadic<V: Into<VariadicFunc>>(func: V, exprs: Vec<Self>) -> Self {
         MirScalarExpr::CallVariadic {
             func: func.into(),
-            exprs,
+            exprs: exprs.into(),
         }
     }
 
     pub fn if_then_else(self, t: Self, f: Self) -> Self {
         MirScalarExpr::If {
-            cond: Box::new(self),
-            then: Box::new(t),
-            els: Box::new(f),
+            cond: CheckedBox::new(self),
+            then: CheckedBox::new(t),
+            els: CheckedBox::new(f),
         }
     }
 
@@ -242,7 +242,7 @@ impl MirScalarExpr {
     pub fn and_or_args(&self, func_to_match: VariadicFunc) -> Vec<MirScalarExpr> {
         assert!(func_to_match == Or.into() || func_to_match == And.into());
         match self {
-            MirScalarExpr::CallVariadic { func, exprs } if *func == func_to_match => exprs.clone(),
+            MirScalarExpr::CallVariadic { func, exprs } if *func == func_to_match => exprs.to_vec(),
             _ => vec![self.clone()],
         }
     }
@@ -382,12 +382,12 @@ impl MirScalarExpr {
                 if func.preserves_uniqueness() && inverse_func.preserves_uniqueness() {
                     let lit_inv = eval(&MirScalarExpr::CallUnary {
                         func: inverse_func,
-                        expr: Box::new(literal.clone()),
+                        expr: CheckedBox::new(literal.clone()),
                     });
                     // The evaluation can error out, e.g., when casting a too large int32 to int16.
                     // This case is handled by `impossible_literal_equality_because_types`.
                     if !lit_inv.is_literal_err() {
-                        return (*inner_expr.clone(), lit_inv);
+                        return ((**inner_expr).clone(), lit_inv);
                     }
                 }
             }
@@ -433,7 +433,7 @@ impl MirScalarExpr {
                 if inverse_func.preserves_uniqueness()
                     && eval(&MirScalarExpr::CallUnary {
                         func: inverse_func,
-                        expr: Box::new(literal.clone()),
+                        expr: CheckedBox::new(literal.clone()),
                     })
                     .is_literal_err()
                 {
@@ -770,7 +770,7 @@ impl MirScalarExpr {
                         } = o
                         {
                             if *inner_func == *outer_func {
-                                mem::take(inner_operands)
+                                mem::take(inner_operands).into_inner()
                             } else {
                                 vec![o.take()]
                             }
@@ -935,12 +935,12 @@ impl MirScalarExpr {
                     if !matches!(o, MirScalarExpr::CallVariadic {func: f, ..} if *f == inner_func) {
                         *o = MirScalarExpr::CallVariadic {
                             func: inner_func.clone(),
-                            exprs: vec![o.take()],
+                            exprs: vec![o.take()].into(),
                         };
                     }
                 });
 
-                let mut inner_operands_refs: Vec<&mut Vec<MirScalarExpr>> = outer_operands
+                let mut inner_operands_refs: Vec<&mut CheckedVec<MirScalarExpr>> = outer_operands
                     .iter_mut()
                     .map(|o| match o {
                         MirScalarExpr::CallVariadic { func: f, exprs } if *f == inner_func => exprs,
@@ -1029,7 +1029,8 @@ impl MirScalarExpr {
                         // then push back the result.
                         let mut undistribute_from = MirScalarExpr::CallVariadic {
                             func: outer_func.clone(),
-                            exprs: swap_remove_multiple(outer_operands, indexes_to_undistribute),
+                            exprs: swap_remove_multiple(outer_operands, indexes_to_undistribute)
+                                .into(),
                         };
                         // By construction, the recursive call is guaranteed to hit
                         // the `!intersection.is_empty()` branch.

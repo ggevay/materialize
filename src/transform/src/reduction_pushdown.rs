@@ -55,6 +55,7 @@ use mz_expr::{AggregateExpr, Columns, JoinInputMapper, MirRelationExpr, MirScala
 
 use crate::TransformCtx;
 use crate::analysis::equivalences::EquivalenceClasses;
+use mz_ore::stack::CheckedBox;
 
 /// Pushes Reduce operators toward sources.
 #[derive(Debug)]
@@ -482,7 +483,7 @@ impl ReduceBuilder {
         expected_group_size: Option<u64>,
     ) -> MirRelationExpr {
         MirRelationExpr::Reduce {
-            input: Box::new(self.input),
+            input: CheckedBox::new(self.input),
             group_key: self.group_key,
             aggregates: self.aggregates,
             monotonic,

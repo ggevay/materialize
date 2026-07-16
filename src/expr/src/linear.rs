@@ -1096,19 +1096,20 @@ impl<E: OptimizableExpr> MapFilterProject<E> {
     ///
     /// ```rust
     /// use mz_expr::{func, MapFilterProject, MirScalarExpr, UnaryFunc, BinaryFunc};
+    /// use mz_ore::stack::CheckedBox;
     /// // Demonstrate extraction of unconditionally evaluated expressions, as well as
     /// // the non-extraction of common expressions guarded by conditions.
     /// let mut map_filter_project = MapFilterProject::new(2)
     ///     .map(vec![
     ///         MirScalarExpr::If {
-    ///             cond: Box::new(MirScalarExpr::column(0).call_binary(MirScalarExpr::column(1), func::Lt)),
-    ///             then: Box::new(MirScalarExpr::column(0).call_binary(MirScalarExpr::column(1), func::DivInt64)),
-    ///             els:  Box::new(MirScalarExpr::column(1).call_binary(MirScalarExpr::column(0), func::DivInt64)),
+    ///             cond: CheckedBox::new(MirScalarExpr::column(0).call_binary(MirScalarExpr::column(1), func::Lt)),
+    ///             then: CheckedBox::new(MirScalarExpr::column(0).call_binary(MirScalarExpr::column(1), func::DivInt64)),
+    ///             els:  CheckedBox::new(MirScalarExpr::column(1).call_binary(MirScalarExpr::column(0), func::DivInt64)),
     ///         },
     ///         MirScalarExpr::If {
-    ///             cond: Box::new(MirScalarExpr::column(0).call_binary(MirScalarExpr::column(1), func::Lt)),
-    ///             then: Box::new(MirScalarExpr::column(1).call_binary(MirScalarExpr::column(0), func::DivInt64)),
-    ///             els:  Box::new(MirScalarExpr::column(0).call_binary(MirScalarExpr::column(1), func::DivInt64)),
+    ///             cond: CheckedBox::new(MirScalarExpr::column(0).call_binary(MirScalarExpr::column(1), func::Lt)),
+    ///             then: CheckedBox::new(MirScalarExpr::column(1).call_binary(MirScalarExpr::column(0), func::DivInt64)),
+    ///             els:  CheckedBox::new(MirScalarExpr::column(0).call_binary(MirScalarExpr::column(1), func::DivInt64)),
     ///         },
     ///     ]);
     ///
@@ -1116,15 +1117,15 @@ impl<E: OptimizableExpr> MapFilterProject<E> {
     ///     .map(vec![
     ///         MirScalarExpr::column(0).call_binary(MirScalarExpr::column(1), func::Lt),
     ///         MirScalarExpr::If {
-    ///             cond: Box::new(MirScalarExpr::column(2)),
-    ///             then: Box::new(MirScalarExpr::column(0).call_binary(MirScalarExpr::column(1), func::DivInt64)),
-    ///             els:  Box::new(MirScalarExpr::column(1).call_binary(MirScalarExpr::column(0), func::DivInt64)),
+    ///             cond: CheckedBox::new(MirScalarExpr::column(2)),
+    ///             then: CheckedBox::new(MirScalarExpr::column(0).call_binary(MirScalarExpr::column(1), func::DivInt64)),
+    ///             els:  CheckedBox::new(MirScalarExpr::column(1).call_binary(MirScalarExpr::column(0), func::DivInt64)),
     ///         },
     ///         MirScalarExpr::column(3),
     ///         MirScalarExpr::If {
-    ///             cond: Box::new(MirScalarExpr::column(2)),
-    ///             then: Box::new(MirScalarExpr::column(1).call_binary(MirScalarExpr::column(0), func::DivInt64)),
-    ///             els:  Box::new(MirScalarExpr::column(0).call_binary(MirScalarExpr::column(1), func::DivInt64)),
+    ///             cond: CheckedBox::new(MirScalarExpr::column(2)),
+    ///             then: CheckedBox::new(MirScalarExpr::column(1).call_binary(MirScalarExpr::column(0), func::DivInt64)),
+    ///             els:  CheckedBox::new(MirScalarExpr::column(0).call_binary(MirScalarExpr::column(1), func::DivInt64)),
     ///         },
     ///         MirScalarExpr::column(5),
     ///     ])

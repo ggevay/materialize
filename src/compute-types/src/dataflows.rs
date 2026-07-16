@@ -15,6 +15,7 @@ use std::fmt;
 use mz_expr::{CollectionPlan, MirRelationExpr, MirScalarExpr, OptimizedMirRelationExpr};
 use mz_ore::collections::CollectionExt;
 use mz_ore::soft_assert_or_log;
+use mz_ore::stack::CheckedBox;
 use mz_repr::refresh_schedule::RefreshSchedule;
 use mz_repr::{GlobalId, ReprRelationType, SqlRelationType, Timestamp};
 use mz_storage_types::time_dependence::TimeDependence;
@@ -188,7 +189,7 @@ impl DataflowDescription<OptimizedMirRelationExpr, ()> {
         self.insert_plan(
             id,
             OptimizedMirRelationExpr::declare_optimized(MirRelationExpr::ArrangeBy {
-                input: Box::new(MirRelationExpr::global_get(
+                input: CheckedBox::new(MirRelationExpr::global_get(
                     description.on_id,
                     on_type.clone(),
                 )),

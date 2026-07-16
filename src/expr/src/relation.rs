@@ -28,7 +28,7 @@ use mz_ore::id_gen::IdGen;
 use mz_ore::metrics::Histogram;
 use mz_ore::num::NonNeg;
 use mz_ore::soft_assert_no_log;
-use mz_ore::stack::RecursionLimitError;
+use mz_ore::stack::{CheckedBox, CheckedVec, RecursionLimitError};
 use mz_ore::str::Indent;
 use mz_repr::adt::numeric::NumericMaxScale;
 use mz_repr::explain::text::text_string_at;
@@ -131,9 +131,9 @@ pub enum MirRelationExpr {
         #[mzreflect(ignore)]
         id: LocalId,
         /// The collection to be bound to `id`.
-        value: Box<MirRelationExpr>,
+        value: CheckedBox<MirRelationExpr>,
         /// The result of the `Let`, evaluated with `id` bound to `value`.
-        body: Box<MirRelationExpr>,
+        body: CheckedBox<MirRelationExpr>,
     },
     /// Introduce mutually recursive bindings.
     ///
@@ -155,7 +155,7 @@ pub enum MirRelationExpr {
         #[mzreflect(ignore)]
         ids: Vec<LocalId>,
         /// The collections to be bound to each `id`.
-        values: Vec<MirRelationExpr>,
+        values: CheckedVec<MirRelationExpr>,
         /// Maximum number of iterations, after which we should artificially force a fixpoint.
         /// (Whether we error or just stop is configured by `LetRecLimit::return_at_limit`.)
         /// The per-`LetRec` limit that the user specified is initially copied to each binding to
@@ -163,14 +163,14 @@ pub enum MirRelationExpr {
         #[mzreflect(ignore)]
         limits: Vec<Option<LetRecLimit>>,
         /// The result of the `Let`, evaluated with `id` bound to `value`.
-        body: Box<MirRelationExpr>,
+        body: CheckedBox<MirRelationExpr>,
     },
     /// Project out some columns from a dataflow
     ///
     /// The runtime memory footprint of this operator is zero.
     Project {
         /// The source collection.
-        input: Box<MirRelationExpr>,
+        input: CheckedBox<MirRelationExpr>,
         /// Indices of columns to retain.
         outputs: Vec<usize>,
     },
@@ -179,7 +179,7 @@ pub enum MirRelationExpr {
     /// The runtime memory footprint of this operator is zero.
     Map {
         /// The source collection.
-        input: Box<MirRelationExpr>,
+        input: CheckedBox<MirRelationExpr>,
         /// Expressions which determine values to append to each row.
         /// An expression may refer to columns in `input` or
         /// expressions defined earlier in the vector
@@ -190,7 +190,7 @@ pub enum MirRelationExpr {
     /// The runtime memory footprint of this operator is zero.
     FlatMap {
         /// The source collection
-        input: Box<MirRelationExpr>,
+        input: CheckedBox<MirRelationExpr>,
         /// The table func to apply
         func: TableFunc,
         /// The argument to the table func
@@ -201,7 +201,7 @@ pub enum MirRelationExpr {
     /// The runtime memory footprint of this operator is zero.
     Filter {
         /// The source collection.
-        input: Box<MirRelationExpr>,
+        input: CheckedBox<MirRelationExpr>,
         /// Predicates, each of which must be true.
         predicates: Vec<MirScalarExpr>,
     },
@@ -214,7 +214,7 @@ pub enum MirRelationExpr {
     /// This may be reduced due to arrangements available at rendering time.
     Join {
         /// A sequence of input relations.
-        inputs: Vec<MirRelationExpr>,
+        inputs: CheckedVec<MirRelationExpr>,
         /// A sequence of equivalence classes of expressions on the cross product of inputs.
         ///
         /// Each equivalence class is a list of scalar expressions, where for each class the
@@ -238,7 +238,7 @@ pub enum MirRelationExpr {
     /// builds the associated dataflow.
     Reduce {
         /// The source collection.
-        input: Box<MirRelationExpr>,
+        input: CheckedBox<MirRelationExpr>,
         /// Column indices used to form groups.
         group_key: Vec<MirScalarExpr>,
         /// Expressions which determine values to append to each row, after the group keys.
@@ -255,7 +255,7 @@ pub enum MirRelationExpr {
     /// The runtime memory footprint of this operator is proportional to its input and output.
     TopK {
         /// The source collection.
-        input: Box<MirRelationExpr>,
+        input: CheckedBox<MirRelationExpr>,
         /// Column indices used to form groups.
         group_key: Vec<usize>,
         /// Column indices used to order rows within groups.
@@ -278,23 +278,23 @@ pub enum MirRelationExpr {
     /// The runtime memory footprint of this operator is zero.
     Negate {
         /// The source collection.
-        input: Box<MirRelationExpr>,
+        input: CheckedBox<MirRelationExpr>,
     },
     /// Keep rows from a dataflow where the row counts are positive
     ///
     /// The runtime memory footprint of this operator is proportional to its input and output.
     Threshold {
         /// The source collection.
-        input: Box<MirRelationExpr>,
+        input: CheckedBox<MirRelationExpr>,
     },
     /// Adds the frequencies of elements in contained sets.
     ///
     /// The runtime memory footprint of this operator is zero.
     Union {
         /// A source collection.
-        base: Box<MirRelationExpr>,
+        base: CheckedBox<MirRelationExpr>,
         /// Source collections to union.
-        inputs: Vec<MirRelationExpr>,
+        inputs: CheckedVec<MirRelationExpr>,
     },
     /// Technically a no-op. Used to render an index. Will be used to optimize queries
     /// on finer grain. Each `keys` item represents a different index that should be
@@ -303,7 +303,7 @@ pub enum MirRelationExpr {
     /// The runtime memory footprint of this operator is proportional to its input.
     ArrangeBy {
         /// The source collection
-        input: Box<MirRelationExpr>,
+        input: CheckedBox<MirRelationExpr>,
         /// Columns to arrange `input` by, in order of decreasing primacy
         keys: Vec<Vec<MirScalarExpr>>,
     },
@@ -1162,7 +1162,7 @@ impl MirRelationExpr {
             self
         } else {
             MirRelationExpr::Project {
-                input: Box::new(self),
+                input: CheckedBox::new(self),
                 outputs,
             }
         }
@@ -1175,7 +1175,7 @@ impl MirRelationExpr {
             self
         } else if !scalars.is_empty() {
             MirRelationExpr::Map {
-                input: Box::new(self),
+                input: CheckedBox::new(self),
                 scalars,
             }
         } else {
@@ -1191,7 +1191,7 @@ impl MirRelationExpr {
     /// Like `map`, but yields zero-or-more output rows per input row
     pub fn flat_map(self, func: TableFunc, exprs: Vec<MirScalarExpr>) -> Self {
         MirRelationExpr::FlatMap {
-            input: Box::new(self),
+            input: CheckedBox::new(self),
             func,
             exprs,
         }
@@ -1204,7 +1204,7 @@ impl MirRelationExpr {
     {
         // Extract existing predicates
         let mut new_predicates = if let MirRelationExpr::Filter { input, predicates } = self {
-            self = *input;
+            self = input.into_inner();
             predicates
         } else {
             Vec::new()
@@ -1217,7 +1217,7 @@ impl MirRelationExpr {
         // Introduce a `Filter` only if we have predicates.
         if !new_predicates.is_empty() {
             self = MirRelationExpr::Filter {
-                input: Box::new(self),
+                input: CheckedBox::new(self),
                 predicates: new_predicates,
             };
         }
@@ -1308,7 +1308,7 @@ impl MirRelationExpr {
         // They neither introduce nor modify any column references.
         inputs.retain(|i| !i.is_constant_singleton());
         MirRelationExpr::Join {
-            inputs,
+            inputs: inputs.into(),
             equivalences,
             implementation: JoinImplementation::Unimplemented,
         }
@@ -1326,7 +1326,7 @@ impl MirRelationExpr {
         expected_group_size: Option<u64>,
     ) -> Self {
         MirRelationExpr::Reduce {
-            input: Box::new(self),
+            input: CheckedBox::new(self),
             group_key: group_key.into_iter().map(MirScalarExpr::column).collect(),
             aggregates,
             monotonic: false,
@@ -1349,7 +1349,7 @@ impl MirRelationExpr {
         expected_group_size: Option<u64>,
     ) -> Self {
         MirRelationExpr::TopK {
-            input: Box::new(self),
+            input: CheckedBox::new(self),
             group_key,
             order_key,
             limit,
@@ -1362,10 +1362,10 @@ impl MirRelationExpr {
     /// Negates the occurrences of each row.
     pub fn negate(self) -> Self {
         if let MirRelationExpr::Negate { input } = self {
-            *input
+            input.into_inner()
         } else {
             MirRelationExpr::Negate {
-                input: Box::new(self),
+                input: CheckedBox::new(self),
             }
         }
     }
@@ -1388,7 +1388,7 @@ impl MirRelationExpr {
             self
         } else {
             MirRelationExpr::Threshold {
-                input: Box::new(self),
+                input: CheckedBox::new(self),
             }
         }
     }
@@ -1402,7 +1402,7 @@ impl MirRelationExpr {
         let mut flat_inputs = Vec::with_capacity(inputs.len());
         for input in inputs {
             if let MirRelationExpr::Union { base, inputs } = input {
-                flat_inputs.push(*base);
+                flat_inputs.push(base.into_inner());
                 flat_inputs.extend(inputs);
             } else {
                 flat_inputs.push(input);
@@ -1418,8 +1418,8 @@ impl MirRelationExpr {
             inputs.into_element()
         } else {
             MirRelationExpr::Union {
-                base: Box::new(inputs.remove(0)),
-                inputs,
+                base: CheckedBox::new(inputs.remove(0)),
+                inputs: inputs.into(),
             }
         }
     }
@@ -1429,28 +1429,28 @@ impl MirRelationExpr {
         // Deconstruct `self` and `other` as `Union`s and reconstitute.
         let mut flat_inputs = Vec::with_capacity(2);
         if let MirRelationExpr::Union { base, inputs } = self {
-            flat_inputs.push(*base);
+            flat_inputs.push(base.into_inner());
             flat_inputs.extend(inputs);
         } else {
             flat_inputs.push(self);
         }
         if let MirRelationExpr::Union { base, inputs } = other {
-            flat_inputs.push(*base);
+            flat_inputs.push(base.into_inner());
             flat_inputs.extend(inputs);
         } else {
             flat_inputs.push(other);
         }
 
         MirRelationExpr::Union {
-            base: Box::new(flat_inputs.remove(0)),
-            inputs: flat_inputs,
+            base: CheckedBox::new(flat_inputs.remove(0)),
+            inputs: flat_inputs.into(),
         }
     }
 
     /// Arranges the collection by the specified columns
     pub fn arrange_by(self, keys: &[Vec<MirScalarExpr>]) -> Self {
         MirRelationExpr::ArrangeBy {
-            input: Box::new(self),
+            input: CheckedBox::new(self),
             keys: keys.to_owned(),
         }
     }
@@ -1595,8 +1595,8 @@ impl MirRelationExpr {
             let body = (body)(id_gen, get)?;
             Ok(MirRelationExpr::Let {
                 id,
-                value: Box::new(self),
-                body: Box::new(body),
+                value: CheckedBox::new(self),
+                body: CheckedBox::new(body),
             })
         }
     }
@@ -1934,8 +1934,11 @@ impl MirRelationExpr {
         .expect("Unexpected error in `visit_scalars` call");
     }
 
-    /// Clears the contents of `self` even if it's so deep that simply dropping it would cause a
-    /// stack overflow in `drop_in_place`.
+    /// Eagerly and iteratively dismantles `self`.
+    ///
+    /// This predates the guarded `Drop` of the recursive `CheckedBox`/`CheckedVec` fields and is
+    /// no longer needed for stack safety, since plainly dropping a deep `MirRelationExpr` is safe.
+    /// It is kept for callers that want an eager iterative teardown.
     ///
     /// Leaves `self` in an unusable state, so this should only be used if `self` is about to be
     /// dropped or otherwise overwritten.
@@ -2106,8 +2109,8 @@ impl MirRelationExpr {
                     });
                     *expr = MirRelationExpr::Let {
                         id,
-                        value: Box::new(value),
-                        body: Box::new(expr.take_dangerous()),
+                        value: CheckedBox::new(value),
+                        body: CheckedBox::new(expr.take_dangerous()),
                     };
                 }
                 worklist.push(expr);

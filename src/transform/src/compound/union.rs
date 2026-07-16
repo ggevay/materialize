@@ -65,12 +65,12 @@ impl UnionNegateFusion {
                     let input = input.take_dangerous();
                     match input {
                         Union { base, inputs } => {
-                            new_inputs.push(*base);
+                            new_inputs.push(base.into_inner());
                             new_inputs.extend(inputs);
                         }
                         Negate { input } if matches!(*input, Union { .. }) => {
-                            if let Union { base, inputs } = *input {
-                                new_inputs.push(base.negate());
+                            if let Union { base, inputs } = input.into_inner() {
+                                new_inputs.push(base.into_inner().negate());
                                 new_inputs.extend(inputs.into_iter().map(|x| x.negate()));
                             } else {
                                 unreachable!()

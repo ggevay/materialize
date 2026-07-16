@@ -178,7 +178,8 @@ impl LiteralConstraints {
                             inputs: vec![
                                 relation.clone().arrange_by(std::slice::from_ref(&key)),
                                 filter_list,
-                            ],
+                            ]
+                            .into(),
                             equivalences: key
                                 .iter()
                                 .enumerate()
@@ -686,7 +687,7 @@ impl LiteralConstraints {
                             // args of the AND over this OR.
                             let mut or = and_args.swap_remove(i);
                             let to_distribute =
-                                MirScalarExpr::call_variadic(And, (*and_args).clone());
+                                MirScalarExpr::call_variadic(And, and_args.to_vec());
                             if let MirScalarExpr::CallVariadic {
                                 func: VariadicFunc::Or(Or),
                                 exprs: ref mut or_args,

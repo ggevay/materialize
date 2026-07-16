@@ -44,7 +44,7 @@ use mz_expr::func::variadic;
 use mz_expr::visit::Visit;
 use mz_expr::{AccessStrategy, AggregateFunc, Columns, MirRelationExpr, MirScalarExpr, func};
 use mz_ore::collections::CollectionExt;
-use mz_ore::stack::maybe_grow;
+use mz_ore::stack::{CheckedBox, maybe_grow};
 use mz_repr::*;
 
 use crate::optimizer_metrics::OptimizerMetrics;
@@ -434,10 +434,10 @@ impl HirRelationExpr {
 
                     MirRelationExpr::LetRec {
                         ids: mir_ids,
-                        values: mir_values,
+                        values: mir_values.into(),
                         // Copy the limit to each binding.
                         limits: repeat(limit).take(num_bindings).collect(),
-                        body: Box::new(mir_body),
+                        body: CheckedBox::new(mir_body),
                     }
                 }
                 Project { input, outputs } => {
@@ -810,7 +810,7 @@ impl HirRelationExpr {
                 Union { base, inputs } => {
                     // Union is uncomplicated.
                     SR::Union {
-                        base: Box::new(base.applied_to(
+                        base: CheckedBox::new(base.applied_to(
                             id_gen,
                             get_outer.clone(),
                             col_map,
@@ -828,7 +828,8 @@ impl HirRelationExpr {
                                     context,
                                 )
                             })
-                            .collect::<Result<Vec<_>, _>>()?,
+                            .collect::<Result<Vec<_>, _>>()?
+                            .into(),
                     }
                 }
                 Reduce {
@@ -1002,7 +1003,7 @@ impl HirScalarExpr {
                     } else {
                         SS::CallUnary {
                             func,
-                            expr: Box::new(inner),
+                            expr: CheckedBox::new(inner),
                         }
                     }
                 }
@@ -1013,7 +1014,7 @@ impl HirScalarExpr {
                     name: _,
                 } => SS::CallBinary {
                     func,
-                    expr1: Box::new(expr1.applied_to(
+                    expr1: CheckedBox::new(expr1.applied_to(
                         id_gen,
                         col_map,
                         cte_map,
@@ -1021,7 +1022,7 @@ impl HirScalarExpr {
                         subquery_map,
                         context,
                     )?),
-                    expr2: Box::new(expr2.applied_to(
+                    expr2: CheckedBox::new(expr2.applied_to(
                         id_gen,
                         col_map,
                         cte_map,
@@ -1088,9 +1089,9 @@ impl HirScalarExpr {
                         // If no additional columns were added, we simply return the
                         // `If` variant with the updated expressions.
                         SS::If {
-                            cond: Box::new(cond_expr),
-                            then: Box::new(then_expr),
-                            els: Box::new(else_expr),
+                            cond: CheckedBox::new(cond_expr),
+                            then: CheckedBox::new(then_expr),
+                            els: CheckedBox::new(else_expr),
                         }
                     } else {
                         // If columns were added, we need a more careful approach, as
@@ -1548,9 +1549,9 @@ impl HirScalarExpr {
                     for c in 0..input_arity {
                         reduce = reduce.take_dangerous().map_one(MirScalarExpr::CallUnary {
                             func: mz_expr::UnaryFunc::RecordGet(mz_expr::func::RecordGet(c)),
-                            expr: Box::new(MirScalarExpr::CallUnary {
+                            expr: CheckedBox::new(MirScalarExpr::CallUnary {
                                 func: mz_expr::UnaryFunc::RecordGet(mz_expr::func::RecordGet(1)),
-                                expr: Box::new(MirScalarExpr::column(record_col)),
+                                expr: CheckedBox::new(MirScalarExpr::column(record_col)),
                             }),
                         });
                     }
@@ -1558,7 +1559,7 @@ impl HirScalarExpr {
                     // Append the column with the result of the window function.
                     reduce = reduce.take_dangerous().map_one(MirScalarExpr::CallUnary {
                         func: mz_expr::UnaryFunc::RecordGet(mz_expr::func::RecordGet(0)),
-                        expr: Box::new(MirScalarExpr::column(record_col)),
+                        expr: CheckedBox::new(MirScalarExpr::column(record_col)),
                     });
 
                     let agg_col = record_col + 1 + input_arity;
@@ -1706,7 +1707,7 @@ impl HirScalarExpr {
                 } else {
                     SS::CallUnary {
                         func,
-                        expr: Box::new(inner),
+                        expr: CheckedBox::new(inner),
                     }
                 }
             }
@@ -1717,8 +1718,8 @@ impl HirScalarExpr {
                 name: _,
             } => SS::CallBinary {
                 func,
-                expr1: Box::new(expr1.lower_uncorrelated(config)?),
-                expr2: Box::new(expr2.lower_uncorrelated(config)?),
+                expr1: CheckedBox::new(expr1.lower_uncorrelated(config)?),
+                expr2: CheckedBox::new(expr2.lower_uncorrelated(config)?),
             },
             CallVariadic {
                 func,
@@ -1737,9 +1738,9 @@ impl HirScalarExpr {
                 els,
                 name: _,
             } => SS::If {
-                cond: Box::new(cond.lower_uncorrelated(config)?),
-                then: Box::new(then.lower_uncorrelated(config)?),
-                els: Box::new(els.lower_uncorrelated(config)?),
+                cond: CheckedBox::new(cond.lower_uncorrelated(config)?),
+                then: CheckedBox::new(then.lower_uncorrelated(config)?),
+                els: CheckedBox::new(els.lower_uncorrelated(config)?),
             },
             Select { .. } | Exists { .. } | Parameter(..) | Column(..) | Windowing(..) => {
                 sql_bail!(

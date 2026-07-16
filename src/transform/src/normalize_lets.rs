@@ -26,6 +26,7 @@
 
 use mz_expr::{MirRelationExpr, visit::Visit};
 use mz_ore::assert_none;
+use mz_ore::stack::CheckedBox;
 use mz_ore::{id_gen::IdGen, stack::RecursionLimitError};
 use mz_repr::optimize::OptimizerFeatures;
 
@@ -149,16 +150,16 @@ impl NormalizeLets {
                 for (id, value) in bindings.into_iter().rev() {
                     **body = MirRelationExpr::Let {
                         id,
-                        value: Box::new(value),
-                        body: Box::new(body.take_dangerous()),
+                        value: CheckedBox::new(value),
+                        body: CheckedBox::new(body.take_dangerous()),
                     };
                 }
             } else {
                 for (id, value) in bindings.into_iter().rev() {
                     *relation = MirRelationExpr::Let {
                         id,
-                        value: Box::new(value),
-                        body: Box::new(relation.take_dangerous()),
+                        value: CheckedBox::new(value),
+                        body: CheckedBox::new(relation.take_dangerous()),
                     };
                 }
             }
@@ -172,8 +173,8 @@ impl NormalizeLets {
                 assert_none!(max_iter);
                 *relation = MirRelationExpr::Let {
                     id,
-                    value: Box::new(value),
-                    body: Box::new(relation.take_dangerous()),
+                    value: CheckedBox::new(value),
+                    body: CheckedBox::new(relation.take_dangerous()),
                 };
             }
 
@@ -346,7 +347,7 @@ mod let_motion {
 
     use itertools::Itertools;
     use mz_expr::{LetRecLimit, LocalId, MirRelationExpr};
-    use mz_ore::stack::RecursionLimitError;
+    use mz_ore::stack::{CheckedBox, RecursionLimitError};
 
     use crate::normalize_lets::support::replace_bindings_from_map;
 
@@ -459,9 +460,9 @@ mod let_motion {
         while let Some((ids, values, limits)) = compact.pop() {
             *expr = MirRelationExpr::LetRec {
                 ids,
-                values,
+                values: values.into(),
                 limits,
-                body: Box::new(expr.take_dangerous()),
+                body: CheckedBox::new(expr.take_dangerous()),
             };
         }
     }

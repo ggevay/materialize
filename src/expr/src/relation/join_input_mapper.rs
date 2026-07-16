@@ -436,6 +436,7 @@ impl JoinInputMapper {
 
 #[cfg(test)]
 mod tests {
+    use mz_ore::stack::CheckedBox;
     use mz_repr::{Datum, ReprScalarType};
 
     use crate::scalar::func;
@@ -478,12 +479,12 @@ mod tests {
 
         let key20 = MirScalarExpr::CallUnary {
             func: UnaryFunc::NegInt32(crate::func::NegInt32),
-            expr: Box::new(MirScalarExpr::column(1)),
+            expr: CheckedBox::new(MirScalarExpr::column(1)),
         };
         let key21 = MirScalarExpr::CallBinary {
             func: BinaryFunc::AddInt32(func::AddInt32),
-            expr1: Box::new(MirScalarExpr::column(2)),
-            expr2: Box::new(MirScalarExpr::literal(
+            expr1: CheckedBox::new(MirScalarExpr::column(2)),
+            expr2: CheckedBox::new(MirScalarExpr::literal(
                 Ok(Datum::Int32(4)),
                 ReprScalarType::Int32,
             )),
@@ -505,16 +506,16 @@ mod tests {
         // subexpressions to the corresponding expressions bound to a different input
         let key_comp = MirScalarExpr::CallBinary {
             func: func::MulInt32.into(),
-            expr1: Box::new(key12.clone()),
-            expr2: Box::new(key22),
+            expr1: CheckedBox::new(key12.clone()),
+            expr2: CheckedBox::new(key22),
         };
         let mut cloned = key_comp.clone();
         input_mapper.try_localize_to_input_with_bound_expr(&mut cloned, 0, &equivalences);
         assert_eq!(
             MirScalarExpr::CallBinary {
                 func: func::MulInt32.into(),
-                expr1: Box::new(key10.clone()),
-                expr2: Box::new(key20.clone()),
+                expr1: CheckedBox::new(key10.clone()),
+                expr2: CheckedBox::new(key20.clone()),
             },
             cloned,
         );
@@ -529,8 +530,8 @@ mod tests {
 
         let key_comp_plus_non_key = MirScalarExpr::CallBinary {
             func: func::Eq.into(),
-            expr1: Box::new(key_comp),
-            expr2: Box::new(MirScalarExpr::column(7)),
+            expr1: CheckedBox::new(key_comp),
+            expr2: CheckedBox::new(MirScalarExpr::column(7)),
         };
         let mut mutab = key_comp_plus_non_key;
         assert_eq!(
@@ -540,8 +541,8 @@ mod tests {
 
         let key_comp_multi_input = MirScalarExpr::CallBinary {
             func: func::Eq.into(),
-            expr1: Box::new(key12),
-            expr2: Box::new(key21),
+            expr1: CheckedBox::new(key12),
+            expr2: CheckedBox::new(key21),
         };
         // test that the function works when part of the expression is already
         // part of the target input
@@ -550,8 +551,8 @@ mod tests {
         assert_eq!(
             MirScalarExpr::CallBinary {
                 func: func::Eq.into(),
-                expr1: Box::new(localized_key12),
-                expr2: Box::new(localized_key22),
+                expr1: CheckedBox::new(localized_key12),
+                expr2: CheckedBox::new(localized_key22),
             },
             cloned,
         );
@@ -562,8 +563,8 @@ mod tests {
         assert_eq!(
             MirScalarExpr::CallBinary {
                 func: func::Eq.into(),
-                expr1: Box::new(key10),
-                expr2: Box::new(key20),
+                expr1: CheckedBox::new(key10),
+                expr2: CheckedBox::new(key20),
             },
             cloned,
         );

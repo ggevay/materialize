@@ -559,6 +559,7 @@ impl UnaryFunc {
 #[cfg(test)]
 mod test {
     use itertools::Itertools;
+    use mz_ore::stack::CheckedBox;
     use mz_repr::{PropDatum, SqlScalarType};
 
     use crate::{MirScalarExpr, like_pattern};
@@ -614,7 +615,7 @@ mod test {
             let is_monotone = func.is_monotone();
             let expr = MirScalarExpr::CallUnary {
                 func,
-                expr: Box::new(MirScalarExpr::column(0)),
+                expr: CheckedBox::new(MirScalarExpr::column(0)),
             };
             if is_monotone {
                 proptest!(|(

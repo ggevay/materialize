@@ -800,8 +800,9 @@ fn normalize_type_name(type_name: &str) -> (String, bool) {
     // Normalize the type name by stripping whitespace.
     let mut type_name = &type_name.replace([' ', '\n'], "")[..];
     let mut option_found = false;
-    // Eliminate outer `Box<>` from type names because they are inconsequential
-    // when it comes to creating a correctly deserializable JSON string.
+    // Eliminate outer `Box<>` and `CheckedBox<>` from type names because they
+    // are inconsequential when it comes to creating a correctly
+    // deserializable JSON string.
     // The presence of an `Option<>` is consequential, but `serde_json` cannot
     // distinguish between `None`, `Some(None)`, `Some(Some(None))`, etc., so
     // we strip out all `Option<>`s and return whether we have seen at least one
@@ -812,12 +813,20 @@ fn normalize_type_name(type_name: &str) -> (String, bool) {
             type_name = &type_name[7..(type_name.len() - 1)]
         } else if type_name.starts_with("Box<") && type_name.ends_with('>') {
             type_name = &type_name[4..(type_name.len() - 1)]
+        } else if type_name.starts_with("CheckedBox<") && type_name.ends_with('>') {
+            type_name = &type_name[11..(type_name.len() - 1)]
         } else {
             break;
         }
     }
 
-    (type_name.to_string(), option_found)
+    // `CheckedVec<>` serializes exactly like `Vec<>`, so rewrite it to `Vec<>`
+    // for the downstream `Vec<`-prefix handling.
+    if type_name.starts_with("CheckedVec<") && type_name.ends_with('>') {
+        (format!("Vec<{}", &type_name[11..]), option_found)
+    } else {
+        (type_name.to_string(), option_found)
+    }
 }
 
 fn find_next_type_in_tuple(type_name: &str, prev_elem_end: usize) -> Option<(usize, usize)> {

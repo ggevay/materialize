@@ -19,6 +19,7 @@ use itertools::Itertools;
 use mz_expr::func;
 use mz_expr::func::variadic::{JsonbBuildObject, RecordCreate};
 use mz_expr::func::{CastArrayToJsonb, CastListToJsonb};
+use mz_ore::stack::{CheckedBox, CheckedVec};
 use mz_repr::{
     ColumnName, Datum, SqlColumnType, SqlRelationType, SqlScalarBaseType, SqlScalarType,
 };
@@ -663,7 +664,7 @@ static VALID_CASTS: LazyLock<BTreeMap<(SqlScalarBaseType, SqlScalarBaseType), Ca
                     e.call_unary(UnaryFunc::CastStringToArray(
                         func::CastStringToArray {
                             return_ty,
-                            cast_expr: Box::new(cast_expr),
+                            cast_expr: CheckedBox::new(cast_expr),
                         },
                     ))
                 })
@@ -676,7 +677,7 @@ static VALID_CASTS: LazyLock<BTreeMap<(SqlScalarBaseType, SqlScalarBaseType), Ca
                     e.call_unary(UnaryFunc::CastStringToList(
                         func::CastStringToList {
                             return_ty,
-                            cast_expr: Box::new(cast_expr),
+                            cast_expr: CheckedBox::new(cast_expr),
                         },
                     ))
                 })
@@ -689,7 +690,7 @@ static VALID_CASTS: LazyLock<BTreeMap<(SqlScalarBaseType, SqlScalarBaseType), Ca
                     e.call_unary(UnaryFunc::CastStringToMap(
                         func::CastStringToMap {
                             return_ty,
-                            cast_expr: Box::new(cast_expr),
+                            cast_expr: CheckedBox::new(cast_expr),
                         },
                     ))
                 })
@@ -702,7 +703,7 @@ static VALID_CASTS: LazyLock<BTreeMap<(SqlScalarBaseType, SqlScalarBaseType), Ca
                     e.call_unary(UnaryFunc::CastStringToRange(
                         func::CastStringToRange {
                             return_ty,
-                            cast_expr: Box::new(cast_expr),
+                            cast_expr: CheckedBox::new(cast_expr),
                         },
                     ))
                 })
@@ -842,7 +843,7 @@ static VALID_CASTS: LazyLock<BTreeMap<(SqlScalarBaseType, SqlScalarBaseType), Ca
                     .iter()
                     .zip_eq(to_fields)
                     .map(|(f, t)| plan_hypothetical_cast(ecx, ccx, f, t))
-                    .collect::<Option<Box<_>>>()?;
+                    .collect::<Option<CheckedVec<_>>>()?;
                 let to = to_type.clone();
                 Some(|e: HirScalarExpr| {
                     e.call_unary(CastRecord1ToRecord2(
@@ -875,7 +876,7 @@ static VALID_CASTS: LazyLock<BTreeMap<(SqlScalarBaseType, SqlScalarBaseType), Ca
                 Some(move |e: HirScalarExpr| {
                     e.call_unary(CastArrayToArray(func::CastArrayToArray {
                         return_ty,
-                        cast_expr: Box::new(cast_expr),
+                        cast_expr: CheckedBox::new(cast_expr),
                     }))
                 })
             }),
@@ -900,9 +901,10 @@ static VALID_CASTS: LazyLock<BTreeMap<(SqlScalarBaseType, SqlScalarBaseType), Ca
                     );
                     match element_cast {
                         Some((return_ty, cast_expr)) => {
-                            arr.call_unary(CastArrayToArray(
-                                func::CastArrayToArray { return_ty, cast_expr: Box::new(cast_expr) }
-                            ))
+                            arr.call_unary(CastArrayToArray(func::CastArrayToArray {
+                                return_ty,
+                                cast_expr: CheckedBox::new(cast_expr),
+                            }))
                         }
                         None => arr,
                     }
@@ -945,7 +947,7 @@ static VALID_CASTS: LazyLock<BTreeMap<(SqlScalarBaseType, SqlScalarBaseType), Ca
                     e.call_unary(UnaryFunc::CastList1ToList2(
                         func::CastList1ToList2 {
                             return_ty,
-                            cast_expr: Box::new(cast_expr),
+                            cast_expr: CheckedBox::new(cast_expr),
                         },
                     ))
                 })
@@ -1236,10 +1238,10 @@ pub fn to_jsonb(ecx: &ExprContext, expr: HirScalarExpr) -> Result<HirScalarExpr,
             // each element of the container at runtime.
             let func = match ty {
                 List { .. } => UnaryFunc::CastListToJsonb(CastListToJsonb {
-                    cast_element: Box::new(cast_element),
+                    cast_element: CheckedBox::new(cast_element),
                 }),
                 Array { .. } => UnaryFunc::CastArrayToJsonb(CastArrayToJsonb {
-                    cast_element: Box::new(cast_element),
+                    cast_element: CheckedBox::new(cast_element),
                 }),
                 _ => unreachable!("validated above"),
             };

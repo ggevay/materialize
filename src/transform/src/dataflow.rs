@@ -22,6 +22,7 @@ use mz_expr::{
     AccessStrategy, CollectionPlan, Id, JoinImplementation, LocalId, MapFilterProject,
     MirRelationExpr, MirScalarExpr, RECURSION_LIMIT,
 };
+use mz_ore::stack::CheckedBox;
 use mz_ore::stack::{CheckedRecursion, RecursionGuard, RecursionLimitError};
 use mz_ore::{assert_none, soft_assert_eq_or_log, soft_assert_or_log, soft_panic_or_log};
 use mz_repr::GlobalId;
@@ -201,8 +202,8 @@ fn inline_views(dataflow: &mut DataflowDesc) -> Result<(), TransformError> {
                 .take_dangerous();
             *dataflow.objects_to_build[other].plan.as_inner_mut() = MirRelationExpr::Let {
                 id: new_local,
-                value: Box::new(value),
-                body: Box::new(body),
+                value: CheckedBox::new(value),
+                body: CheckedBox::new(body),
             };
             dataflow.objects_to_build.remove(index);
         }

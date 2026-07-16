@@ -10,6 +10,7 @@
 use itertools::Itertools;
 use mz_expr::{MirRelationExpr, MirScalarExpr, func};
 use mz_ore::soft_assert_eq_or_log;
+use mz_ore::stack::CheckedBox;
 use mz_repr::Diff;
 
 use crate::plan::PlanError;
@@ -354,11 +355,13 @@ pub(crate) fn attempt_left_join_magic(
                 .map(
                     (oa + ba..oa + ba + ra)
                         .map(|col| MirScalarExpr::If {
-                            cond: Box::new(MirScalarExpr::column(oa + ba + ra).call_is_null()),
-                            then: Box::new(MirScalarExpr::literal_null(
+                            cond: CheckedBox::new(
+                                MirScalarExpr::column(oa + ba + ra).call_is_null(),
+                            ),
+                            then: CheckedBox::new(MirScalarExpr::literal_null(
                                 rt[col - (oa + ba)].scalar_type.clone(),
                             )),
-                            els: Box::new(MirScalarExpr::column(col)),
+                            els: CheckedBox::new(MirScalarExpr::column(col)),
                         })
                         .collect(),
                 )
@@ -385,15 +388,15 @@ pub(crate) fn attempt_left_join_magic(
     while let Some((id, _get, value)) = augmented.pop() {
         body = MirRelationExpr::Let {
             id,
-            value: Box::new(value),
-            body: Box::new(body),
+            value: CheckedBox::new(value),
+            body: CheckedBox::new(body),
         };
     }
     while let Some((id, _get, value)) = bindings.pop() {
         body = MirRelationExpr::Let {
             id,
-            value: Box::new(value),
-            body: Box::new(body),
+            value: CheckedBox::new(value),
+            body: CheckedBox::new(body),
         };
     }
 

@@ -14,6 +14,7 @@ use mz_expr::{AccessStrategy, EvalError, Id, LocalId, MirRelationExpr, MirScalar
 use mz_lowertest::*;
 use mz_ore::cast::CastFrom;
 use mz_ore::result::ResultExt;
+use mz_ore::stack::CheckedBox;
 use mz_ore::str::separated;
 use mz_repr::explain::{DummyHumanizer, ExprHumanizer};
 use mz_repr::{
@@ -520,8 +521,8 @@ impl<'a> MirRelationExprDeserializeContext<'a> {
 
         Ok(MirRelationExpr::Let {
             id,
-            value: Box::new(value),
-            body: Box::new(body),
+            value: CheckedBox::new(value),
+            body: CheckedBox::new(body),
         })
     }
 
@@ -532,8 +533,8 @@ impl<'a> MirRelationExprDeserializeContext<'a> {
         let mut inputs: Vec<MirRelationExpr> =
             deserialize(stream_iter, "Vec<MirRelationExpr>", self)?;
         Ok(MirRelationExpr::Union {
-            base: Box::new(inputs.remove(0)),
-            inputs,
+            base: CheckedBox::new(inputs.remove(0)),
+            inputs: inputs.into(),
         })
     }
 

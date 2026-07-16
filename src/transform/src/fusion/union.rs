@@ -11,6 +11,7 @@
 
 use mz_expr::MirRelationExpr;
 use mz_expr::visit::Visit;
+use mz_ore::stack::CheckedBox;
 
 /// Fuses multiple `Union` operators into one.
 #[derive(Debug)]
@@ -48,8 +49,8 @@ impl Union {
             let mut list: Vec<MirRelationExpr> = Vec::with_capacity(1 + inputs.len());
             Self::unfold_unions_into(relation.take_dangerous(), &mut list);
             *relation = MirRelationExpr::Union {
-                base: Box::new(list.remove(0)),
-                inputs: list,
+                base: CheckedBox::new(list.remove(0)),
+                inputs: list.into(),
             }
         }
     }
@@ -60,7 +61,7 @@ impl Union {
         while let Some(expr) = stack.pop() {
             if let MirRelationExpr::Union { base, inputs } = expr {
                 stack.extend(inputs.into_iter().rev());
-                stack.push(*base);
+                stack.push(base.into_inner());
             } else {
                 list.push(expr);
             }

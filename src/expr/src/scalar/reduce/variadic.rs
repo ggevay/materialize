@@ -13,6 +13,7 @@ use std::collections::BTreeSet;
 use std::mem;
 
 use mz_ore::collections::CollectionExt;
+use mz_ore::stack::CheckedBox;
 use mz_pgtz::timezone::TimezoneSpec;
 use mz_repr::{Datum, ReprColumnType, ReprScalarType, RowArena, SqlScalarType};
 
@@ -172,7 +173,7 @@ pub(super) fn reduce_call_variadic(
                             .unwrap_timestamptz()
                             .naive_utc(),
                     }),
-                    expr: Box::new(exprs[1].take()),
+                    expr: CheckedBox::new(exprs[1].take()),
                 },
                 Err(err) => MirScalarExpr::literal(Err(err), e.typ(column_types).scalar_type),
             };

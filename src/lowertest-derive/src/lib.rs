@@ -17,7 +17,7 @@ use syn::{Data, DeriveInput, Fields, parse};
 
 /// Types defined outside of Materialize used to build test objects.
 const EXTERNAL_TYPES: &[&str] = &["String", "FixedOffset", "Tz", "NaiveDateTime", "Regex"];
-const SUPPORTED_ANGLE_TYPES: &[&str] = &["Vec", "Box", "Option"];
+const SUPPORTED_ANGLE_TYPES: &[&str] = &["Vec", "Box", "Option", "CheckedBox", "CheckedVec"];
 
 /// Macro generating an implementation for the trait MzReflect
 #[proc_macro_derive(MzReflect, attributes(mzreflect))]

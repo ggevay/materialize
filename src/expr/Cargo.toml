@@ -44,7 +44,7 @@ md-5.workspace = true
 murmur2.workspace = true
 mz-expr-derive = { path = "../expr-derive", features = ["test"] }
 mz-lowertest = { path = "../lowertest" }
-mz-ore = { path = "../ore", features = ["network", "proptest", "id_gen"] }
+mz-ore = { path = "../ore", features = ["network", "proptest", "id_gen", "stack"] }
 mz-persist-types = { path = "../persist-types" }
 mz-pgrepr = { path = "../pgrepr" }
 mz-pgtz = { path = "../pgtz" }

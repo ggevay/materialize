@@ -241,7 +241,7 @@ fn try_create_case_literal(expr: &mut MirScalarExpr, column_types: &[ReprColumnT
 
     *expr = MirScalarExpr::CallVariadic {
         func: VariadicFunc::CaseLiteral(cl),
-        exprs,
+        exprs: exprs.into(),
     };
 }
 
@@ -342,10 +342,10 @@ fn collect_if_chain_arms(
 
                     // First occurrence of each literal wins (SQL CASE semantics).
                     if seen.insert(literal_row.clone()) {
-                        cases.push((literal_row.clone(), *then));
+                        cases.push((literal_row.clone(), then.into_inner()));
                     }
 
-                    remaining = *els;
+                    remaining = els.into_inner();
                 } else {
                     remaining = MirScalarExpr::If { cond, then, els };
                     break;
@@ -362,6 +362,7 @@ fn collect_if_chain_arms(
 mod tests {
     use mz_expr::func::Eq;
     use mz_expr::{Eval, MirRelationExpr, MirScalarExpr, VariadicFunc};
+    use mz_ore::stack::CheckedBox;
     use mz_repr::{Datum, ReprColumnType, ReprRelationType, ReprScalarType};
 
     use super::*;
@@ -374,7 +375,7 @@ mod tests {
     /// Wrap a scalar expression in a `Map` over a constant to allow applying the transform.
     fn wrap_in_map(scalar: MirScalarExpr) -> MirRelationExpr {
         MirRelationExpr::Map {
-            input: Box::new(MirRelationExpr::constant(
+            input: CheckedBox::new(MirRelationExpr::constant(
                 vec![vec![Datum::Int64(0)]],
                 ReprRelationType::new(vec![ReprColumnType {
                     scalar_type: ReprScalarType::Int64,
@@ -539,7 +540,7 @@ mod tests {
         }
         fn wrap_in_string_map(scalar: MirScalarExpr) -> MirRelationExpr {
             MirRelationExpr::Map {
-                input: Box::new(MirRelationExpr::constant(
+                input: CheckedBox::new(MirRelationExpr::constant(
                     vec![vec![Datum::String("x")]],
                     ReprRelationType::new(vec![ReprColumnType {
                         scalar_type: ReprScalarType::String,

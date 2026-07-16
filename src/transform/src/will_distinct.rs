@@ -19,6 +19,7 @@ use mz_expr::MirRelationExpr;
 use crate::analysis::{DerivedView, NonNegative};
 
 use crate::{TransformCtx, TransformError};
+use mz_ore::stack::CheckedBox;
 
 /// Pushes down the information that a collection will be subjected to a `Distinct`.
 ///
@@ -91,9 +92,9 @@ impl WillDistinct {
                     let arity = input.arity();
                     *expr = MirRelationExpr::Project {
                         outputs: (arity..arity + group_key.len()).collect::<Vec<_>>(),
-                        input: Box::new(MirRelationExpr::Map {
+                        input: CheckedBox::new(MirRelationExpr::Map {
                             scalars: group_key.clone(),
-                            input: Box::new(input.take_dangerous()),
+                            input: CheckedBox::new(input.take_dangerous()),
                         }),
                     };
                     // We are certain to have a specific pattern of AST nodes, which we need to push through so that

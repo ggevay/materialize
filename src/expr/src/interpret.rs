@@ -10,6 +10,7 @@
 use std::collections::BTreeMap;
 use std::fmt::Debug;
 
+use mz_ore::stack::CheckedBox;
 use mz_repr::{Datum, ReprColumnType, ReprRelationType, ReprScalarType, Row, RowArena};
 
 use crate::scalar::func::variadic::And;
@@ -652,7 +653,7 @@ impl SpecialUnary {
                         func: UnaryFunc::TryParseMonotonicIso8601Timestamp(
                             crate::func::TryParseMonotonicIso8601Timestamp,
                         ),
-                        expr: Box::new(MirScalarExpr::column(0)),
+                        expr: CheckedBox::new(MirScalarExpr::column(0)),
                     };
                     let eval = |d| specs.eval_result(expr.eval(&[d], specs.arena));
 
@@ -1017,7 +1018,7 @@ impl<'a> Interpreter for ColumnSpecs<'a> {
             let is_monotone = func.is_monotone();
             let mut expr = MirScalarExpr::CallUnary {
                 func: func.clone(),
-                expr: Box::new(Self::placeholder(summary.col_type.clone())),
+                expr: CheckedBox::new(Self::placeholder(summary.col_type.clone())),
             };
             summary.range.flat_map(is_monotone, |datum| {
                 Self::set_argument(&mut expr, 0, datum);
@@ -1066,8 +1067,8 @@ impl<'a> Interpreter for ColumnSpecs<'a> {
             _ => {
                 let mut expr = MirScalarExpr::CallBinary {
                     func: func.clone(),
-                    expr1: Box::new(Self::placeholder(left.col_type.clone())),
-                    expr2: Box::new(Self::placeholder(right.col_type.clone())),
+                    expr1: CheckedBox::new(Self::placeholder(left.col_type.clone())),
+                    expr2: CheckedBox::new(Self::placeholder(right.col_type.clone())),
                 };
                 left.range.flat_map(left_monotonic, |left_result| {
                     Self::set_argument(&mut expr, 0, left_result);
@@ -1600,7 +1601,7 @@ mod tests {
                         let type_out = func.output_type(type_in);
                         let expr_out = MirScalarExpr::CallUnary {
                             func,
-                            expr: Box::new(expr_in),
+                            expr: CheckedBox::new(expr_in),
                         };
                         Some((expr_out, type_out))
                     })
@@ -1619,8 +1620,8 @@ mod tests {
                             let type_out = func.output_type(&[type_left, type_right]);
                             let expr_out = MirScalarExpr::CallBinary {
                                 func,
-                                expr1: Box::new(expr_left),
-                                expr2: Box::new(expr_right),
+                                expr1: CheckedBox::new(expr_left),
+                                expr2: CheckedBox::new(expr_right),
                             };
                             Some((expr_out, type_out))
                         },
@@ -1663,9 +1664,9 @@ mod tests {
                                     out_type.clone(),
                                 );
                                 let expr_out = MirScalarExpr::If {
-                                    cond: Box::new(cond_expr.clone()),
-                                    then: Box::new(then_expr.clone()),
-                                    els: Box::new(els_expr),
+                                    cond: CheckedBox::new(cond_expr.clone()),
+                                    then: CheckedBox::new(then_expr.clone()),
+                                    els: CheckedBox::new(els_expr),
                                 };
                                 (expr_out, out_type.clone())
                             })
@@ -2024,7 +2025,7 @@ mod tests {
 
         let neg = MirScalarExpr::CallUnary {
             func: UnaryFunc::NegNumeric(NegNumeric),
-            expr: Box::new(MirScalarExpr::column(0)),
+            expr: CheckedBox::new(MirScalarExpr::column(0)),
         };
 
         let relation = ReprRelationType::new(vec![ReprScalarType::Numeric.nullable(false)]);
@@ -2069,7 +2070,7 @@ mod tests {
 
         let cast = MirScalarExpr::CallUnary {
             func: UnaryFunc::CastNumericToMzTimestamp(CastNumericToMzTimestamp),
-            expr: Box::new(MirScalarExpr::column(0)),
+            expr: CheckedBox::new(MirScalarExpr::column(0)),
         };
 
         let relation = ReprRelationType::new(vec![ReprScalarType::Numeric.nullable(false)]);
@@ -2120,7 +2121,7 @@ mod tests {
         let mfp = MapFilterProject {
             expressions: vec![MirScalarExpr::CallUnary {
                 func: UnaryFunc::CastStringToUuid(CastStringToUuid),
-                expr: Box::new(MirScalarExpr::column(0)),
+                expr: CheckedBox::new(MirScalarExpr::column(0)),
             }],
             predicates: vec![(
                 1,
@@ -2215,10 +2216,10 @@ mod tests {
                     1,
                     CallUnary {
                         func: UnaryFunc::IsNull(IsNull),
-                        expr: Box::new(CallBinary {
+                        expr: CheckedBox::new(CallBinary {
                             func: MulInt32.into(),
-                            expr1: Box::new(MirScalarExpr::column(0)),
-                            expr2: Box::new(MirScalarExpr::column(0)),
+                            expr1: CheckedBox::new(MirScalarExpr::column(0)),
+                            expr2: CheckedBox::new(MirScalarExpr::column(0)),
                         }),
                     },
                 ),
@@ -2227,8 +2228,8 @@ mod tests {
                     1,
                     CallBinary {
                         func: Eq.into(),
-                        expr1: Box::new(MirScalarExpr::column(0)),
-                        expr2: Box::new(MirScalarExpr::literal_ok(
+                        expr1: CheckedBox::new(MirScalarExpr::column(0)),
+                        expr2: CheckedBox::new(MirScalarExpr::literal_ok(
                             Datum::Int32(1727694505),
                             ReprScalarType::Int32,
                         )),
@@ -2281,18 +2282,18 @@ mod tests {
         let period_ms = MirScalarExpr::literal_ok(Datum::Int64(10), ReprScalarType::Int64);
         let expr = MirScalarExpr::CallBinary {
             func: Gte.into(),
-            expr1: Box::new(MirScalarExpr::CallUnmaterializable(
+            expr1: CheckedBox::new(MirScalarExpr::CallUnmaterializable(
                 UnmaterializableFunc::MzNow,
             )),
-            expr2: Box::new(MirScalarExpr::CallUnary {
+            expr2: CheckedBox::new(MirScalarExpr::CallUnary {
                 func: UnaryFunc::CastInt64ToMzTimestamp(CastInt64ToMzTimestamp),
-                expr: Box::new(MirScalarExpr::CallBinary {
+                expr: CheckedBox::new(MirScalarExpr::CallBinary {
                     func: MulInt64.into(),
-                    expr1: Box::new(period_ms.clone()),
-                    expr2: Box::new(MirScalarExpr::CallBinary {
+                    expr1: CheckedBox::new(period_ms.clone()),
+                    expr2: CheckedBox::new(MirScalarExpr::CallBinary {
                         func: DivInt64.into(),
-                        expr1: Box::new(MirScalarExpr::column(0)),
-                        expr2: Box::new(period_ms),
+                        expr1: CheckedBox::new(MirScalarExpr::column(0)),
+                        expr2: CheckedBox::new(period_ms),
                     }),
                 }),
             }),
@@ -2454,9 +2455,9 @@ mod tests {
 
         // `(CASE WHEN col0 THEN col1 ELSE col2 END) ->> 'y' IS NULL`
         let expr = MirScalarExpr::If {
-            cond: Box::new(MirScalarExpr::column(0)),
-            then: Box::new(MirScalarExpr::column(1)),
-            els: Box::new(MirScalarExpr::column(2)),
+            cond: CheckedBox::new(MirScalarExpr::column(0)),
+            then: CheckedBox::new(MirScalarExpr::column(1)),
+            els: CheckedBox::new(MirScalarExpr::column(2)),
         }
         .call_binary(
             MirScalarExpr::literal_ok(Datum::from("y"), ReprScalarType::String),
@@ -2502,7 +2503,7 @@ mod tests {
             func: UnaryFunc::IsLikeMatch(IsLikeMatch(
                 crate::like_pattern::compile("%whatever%", true).unwrap(),
             )),
-            expr: Box::new(MirScalarExpr::column(0)),
+            expr: CheckedBox::new(MirScalarExpr::column(0)),
         };
 
         let relation = ReprRelationType::new(vec![ReprScalarType::String.nullable(true)]);
@@ -2530,7 +2531,7 @@ mod tests {
 
         let expr = MirScalarExpr::CallUnary {
             func: UnaryFunc::TryParseMonotonicIso8601Timestamp(TryParseMonotonicIso8601Timestamp),
-            expr: Box::new(MirScalarExpr::column(0)),
+            expr: CheckedBox::new(MirScalarExpr::column(0)),
         };
 
         let relation = ReprRelationType::new(vec![ReprScalarType::String.nullable(true)]);
@@ -2886,8 +2887,8 @@ mod tests {
 
         let expr = MirScalarExpr::CallBinary {
             func: AddTimestampInterval.into(),
-            expr1: Box::new(MirScalarExpr::column(0)),
-            expr2: Box::new(MirScalarExpr::column(1)),
+            expr1: CheckedBox::new(MirScalarExpr::column(0)),
+            expr2: CheckedBox::new(MirScalarExpr::column(1)),
         };
         let arena = RowArena::new();
 

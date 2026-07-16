@@ -21,6 +21,7 @@ use mz_expr::{
     BinaryFunc, Columns, Eval, EvalError, MapFilterProject, MfpPlan, MirScalarExpr,
     OptimizableExpr, SafeMfpPlan, UnaryFunc, UnmaterializableFunc, VariadicFunc,
 };
+use mz_ore::stack::CheckedBox;
 use mz_ore::str::separated;
 use mz_ore::treat_as_equal::TreatAsEqual;
 use mz_repr::explain::ScalarOps;
@@ -612,21 +613,21 @@ impl From<&LirScalarExpr> for MirScalarExpr {
             }
             CallUnary { func, expr } => MirScalarExpr::CallUnary {
                 func: func.clone(),
-                expr: Box::new(MirScalarExpr::from(expr.as_ref())),
+                expr: CheckedBox::new(MirScalarExpr::from(expr.as_ref())),
             },
             CallBinary { func, expr1, expr2 } => MirScalarExpr::CallBinary {
                 func: func.clone(),
-                expr1: Box::new(MirScalarExpr::from(expr1.as_ref())),
-                expr2: Box::new(MirScalarExpr::from(expr2.as_ref())),
+                expr1: CheckedBox::new(MirScalarExpr::from(expr1.as_ref())),
+                expr2: CheckedBox::new(MirScalarExpr::from(expr2.as_ref())),
             },
             CallVariadic { func, exprs } => MirScalarExpr::CallVariadic {
                 func: func.clone(),
                 exprs: exprs.iter().map(MirScalarExpr::from).collect(),
             },
             If { cond, then, els } => MirScalarExpr::If {
-                cond: Box::new(MirScalarExpr::from(cond.as_ref())),
-                then: Box::new(MirScalarExpr::from(then.as_ref())),
-                els: Box::new(MirScalarExpr::from(els.as_ref())),
+                cond: CheckedBox::new(MirScalarExpr::from(cond.as_ref())),
+                then: CheckedBox::new(MirScalarExpr::from(then.as_ref())),
+                els: CheckedBox::new(MirScalarExpr::from(els.as_ref())),
             },
         }
     }

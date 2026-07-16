@@ -21,6 +21,7 @@ use std::collections::BTreeMap;
 use mz_expr::visit::VisitChildren;
 use mz_expr::{AccessStrategy, Id, LocalId, MirRelationExpr, RECURSION_LIMIT};
 use mz_ore::id_gen::IdGen;
+use mz_ore::stack::CheckedBox;
 use mz_ore::stack::{CheckedRecursion, RecursionGuard};
 
 /// Transform an MirRelationExpr into an administrative normal form (ANF).
@@ -250,7 +251,7 @@ impl Bindings {
                     }
 
                     *ids = new_ids;
-                    *values = new_values;
+                    *values = new_values.into();
                     *limits = new_limits.into_values().collect();
                 }
                 MirRelationExpr::Let { id, value, body } => {
@@ -325,8 +326,8 @@ impl Bindings {
         for (value, index) in bindings.into_iter().rev() {
             let new_expression = MirRelationExpr::Let {
                 id: LocalId::new(index),
-                value: Box::new(value),
-                body: Box::new(expression.take_dangerous()),
+                value: CheckedBox::new(value),
+                body: CheckedBox::new(expression.take_dangerous()),
             };
             *expression = new_expression;
         }

@@ -49,7 +49,7 @@ pub(super) fn reduce_if(e: &mut MirScalarExpr, column_types: &[ReprColumnType]) 
             (Some(Ok(Datum::True)), _) => {
                 // Rewritten as ((<cond> IS NOT NULL) AND (<cond>)) OR (<els>)
                 // NULL <cond> results in: (FALSE AND NULL) OR (<els>) => (<els>)
-                *e = cond
+                *e = (**cond)
                     .clone()
                     .call_is_null()
                     .not()
@@ -59,7 +59,7 @@ pub(super) fn reduce_if(e: &mut MirScalarExpr, column_types: &[ReprColumnType]) 
             (Some(Ok(Datum::False)), _) => {
                 // Rewritten as ((NOT <cond>) OR (<cond> IS NULL)) AND (<els>)
                 // NULL <cond> results in: (NULL OR TRUE) AND (<els>) => TRUE AND (<els>) => (<els>)
-                *e = cond
+                *e = (**cond)
                     .clone()
                     .not()
                     .or(cond.take().call_is_null())
@@ -68,7 +68,7 @@ pub(super) fn reduce_if(e: &mut MirScalarExpr, column_types: &[ReprColumnType]) 
             (_, Some(Ok(Datum::True))) => {
                 // Rewritten as (NOT <cond>) OR (<cond> IS NULL) OR (<then>)
                 // NULL <cond> results in: NULL OR TRUE OR (<then>) => TRUE
-                *e = cond
+                *e = (**cond)
                     .clone()
                     .not()
                     .or(cond.take().call_is_null())
@@ -77,7 +77,7 @@ pub(super) fn reduce_if(e: &mut MirScalarExpr, column_types: &[ReprColumnType]) 
             (_, Some(Ok(Datum::False))) => {
                 // Rewritten as (<cond> IS NOT NULL) AND (<cond>) AND (<then>)
                 // NULL <cond> results in: FALSE AND NULL AND (<then>) => FALSE
-                *e = cond
+                *e = (**cond)
                     .clone()
                     .call_is_null()
                     .not()

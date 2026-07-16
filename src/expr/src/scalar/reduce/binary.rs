@@ -23,6 +23,7 @@ use crate::scalar::func::variadic::And;
 use crate::scalar::func::{self, BinaryFunc, UnaryFunc, VariadicFunc, parse_timezone};
 use crate::scalar::like_pattern;
 use crate::{Eval, EvalError, MirScalarExpr};
+use mz_ore::stack::CheckedBox;
 
 pub(super) fn reduce_call_binary(
     e: &mut MirScalarExpr,
@@ -384,7 +385,7 @@ where
     *e = match units_str.parse::<DateTimeUnits>() {
         Ok(units) => MirScalarExpr::CallUnary {
             func: build_unary(units),
-            expr: Box::new(expr2.take()),
+            expr: CheckedBox::new(expr2.take()),
         },
         Err(_) => MirScalarExpr::literal(
             Err(EvalError::UnknownUnits(units_str.into())),
@@ -407,7 +408,7 @@ where
     *e = match parse_timezone(tz_str, TimezoneSpec::Posix) {
         Ok(tz) => MirScalarExpr::CallUnary {
             func: build_unary(tz),
-            expr: Box::new(expr2.take()),
+            expr: CheckedBox::new(expr2.take()),
         },
         Err(err) => MirScalarExpr::literal(Err(err), e.typ(column_types).scalar_type),
     };
@@ -426,7 +427,7 @@ where
     let compiled = DateTimeFormat::compile(&format_str);
     *e = MirScalarExpr::CallUnary {
         func: build_unary(format_str, compiled),
-        expr: Box::new(expr1.take()),
+        expr: CheckedBox::new(expr1.take()),
     };
 }
 

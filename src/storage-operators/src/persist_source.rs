@@ -1516,6 +1516,7 @@ mod tests {
         };
         use mz_expr::{BinaryFunc, MapFilterProject, MirScalarExpr, UnaryFunc};
         use mz_ore::metrics::MetricsRegistry;
+        use mz_ore::stack::CheckedBox;
         use mz_persist_types::part::PartBuilder;
         use mz_persist_types::stats::{PartStats, PartStatsMetrics};
         use mz_repr::adt::numeric::Numeric;
@@ -1612,30 +1613,30 @@ mod tests {
         ) -> MirScalarExpr {
             let round = MirScalarExpr::CallBinary {
                 func: BinaryFunc::RoundNumeric(RoundNumericBinary),
-                expr1: Box::new(MirScalarExpr::column(0)),
-                expr2: Box::new(MirScalarExpr::literal_ok(
+                expr1: CheckedBox::new(MirScalarExpr::column(0)),
+                expr2: CheckedBox::new(MirScalarExpr::literal_ok(
                     Datum::from(scale),
                     ReprScalarType::Int32,
                 )),
             };
             let cast = MirScalarExpr::CallUnary {
                 func: UnaryFunc::CastNumericToFloat32(CastNumericToFloat32),
-                expr: Box::new(round),
+                expr: CheckedBox::new(round),
             };
             let add = MirScalarExpr::CallBinary {
                 func: BinaryFunc::AddFloat32(AddFloat32),
-                expr1: Box::new(f32_lit(a)),
-                expr2: Box::new(cast),
+                expr1: CheckedBox::new(f32_lit(a)),
+                expr2: CheckedBox::new(cast),
             };
             let mul = MirScalarExpr::CallBinary {
                 func: BinaryFunc::MulFloat32(MulFloat32),
-                expr1: Box::new(add),
-                expr2: Box::new(f32_lit(b)),
+                expr1: CheckedBox::new(add),
+                expr2: CheckedBox::new(f32_lit(b)),
             };
             MirScalarExpr::CallBinary {
                 func: cmp,
-                expr1: Box::new(mul),
-                expr2: Box::new(f32_lit(c)),
+                expr1: CheckedBox::new(mul),
+                expr2: CheckedBox::new(f32_lit(c)),
             }
         }
 
@@ -1645,12 +1646,12 @@ mod tests {
         fn cast_mz_timestamp_predicate(ts: u64, cmp: BinaryFunc) -> MirScalarExpr {
             let cast = MirScalarExpr::CallUnary {
                 func: UnaryFunc::CastNumericToMzTimestamp(CastNumericToMzTimestamp),
-                expr: Box::new(MirScalarExpr::column(0)),
+                expr: CheckedBox::new(MirScalarExpr::column(0)),
             };
             MirScalarExpr::CallBinary {
                 func: cmp,
-                expr1: Box::new(cast),
-                expr2: Box::new(MirScalarExpr::literal_ok(
+                expr1: CheckedBox::new(cast),
+                expr2: CheckedBox::new(MirScalarExpr::literal_ok(
                     Datum::MzTimestamp(Timestamp::from(ts)),
                     ReprScalarType::MzTimestamp,
                 )),

@@ -32,6 +32,7 @@ use crate::analysis::equivalences::EquivalenceClasses;
 use crate::canonicalize_mfp::CanonicalizeMfp;
 use crate::predicate_pushdown::PredicatePushdown;
 use crate::{TransformCtx, TransformError};
+use mz_ore::stack::CheckedBox;
 
 /// Fuses multiple `Join` operators into one `Join` operator.
 ///
@@ -271,12 +272,13 @@ fn unpack_equivalences(equivalences: &Vec<Vec<MirScalarExpr>>) -> Vec<MirScalarE
                 vec![
                     MirScalarExpr::CallBinary {
                         func: mz_expr::func::Eq.into(),
-                        expr1: Box::new(class[0].clone()),
-                        expr2: Box::new(expr.clone()),
+                        expr1: CheckedBox::new(class[0].clone()),
+                        expr2: CheckedBox::new(expr.clone()),
                     },
                     MirScalarExpr::CallVariadic {
                         func: And.into(),
-                        exprs: vec![class[0].clone().call_is_null(), expr.clone().call_is_null()],
+                        exprs: vec![class[0].clone().call_is_null(), expr.clone().call_is_null()]
+                            .into(),
                     },
                 ],
             ));

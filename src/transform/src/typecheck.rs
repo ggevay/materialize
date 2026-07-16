@@ -2062,6 +2062,7 @@ impl<'a> TypeError<'a> {
 
 #[cfg(test)]
 mod tests {
+    use mz_ore::stack::CheckedBox;
     use mz_ore::{assert_err, assert_ok};
     use mz_repr::{SqlColumnType, arb_datum, arb_datum_for_column};
     use proptest::prelude::*;
@@ -2198,8 +2199,8 @@ mod tests {
         for i in 0..2 * RECURSION_LIMIT {
             relation = MirRelationExpr::Let {
                 id: LocalId::new(u64::cast_from(i)),
-                value: Box::new(empty()),
-                body: Box::new(relation),
+                value: CheckedBox::new(empty()),
+                body: CheckedBox::new(relation),
             };
         }
 

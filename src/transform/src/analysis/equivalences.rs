@@ -870,11 +870,11 @@ impl EquivalenceClasses {
                         expr2,
                     } = expr
                     {
-                        to_add.push(vec![*expr1.clone(), *expr2.clone()]);
+                        to_add.push(vec![(**expr1).clone(), (**expr2).clone()]);
                         to_add.push(vec![
                             MirScalarExpr::literal_false(),
-                            expr1.clone().call_is_null(),
-                            expr2.clone().call_is_null(),
+                            (**expr1).clone().call_is_null(),
+                            (**expr2).clone().call_is_null(),
                         ]);
                     }
                 }

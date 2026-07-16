@@ -16,6 +16,7 @@ use mz_expr_derive::sqlfunc;
 use mz_lowertest::MzReflect;
 use mz_ore::cast::CastFrom;
 use mz_ore::result::ResultExt;
+use mz_ore::stack::CheckedBox;
 use mz_ore::str::StrExt;
 use mz_repr::adt::char::{Char, format_str_trim};
 use mz_repr::adt::date::Date;
@@ -352,7 +353,7 @@ pub struct CastStringToArray {
     pub return_ty: SqlScalarType,
     // The expression to cast the discovered array elements to the array's
     // element type.
-    pub cast_expr: Box<MirScalarExpr>,
+    pub cast_expr: CheckedBox<MirScalarExpr>,
 }
 
 impl LazyUnaryFunc for CastStringToArray {
@@ -440,7 +441,7 @@ pub struct CastStringToList {
     pub return_ty: SqlScalarType,
     // The expression to cast the discovered list elements to the list's
     // element type.
-    pub cast_expr: Box<MirScalarExpr>,
+    pub cast_expr: CheckedBox<MirScalarExpr>,
 }
 
 impl LazyUnaryFunc for CastStringToList {
@@ -534,7 +535,7 @@ pub struct CastStringToMap {
     pub return_ty: SqlScalarType,
     // The expression used to cast the discovered values to the map's value
     // type.
-    pub cast_expr: Box<MirScalarExpr>,
+    pub cast_expr: CheckedBox<MirScalarExpr>,
 }
 
 impl LazyUnaryFunc for CastStringToMap {
@@ -704,7 +705,7 @@ pub struct CastStringToRange {
     pub return_ty: SqlScalarType,
     // The expression to cast the discovered range elements to the range's
     // element type.
-    pub cast_expr: Box<MirScalarExpr>,
+    pub cast_expr: CheckedBox<MirScalarExpr>,
 }
 
 impl LazyUnaryFunc for CastStringToRange {
@@ -857,7 +858,7 @@ impl fmt::Display for CastStringToVarChar {
 // position akin to array parsing.
 static INT2VECTOR_CAST_EXPR: LazyLock<MirScalarExpr> = LazyLock::new(|| MirScalarExpr::CallUnary {
     func: UnaryFunc::CastStringToInt16(CastStringToInt16),
-    expr: Box::new(MirScalarExpr::column(0)),
+    expr: CheckedBox::new(MirScalarExpr::column(0)),
 });
 
 #[derive(

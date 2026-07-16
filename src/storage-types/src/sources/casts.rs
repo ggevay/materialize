@@ -1003,6 +1003,7 @@ mod tests {
 
     mod parity {
         use mz_expr::{Eval, MirScalarExpr, UnaryFunc};
+        use mz_ore::stack::CheckedBox;
         use mz_repr::{Datum, RowArena};
 
         use super::*;
@@ -1015,7 +1016,7 @@ mod tests {
                 StorageScalarExpr::CallUnary(storage_func, Box::new(StorageScalarExpr::Column(0)));
             let m_expr = MirScalarExpr::CallUnary {
                 func: mir_func,
-                expr: Box::new(MirScalarExpr::column(0)),
+                expr: CheckedBox::new(MirScalarExpr::column(0)),
             };
 
             for &input in inputs {

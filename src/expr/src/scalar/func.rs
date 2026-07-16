@@ -3047,6 +3047,7 @@ fn mz_render_typmod(oid: u32, typmod: i32) -> String {
 #[cfg(test)]
 mod test {
     use chrono::prelude::*;
+    use mz_ore::stack::CheckedBox;
     use mz_repr::PropDatum;
     use proptest::prelude::*;
 
@@ -3194,8 +3195,8 @@ mod test {
             let (left_monotone, right_monotone) = func.is_monotone();
             let expr = MirScalarExpr::CallBinary {
                 func,
-                expr1: Box::new(MirScalarExpr::column(0)),
-                expr2: Box::new(MirScalarExpr::column(1)),
+                expr1: CheckedBox::new(MirScalarExpr::column(0)),
+                expr2: CheckedBox::new(MirScalarExpr::column(1)),
             };
             proptest!(|(
                 mut left in proptest::array::uniform3(left),

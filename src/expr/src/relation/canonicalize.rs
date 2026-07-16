@@ -16,6 +16,7 @@ use std::rc::Rc;
 
 use itertools::Itertools;
 use mz_ore::soft_assert_or_log;
+use mz_ore::stack::CheckedBox;
 use mz_repr::{ReprColumnType, ReprScalarType};
 
 use crate::visit::Visit;
@@ -237,7 +238,7 @@ pub fn canonicalize_predicates(
             exprs,
         } = p
         {
-            exprs
+            exprs.into_inner()
         } else {
             vec![p]
         }
@@ -424,7 +425,7 @@ fn replace_subexpr_and_reduce(
                         if negation == *l_func && l_expr1 == r_expr1 && l_expr2 == r_expr2 {
                             *e = MirScalarExpr::CallUnary {
                                 func: UnaryFunc::Not(func::Not),
-                                expr: Box::new(replace_with.clone()),
+                                expr: CheckedBox::new(replace_with.clone()),
                             };
                             changed = true;
                         }

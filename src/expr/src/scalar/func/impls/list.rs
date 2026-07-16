@@ -11,6 +11,7 @@ use std::fmt;
 
 use mz_expr_derive::sqlfunc;
 use mz_lowertest::MzReflect;
+use mz_ore::stack::CheckedBox;
 use mz_repr::{AsColumnType, Datum, DatumList, Row, RowArena, SqlColumnType, SqlScalarType};
 use serde::{Deserialize, Serialize};
 
@@ -99,7 +100,7 @@ impl fmt::Display for CastListToString {
     MzReflect
 )]
 pub struct CastListToJsonb {
-    pub cast_element: Box<MirScalarExpr>,
+    pub cast_element: CheckedBox<MirScalarExpr>,
 }
 
 impl LazyUnaryFunc for CastListToJsonb {
@@ -182,7 +183,7 @@ pub struct CastList1ToList2 {
     /// List2's type
     pub return_ty: SqlScalarType,
     /// The expression to cast List1's elements to List2's elements' type
-    pub cast_expr: Box<MirScalarExpr>,
+    pub cast_expr: CheckedBox<MirScalarExpr>,
 }
 
 impl LazyUnaryFunc for CastList1ToList2 {

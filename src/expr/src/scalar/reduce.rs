@@ -22,6 +22,7 @@ use mz_repr::{ReprColumnType, RowArena};
 use crate::MirScalarExpr;
 use crate::scalar::func::UnaryFunc;
 use crate::visit::Visit;
+use mz_ore::stack::CheckedBox;
 
 mod binary;
 mod if_then;
@@ -82,8 +83,8 @@ fn reduce_pre(e: &mut MirScalarExpr, column_types: &[ReprColumnType]) {
                 } => {
                     if let Some(negated) = bf.negate() {
                         *e = MirScalarExpr::CallBinary {
-                            expr1: Box::new(expr1.take()),
-                            expr2: Box::new(expr2.take()),
+                            expr1: CheckedBox::new(expr1.take()),
+                            expr2: CheckedBox::new(expr2.take()),
                             func: negated,
                         };
                     }

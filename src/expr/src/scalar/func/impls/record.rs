@@ -11,6 +11,7 @@ use std::fmt;
 
 use itertools::Itertools;
 use mz_lowertest::MzReflect;
+use mz_ore::stack::CheckedVec;
 use mz_repr::{Datum, RowArena, SqlColumnType, SqlScalarType};
 use serde::{Deserialize, Serialize};
 
@@ -101,7 +102,7 @@ impl fmt::Display for CastRecordToString {
 )]
 pub struct CastRecord1ToRecord2 {
     pub return_ty: SqlScalarType,
-    pub cast_exprs: Box<[MirScalarExpr]>,
+    pub cast_exprs: CheckedVec<MirScalarExpr>,
 }
 
 impl LazyUnaryFunc for CastRecord1ToRecord2 {

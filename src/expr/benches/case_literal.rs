@@ -12,6 +12,7 @@ use std::hint::black_box;
 use criterion::{Criterion, criterion_group, criterion_main};
 use mz_expr::func::{BinaryFunc, Eq};
 use mz_expr::{Eval, MirScalarExpr};
+use mz_ore::stack::CheckedBox;
 use mz_repr::{Datum, ReprColumnType, ReprRelationType, ReprScalarType, RowArena};
 use mz_transform::Transform;
 use mz_transform::case_literal::CaseLiteralTransform;
@@ -20,8 +21,8 @@ use mz_transform::case_literal::CaseLiteralTransform;
 fn eq(lhs: MirScalarExpr, rhs: MirScalarExpr) -> MirScalarExpr {
     MirScalarExpr::CallBinary {
         func: BinaryFunc::Eq(Eq),
-        expr1: Box::new(lhs),
-        expr2: Box::new(rhs),
+        expr1: CheckedBox::new(lhs),
+        expr2: CheckedBox::new(rhs),
     }
 }
 
@@ -55,7 +56,7 @@ fn build_if_chain(n: usize) -> MirScalarExpr {
 fn build_case_literal(n: usize) -> MirScalarExpr {
     let scalar = build_if_chain(n);
     let mut relation = mz_expr::MirRelationExpr::Map {
-        input: Box::new(mz_expr::MirRelationExpr::constant(
+        input: CheckedBox::new(mz_expr::MirRelationExpr::constant(
             vec![vec![Datum::Int64(0)]],
             ReprRelationType::new(vec![ReprColumnType {
                 scalar_type: ReprScalarType::Int64,

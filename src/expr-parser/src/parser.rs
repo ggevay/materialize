@@ -17,6 +17,7 @@
 // by the Apache License, Version 2.0.
 
 use mz_ore::collections::CollectionExt;
+use mz_ore::stack::CheckedBox;
 use proc_macro2::LineColumn;
 use syn::Error;
 use syn::parse::{Parse, ParseStream, Parser};
@@ -271,8 +272,8 @@ mod relation {
                     };
                     // Do not use the `union` smart constructor here!
                     MirRelationExpr::Union {
-                        base: Box::new(get_cte),
-                        inputs: vec![value],
+                        base: CheckedBox::new(get_cte),
+                        inputs: vec![value].into(),
                     }
                 };
 
@@ -283,17 +284,17 @@ mod relation {
 
             Ok(MirRelationExpr::LetRec {
                 ids,
-                values,
+                values: values.into(),
                 limits,
-                body: Box::new(body),
+                body: CheckedBox::new(body),
             })
         } else {
             let mut body = body;
             for (id, _, value) in ctes.into_iter().rev() {
                 body = MirRelationExpr::Let {
                     id,
-                    value: Box::new(value),
-                    body: Box::new(body),
+                    value: CheckedBox::new(value),
+                    body: CheckedBox::new(body),
                 };
             }
             Ok(body)
@@ -326,7 +327,7 @@ mod relation {
         syn::parenthesized!(content in input);
         let outputs = content.parse_comma_sep(scalar::parse_column_index)?;
         let parse_input = ParseChildren::new(input, project.span().start());
-        let input = Box::new(parse_input.parse_one(ctx, parse_expr)?);
+        let input = CheckedBox::new(parse_input.parse_one(ctx, parse_expr)?);
 
         Ok(MirRelationExpr::Project { input, outputs })
     }
@@ -341,7 +342,7 @@ mod relation {
         };
 
         let parse_input = ParseChildren::new(input, map.span().start());
-        let input = Box::new(parse_input.parse_one(ctx, parse_expr)?);
+        let input = CheckedBox::new(parse_input.parse_one(ctx, parse_expr)?);
 
         Ok(MirRelationExpr::Map { input, scalars })
     }
@@ -395,7 +396,7 @@ mod relation {
         };
 
         let parse_input = ParseChildren::new(input, flat_map.span().start());
-        let input = Box::new(parse_input.parse_one(ctx, parse_expr)?);
+        let input = CheckedBox::new(parse_input.parse_one(ctx, parse_expr)?);
 
         Ok(MirRelationExpr::FlatMap { input, func, exprs })
     }
@@ -410,12 +411,12 @@ mod relation {
             CallVariadic {
                 func: And(_),
                 exprs,
-            } => exprs,
+            } => exprs.into_inner(),
             expr => vec![expr],
         };
 
         let parse_input = ParseChildren::new(input, filter.span().start());
-        let input = Box::new(parse_input.parse_one(ctx, parse_expr)?);
+        let input = CheckedBox::new(parse_input.parse_one(ctx, parse_expr)?);
 
         Ok(MirRelationExpr::Filter { input, predicates })
     }
@@ -427,7 +428,7 @@ mod relation {
         let inputs = parse_inputs.parse_many(ctx, parse_expr)?;
 
         Ok(MirRelationExpr::Join {
-            inputs,
+            inputs: inputs.into(),
             equivalences: vec![],
             implementation: JoinImplementation::Unimplemented,
         })
@@ -446,7 +447,7 @@ mod relation {
         let inputs = parse_inputs.parse_many(ctx, parse_expr)?;
 
         Ok(MirRelationExpr::Join {
-            inputs,
+            inputs: inputs.into(),
             equivalences,
             implementation: JoinImplementation::Unimplemented,
         })
@@ -474,7 +475,7 @@ mod relation {
         };
 
         let parse_inputs = ParseChildren::new(input, reduce.span().start());
-        let input = Box::new(parse_inputs.parse_one(ctx, parse_expr)?);
+        let input = CheckedBox::new(parse_inputs.parse_one(ctx, parse_expr)?);
 
         Ok(MirRelationExpr::Reduce {
             input,
@@ -515,7 +516,7 @@ mod relation {
         };
 
         let parse_inputs = ParseChildren::new(input, reduce.span().start());
-        let input = Box::new(parse_inputs.parse_one(ctx, parse_expr)?);
+        let input = CheckedBox::new(parse_inputs.parse_one(ctx, parse_expr)?);
 
         Ok(MirRelationExpr::Reduce {
             input,
@@ -571,7 +572,7 @@ mod relation {
         };
 
         let parse_inputs = ParseChildren::new(input, top_k.span().start());
-        let input = Box::new(parse_inputs.parse_one(ctx, parse_expr)?);
+        let input = CheckedBox::new(parse_inputs.parse_one(ctx, parse_expr)?);
 
         Ok(MirRelationExpr::TopK {
             input,
@@ -588,7 +589,7 @@ mod relation {
         let negate = input.parse::<kw::Negate>()?;
 
         let parse_input = ParseChildren::new(input, negate.span().start());
-        let input = Box::new(parse_input.parse_one(ctx, parse_expr)?);
+        let input = CheckedBox::new(parse_input.parse_one(ctx, parse_expr)?);
 
         Ok(MirRelationExpr::Negate { input })
     }
@@ -597,7 +598,7 @@ mod relation {
         let threshold = input.parse::<kw::Threshold>()?;
 
         let parse_input = ParseChildren::new(input, threshold.span().start());
-        let input = Box::new(parse_input.parse_one(ctx, parse_expr)?);
+        let input = CheckedBox::new(parse_input.parse_one(ctx, parse_expr)?);
 
         Ok(MirRelationExpr::Threshold { input })
     }
@@ -608,9 +609,12 @@ mod relation {
         let parse_inputs = ParseChildren::new(input, union.span().start());
         let mut children = parse_inputs.parse_many(ctx, parse_expr)?;
         let inputs = children.split_off(1);
-        let base = Box::new(children.into_element());
+        let base = CheckedBox::new(children.into_element());
 
-        Ok(MirRelationExpr::Union { base, inputs })
+        Ok(MirRelationExpr::Union {
+            base,
+            inputs: inputs.into(),
+        })
     }
 
     fn parse_arrange_by(ctx: CtxRef, input: ParseStream) -> Result {
@@ -629,7 +633,7 @@ mod relation {
         };
 
         let parse_input = ParseChildren::new(input, arrange_by.span().start());
-        let input = Box::new(parse_input.parse_one(ctx, parse_expr)?);
+        let input = CheckedBox::new(parse_input.parse_one(ctx, parse_expr)?);
 
         Ok(MirRelationExpr::ArrangeBy { input, keys })
     }
@@ -679,7 +683,7 @@ mod relation {
                     let MirRelationExpr::Union { base, mut inputs } = value.take_dangerous() else {
                         unreachable!("ensured by construction");
                     };
-                    let MirRelationExpr::Get { id: _, typ, .. } = *base else {
+                    let MirRelationExpr::Get { id: _, typ, .. } = base.into_inner() else {
                         unreachable!("ensured by construction");
                     };
                     if let Some(prior_typ) = ctx.env.insert(id.clone(), typ) {
@@ -916,16 +920,16 @@ mod scalar {
                     stack.push(expr);
                 }
                 Entry::Operator(Op::Unr(func)) => {
-                    let expr = Box::new(stack.pop().expect("non-empty stack"));
+                    let expr = CheckedBox::new(stack.pop().expect("non-empty stack"));
                     stack.push(MirScalarExpr::CallUnary { func, expr });
                 }
                 Entry::Operator(Op::Neg(func)) => {
-                    let expr = Box::new(stack.pop().expect("non-empty stack"));
+                    let expr = CheckedBox::new(stack.pop().expect("non-empty stack"));
                     stack.push(MirScalarExpr::CallUnary { func, expr }.not());
                 }
                 Entry::Operator(Op::Bin(func)) => {
-                    let expr2 = Box::new(stack.pop().expect("non-empty stack"));
-                    let expr1 = Box::new(stack.pop().expect("non-empty stack"));
+                    let expr2 = CheckedBox::new(stack.pop().expect("non-empty stack"));
+                    let expr1 = CheckedBox::new(stack.pop().expect("non-empty stack"));
                     stack.push(MirScalarExpr::CallBinary { func, expr1, expr2 });
                 }
                 Entry::Operator(Op::Var(func)) => {
@@ -942,7 +946,10 @@ mod scalar {
                             }
                         }
                     }
-                    stack.push(MirScalarExpr::CallVariadic { func, exprs });
+                    stack.push(MirScalarExpr::CallVariadic {
+                        func,
+                        exprs: exprs.into(),
+                    });
                 }
             }
         }
@@ -1000,9 +1007,9 @@ mod scalar {
             let els = parse_expr(input)?;
             input.parse::<kw::end>()?;
             Ok(MirScalarExpr::If {
-                cond: Box::new(cond),
-                then: Box::new(then),
-                els: Box::new(els),
+                cond: CheckedBox::new(cond),
+                then: CheckedBox::new(then),
+                els: CheckedBox::new(els),
             })
         } else {
             Err(Error::new(input.span(), "expected 'when' after 'case'"))
@@ -1149,13 +1156,13 @@ mod scalar {
             Ok(MirScalarExpr::CallUnmaterializable(func))
         };
         let parse_unary = |func: UnaryFunc| -> Result {
-            let expr = Box::new(parse_expr(&inner)?);
+            let expr = CheckedBox::new(parse_expr(&inner)?);
             Ok(MirScalarExpr::CallUnary { func, expr })
         };
         let parse_binary = |func: BinaryFunc| -> Result {
-            let expr1 = Box::new(parse_expr(&inner)?);
+            let expr1 = CheckedBox::new(parse_expr(&inner)?);
             inner.parse::<syn::Token![,]>()?;
-            let expr2 = Box::new(parse_expr(&inner)?);
+            let expr2 = CheckedBox::new(parse_expr(&inner)?);
             Ok(MirScalarExpr::CallBinary { func, expr1, expr2 })
         };
         let parse_variadic = |func: VariadicFunc| -> Result {
@@ -1200,8 +1207,8 @@ mod scalar {
                     {
                         // We reverse the order in the worklist in order to get
                         // the correct order in the equivalence class.
-                        worklist.push(*expr2);
-                        worklist.push(*expr1);
+                        worklist.push(expr2.into_inner());
+                        worklist.push(expr1.into_inner());
                     } else {
                         equivalence.push(operand);
                     }

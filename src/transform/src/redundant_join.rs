@@ -29,6 +29,7 @@ use mz_expr::visit::Visit;
 use mz_expr::{
     Columns, Id, JoinInputMapper, LocalId, MirRelationExpr, MirScalarExpr, RECURSION_LIMIT,
 };
+use mz_ore::stack::CheckedBox;
 use mz_ore::stack::{CheckedRecursion, RecursionGuard};
 use mz_ore::{assert_none, soft_panic_or_log};
 
@@ -492,7 +493,7 @@ impl ProvInfo {
             MirScalarExpr::CallUnary { func, expr } => self.dereference(expr).and_then(|expr| {
                 Some(MirScalarExpr::CallUnary {
                     func: func.clone(),
-                    expr: Box::new(expr),
+                    expr: CheckedBox::new(expr),
                 })
             }),
             MirScalarExpr::CallBinary { func, expr1, expr2 } => {
@@ -500,8 +501,8 @@ impl ProvInfo {
                     self.dereference(expr2).and_then(|expr2| {
                         Some(MirScalarExpr::CallBinary {
                             func: func.clone(),
-                            expr1: Box::new(expr1),
-                            expr2: Box::new(expr2),
+                            expr1: CheckedBox::new(expr1),
+                            expr2: CheckedBox::new(expr2),
                         })
                     })
                 })
@@ -511,7 +512,7 @@ impl ProvInfo {
                 if new_exprs.len() == exprs.len() {
                     Some(MirScalarExpr::CallVariadic {
                         func: func.clone(),
-                        exprs: new_exprs,
+                        exprs: new_exprs.into(),
                     })
                 } else {
                     None
@@ -524,9 +525,9 @@ impl ProvInfo {
                 self.dereference(then).and_then(|then| {
                     self.dereference(els).and_then(|els| {
                         Some(MirScalarExpr::If {
-                            cond: Box::new(cond),
-                            then: Box::new(then),
-                            els: Box::new(els),
+                            cond: CheckedBox::new(cond),
+                            then: CheckedBox::new(then),
+                            els: CheckedBox::new(els),
                         })
                     })
                 })
@@ -725,7 +726,7 @@ fn try_build_expression_using_other(
                 |expr| {
                     Some(MirScalarExpr::CallUnary {
                         func: func.clone(),
-                        expr: Box::new(expr),
+                        expr: CheckedBox::new(expr),
                     })
                 },
             )
@@ -737,8 +738,8 @@ fn try_build_expression_using_other(
                         .and_then(|expr2| {
                             Some(MirScalarExpr::CallBinary {
                                 func: func.clone(),
-                                expr1: Box::new(expr1),
-                                expr2: Box::new(expr2),
+                                expr1: CheckedBox::new(expr1),
+                                expr2: CheckedBox::new(expr2),
                             })
                         })
                 },
@@ -752,7 +753,7 @@ fn try_build_expression_using_other(
             if new_exprs.len() == exprs.len() {
                 Some(MirScalarExpr::CallVariadic {
                     func: func.clone(),
-                    exprs: new_exprs,
+                    exprs: new_exprs.into(),
                 })
             } else {
                 None
@@ -769,9 +770,9 @@ fn try_build_expression_using_other(
                             try_build_expression_using_other(els, other, other_prov, input_mapper)
                                 .and_then(|els| {
                                     Some(MirScalarExpr::If {
-                                        cond: Box::new(cond),
-                                        then: Box::new(then),
-                                        els: Box::new(els),
+                                        cond: CheckedBox::new(cond),
+                                        then: CheckedBox::new(then),
+                                        els: CheckedBox::new(els),
                                     })
                                 })
                         })

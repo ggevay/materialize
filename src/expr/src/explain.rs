@@ -13,6 +13,7 @@ use std::collections::BTreeMap;
 use std::fmt::Formatter;
 use std::time::Duration;
 
+use mz_ore::stack::CheckedBox;
 use mz_ore::str::{Indent, IndentLike, separated};
 use mz_repr::GlobalId;
 use mz_repr::explain::ExplainError::LinearChainsPlusRecursive;
@@ -246,8 +247,8 @@ pub fn enforce_linear_chains(expr: &mut MirRelationExpr) -> Result<(), ExplainEr
                 // generate a `let $fresh_id = $body in $fresh_id` to replace this input
                 let mut binding = MirRelationExpr::Let {
                     id,
-                    value: Box::new(value),
-                    body: Box::new(Get {
+                    value: CheckedBox::new(value),
+                    body: CheckedBox::new(Get {
                         id: Id::Local(id.clone()),
                         typ: input.typ(),
                         access_strategy: AccessStrategy::UnknownOrLocal,

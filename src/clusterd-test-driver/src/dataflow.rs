@@ -511,7 +511,7 @@ pub fn count_over_index(
         distinct: false,
     };
     let reduce = MirRelationExpr::Reduce {
-        input: Box::new(input.get()),
+        input: mz_ore::stack::CheckedBox::new(input.get()),
         group_key: vec![],
         aggregates: vec![count],
         monotonic: false,
