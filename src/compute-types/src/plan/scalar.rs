@@ -21,7 +21,7 @@ use mz_expr::{
     BinaryFunc, Columns, Eval, EvalError, MapFilterProject, MfpPlan, MirScalarExpr,
     OptimizableExpr, SafeMfpPlan, UnaryFunc, UnmaterializableFunc, VariadicFunc,
 };
-use mz_ore::stack::CheckedBox;
+use mz_ore::stack::{CheckedBox, CheckedVec};
 use mz_ore::str::separated;
 use mz_ore::treat_as_equal::TreatAsEqual;
 use mz_repr::explain::ScalarOps;
@@ -42,23 +42,23 @@ pub enum LirScalarExpr {
         /// Function
         func: UnaryFunc,
         /// Argument
-        expr: Box<LirScalarExpr>,
+        expr: CheckedBox<LirScalarExpr>,
     },
     /// A function call that takes two expressions as arguments.
     CallBinary {
         /// Function
         func: BinaryFunc,
         /// First argument
-        expr1: Box<LirScalarExpr>,
+        expr1: CheckedBox<LirScalarExpr>,
         /// Second argument
-        expr2: Box<LirScalarExpr>,
+        expr2: CheckedBox<LirScalarExpr>,
     },
     /// A function call that takes an arbitrary number of arguments.
     CallVariadic {
         /// Function
         func: VariadicFunc,
         /// Arguments
-        exprs: Vec<LirScalarExpr>,
+        exprs: CheckedVec<LirScalarExpr>,
     },
     /// Conditionally evaluated expressions.
     ///
@@ -68,11 +68,11 @@ pub enum LirScalarExpr {
     /// short-circuit) and we need to preserve that.
     If {
         /// Condition
-        cond: Box<LirScalarExpr>,
+        cond: CheckedBox<LirScalarExpr>,
         /// Then branch
-        then: Box<LirScalarExpr>,
+        then: CheckedBox<LirScalarExpr>,
         /// Else branch
-        els: Box<LirScalarExpr>,
+        els: CheckedBox<LirScalarExpr>,
     },
 }
 
@@ -124,7 +124,7 @@ impl LirScalarExpr {
     pub fn call_unary<U: Into<UnaryFunc>>(self, func: U) -> Self {
         LirScalarExpr::CallUnary {
             func: func.into(),
-            expr: Box::new(self),
+            expr: CheckedBox::new(self),
         }
     }
 
@@ -132,8 +132,8 @@ impl LirScalarExpr {
     pub fn call_binary<B: Into<BinaryFunc>>(self, other: Self, func: B) -> Self {
         LirScalarExpr::CallBinary {
             func: func.into(),
-            expr1: Box::new(self),
-            expr2: Box::new(other),
+            expr1: CheckedBox::new(self),
+            expr2: CheckedBox::new(other),
         }
     }
 
@@ -348,7 +348,12 @@ impl Eval for LirScalarExpr {
         temp_storage: &'a RowArena,
     ) -> Result<Datum<'a>, EvalError> {
         use LirScalarExpr::*;
-        match self {
+        // Evaluation recurses per scalar nesting level (two frames per level, through
+        // `func.eval`), runs on worker threads with default-sized stacks, and sees
+        // expressions as deep as the optimizer's scalar depth limit admits (8192), so
+        // grow the stack as needed. NOTE: this is the per-row hot path, the guard is a
+        // thread-local read and compare per node visit.
+        mz_ore::stack::maybe_grow(|| match self {
             Column(index, _name) => Ok(datums[*index]),
             Literal(res, _column_type) => match res {
                 Ok(row) => Ok(row.unpack_first()),
@@ -366,7 +371,7 @@ impl Eval for LirScalarExpr {
                     format!("if condition evaluated to non-boolean datum: {:?}", d).into(),
                 )),
             },
-        }
+        })
     }
 
     /// True iff evaluation could possibly error on non-error input `Datum`.
@@ -654,7 +659,7 @@ impl TryFrom<&MirScalarExpr> for LirScalarExpr {
             )),
             CallUnary { func, expr } => Ok(LirScalarExpr::CallUnary {
                 func: func.clone(),
-                expr: Box::new(LirScalarExpr::try_from(expr.as_ref())?),
+                expr: CheckedBox::new(LirScalarExpr::try_from(expr.as_ref())?),
             }),
             CallBinary { func, expr1, expr2 } => {
                 match (
@@ -663,8 +668,8 @@ impl TryFrom<&MirScalarExpr> for LirScalarExpr {
                 ) {
                     (Ok(expr1), Ok(expr2)) => Ok(LirScalarExpr::CallBinary {
                         func: func.clone(),
-                        expr1: Box::new(expr1),
-                        expr2: Box::new(expr2),
+                        expr1: CheckedBox::new(expr1),
+                        expr2: CheckedBox::new(expr2),
                     }),
                     (Ok(_), Err(e)) | (Err(e), Ok(_)) => Err(e),
                     (Err(mut e1), Err(mut e2)) => {
@@ -682,7 +687,7 @@ impl TryFrom<&MirScalarExpr> for LirScalarExpr {
                 if errors.is_empty() {
                     Ok(LirScalarExpr::CallVariadic {
                         func: func.clone(),
-                        exprs,
+                        exprs: exprs.into(),
                     })
                 } else {
                     Err(errors.concat())
@@ -695,9 +700,9 @@ impl TryFrom<&MirScalarExpr> for LirScalarExpr {
 
                 match (cond, then, els) {
                     (Ok(cond), Ok(then), Ok(els)) => Ok(LirScalarExpr::If {
-                        cond: Box::new(cond),
-                        then: Box::new(then),
-                        els: Box::new(els),
+                        cond: CheckedBox::new(cond),
+                        then: CheckedBox::new(then),
+                        els: CheckedBox::new(els),
                     }),
                     (Err(e), Ok(_), Ok(_)) | (Ok(_), Err(e), Ok(_)) | (Ok(_), Ok(_), Err(e)) => {
                         Err(e)
@@ -816,23 +821,25 @@ pub(crate) fn lses_from_mses<'a>(
 mod tests {
     use super::*;
 
-    /// The MIR<->LIR scalar conversions (and `could_error`) recurse per scalar nesting
-    /// level, and the optimizer's scalar depth limit admits expressions up to 8192
-    /// levels deep (e.g. the If chain of a big CASE), so they must not overflow the
-    /// stack. The recursions are guarded by `maybe_grow`, so this must succeed even on
-    /// a small thread stack.
+    /// The MIR<->LIR scalar conversions, `could_error`, and per-row evaluation recurse
+    /// per scalar nesting level, and the optimizer's scalar depth limit admits
+    /// expressions up to 8192 levels deep (e.g. the If chain of a big CASE, or NOT
+    /// chains composed by stacked views), so they must not overflow the stack. The
+    /// recursions are guarded by `maybe_grow` (and the derived walks by the
+    /// `CheckedBox`/`CheckedVec` fields), so this must succeed even on a small thread
+    /// stack.
     #[mz_ore::test]
     #[cfg_attr(miri, ignore)] // too slow, and stacker is unsupported under miri
-    fn deep_if_chain_conversion() {
+    fn deep_scalar_conversion_and_eval() {
         std::thread::Builder::new()
-            .stack_size(8 << 20)
-            .spawn(deep_if_chain_conversion_inner)
+            .stack_size(2 << 20)
+            .spawn(deep_scalar_conversion_and_eval_inner)
             .expect("thread spawns")
             .join()
-            .expect("no crash");
+            .expect("no crash")
     }
 
-    fn deep_if_chain_conversion_inner() {
+    fn deep_scalar_conversion_and_eval_inner() {
         use mz_repr::{Datum, ReprScalarType};
 
         // Build iteratively, a recursive builder would overflow the small test stack.
@@ -852,7 +859,21 @@ mod tests {
         assert!(!lir.could_error());
         let roundtripped = MirScalarExpr::from(&lir);
         assert!(expr == roundtripped, "roundtrip differs from the original");
-        // NB: dropping `lir` recurses over its plain `Box` fields (unguarded, unlike the
-        // MirScalarExpr drops), which the small stack accommodates at this depth.
+
+        // A NOT chain exercises the `CallUnary` evaluation shape, which recurses through
+        // `func.eval` with larger frames than the lazily evaluated `If` chain above.
+        let mut not_chain = MirScalarExpr::literal_true();
+        for _ in 0..10_000 {
+            not_chain = not_chain.not();
+        }
+        let lir_not_chain =
+            LirScalarExpr::try_from(&not_chain).expect("no unmaterializable functions");
+        let arena = RowArena::new();
+        // An even number of NOTs over `true` evaluates to `true`.
+        assert_eq!(lir_not_chain.eval(&[], &arena), Ok(Datum::True));
+        assert_eq!(not_chain.eval(&[], &arena), Ok(Datum::True));
+        // NOTE: all the walks this test exercises are guarded: the conversions and both
+        // evals by maybe_grow, the drops and comparisons by the CheckedBox/CheckedVec
+        // recursive fields of both expression types.
     }
 }

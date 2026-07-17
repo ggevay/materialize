@@ -1175,7 +1175,12 @@ impl Eval for MirScalarExpr {
         datums: &[Datum<'a>],
         temp_storage: &'a RowArena,
     ) -> Result<Datum<'a>, EvalError> {
-        match self {
+        // Evaluation recurses per scalar nesting level (two frames per level, through
+        // `func.eval`), runs on worker threads with default-sized stacks, and sees
+        // expressions as deep as the optimizer's scalar depth limit admits (8192), so
+        // grow the stack as needed. NOTE: this is the per-row hot path, the guard is a
+        // thread-local read and compare per node visit.
+        mz_ore::stack::maybe_grow(|| match self {
             MirScalarExpr::Column(index, _name) => Ok(datums[*index]),
             MirScalarExpr::Literal(res, _column_type) => match res {
                 Ok(row) => Ok(row.unpack_first()),
@@ -1203,7 +1208,7 @@ impl Eval for MirScalarExpr {
                     format!("if condition evaluated to non-boolean datum: {:?}", d).into(),
                 )),
             },
-        }
+        })
     }
 
     fn could_error(&self) -> bool {
