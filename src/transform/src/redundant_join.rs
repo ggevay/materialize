@@ -465,13 +465,7 @@ impl ProvInfo {
     fn dereference(&self, expr: &MirScalarExpr) -> Option<MirScalarExpr> {
         // This method recurses per scalar expression level, so grow the stack as needed
         // instead of overflowing on deep expressions (e.g. the If chain of a big CASE).
-        mz_ore::stack::maybe_grow(|| self.dereference_inner(expr))
-    }
-
-    /// The body of [`Self::dereference`]. Must only be called through `dereference`,
-    /// which ensures sufficient stack space for the recursion.
-    fn dereference_inner(&self, expr: &MirScalarExpr) -> Option<MirScalarExpr> {
-        match expr {
+        mz_ore::stack::maybe_grow(|| match expr {
             MirScalarExpr::Column(c, _) => {
                 if let Some(expr) = &self.dereferenced_projection[*c] {
                     Some(expr.clone())
@@ -521,7 +515,7 @@ impl ProvInfo {
                     })
                 })
             }),
-        }
+        })
     }
 
     /// Like `dereference` but only returns expressions that actually depend on
@@ -694,96 +688,90 @@ fn try_build_expression_using_other(
     // This function recurses per scalar expression level, so grow the stack as needed
     // instead of overflowing on deep expressions.
     mz_ore::stack::maybe_grow(|| {
-        try_build_expression_using_other_inner(root_expr, other, other_prov, input_mapper)
-    })
-}
+        if root_expr.is_literal() {
+            return Some(root_expr.clone());
+        }
 
-/// The body of [`try_build_expression_using_other`]. Must only be called through it,
-/// which ensures sufficient stack space for the recursion.
-fn try_build_expression_using_other_inner(
-    root_expr: &MirScalarExpr,
-    other: usize,
-    other_prov: &ProvInfo,
-    input_mapper: &JoinInputMapper,
-) -> Option<MirScalarExpr> {
-    if root_expr.is_literal() {
-        return Some(root_expr.clone());
-    }
-
-    // Check if 'other' projects a column that lead to `root_expr`.
-    for (other_col, derefed) in other_prov.dereferenced_projection.iter().enumerate() {
-        if let Some(derefed) = derefed {
-            if derefed == root_expr {
-                return Some(MirScalarExpr::column(
-                    input_mapper.map_column_to_global(other_col, other),
-                ));
+        // Check if 'other' projects a column that lead to `root_expr`.
+        for (other_col, derefed) in other_prov.dereferenced_projection.iter().enumerate() {
+            if let Some(derefed) = derefed {
+                if derefed == root_expr {
+                    return Some(MirScalarExpr::column(
+                        input_mapper.map_column_to_global(other_col, other),
+                    ));
+                }
             }
         }
-    }
 
-    // Otherwise, try to build root_expr's sub-expressions recursively
-    // other's projection.
-    match root_expr {
-        MirScalarExpr::Column(_, _) => None,
-        MirScalarExpr::CallUnary { func, expr } => {
-            try_build_expression_using_other(expr, other, other_prov, input_mapper).and_then(
-                |expr| {
-                    Some(MirScalarExpr::CallUnary {
-                        func: func.clone(),
-                        expr: CheckedBox::new(expr),
-                    })
-                },
-            )
-        }
-        MirScalarExpr::CallBinary { func, expr1, expr2 } => {
-            try_build_expression_using_other(expr1, other, other_prov, input_mapper).and_then(
-                |expr1| {
-                    try_build_expression_using_other(expr2, other, other_prov, input_mapper)
-                        .and_then(|expr2| {
-                            Some(MirScalarExpr::CallBinary {
-                                func: func.clone(),
-                                expr1: CheckedBox::new(expr1),
-                                expr2: CheckedBox::new(expr2),
-                            })
+        // Otherwise, try to build root_expr's sub-expressions recursively
+        // other's projection.
+        match root_expr {
+            MirScalarExpr::Column(_, _) => None,
+            MirScalarExpr::CallUnary { func, expr } => {
+                try_build_expression_using_other(expr, other, other_prov, input_mapper).and_then(
+                    |expr| {
+                        Some(MirScalarExpr::CallUnary {
+                            func: func.clone(),
+                            expr: CheckedBox::new(expr),
                         })
-                },
-            )
-        }
-        MirScalarExpr::CallVariadic { func, exprs } => {
-            let new_exprs = exprs
-                .iter()
-                .flat_map(|e| try_build_expression_using_other(e, other, other_prov, input_mapper))
-                .collect_vec();
-            if new_exprs.len() == exprs.len() {
-                Some(MirScalarExpr::CallVariadic {
-                    func: func.clone(),
-                    exprs: new_exprs.into(),
-                })
-            } else {
-                None
+                    },
+                )
             }
-        }
-        MirScalarExpr::Literal(..) | MirScalarExpr::CallUnmaterializable(..) => {
-            Some(root_expr.clone())
-        }
-        MirScalarExpr::If { cond, then, els } => {
-            try_build_expression_using_other(cond, other, other_prov, input_mapper).and_then(
-                |cond| {
-                    try_build_expression_using_other(then, other, other_prov, input_mapper)
-                        .and_then(|then| {
-                            try_build_expression_using_other(els, other, other_prov, input_mapper)
-                                .and_then(|els| {
-                                    Some(MirScalarExpr::If {
-                                        cond: CheckedBox::new(cond),
-                                        then: CheckedBox::new(then),
-                                        els: CheckedBox::new(els),
-                                    })
+            MirScalarExpr::CallBinary { func, expr1, expr2 } => {
+                try_build_expression_using_other(expr1, other, other_prov, input_mapper).and_then(
+                    |expr1| {
+                        try_build_expression_using_other(expr2, other, other_prov, input_mapper)
+                            .and_then(|expr2| {
+                                Some(MirScalarExpr::CallBinary {
+                                    func: func.clone(),
+                                    expr1: CheckedBox::new(expr1),
+                                    expr2: CheckedBox::new(expr2),
                                 })
-                        })
-                },
+                            })
+                    },
+                )
+            }
+            MirScalarExpr::CallVariadic { func, exprs } => {
+                let new_exprs = exprs
+                    .iter()
+                    .flat_map(|e| {
+                        try_build_expression_using_other(e, other, other_prov, input_mapper)
+                    })
+                    .collect_vec();
+                if new_exprs.len() == exprs.len() {
+                    Some(MirScalarExpr::CallVariadic {
+                        func: func.clone(),
+                        exprs: new_exprs.into(),
+                    })
+                } else {
+                    None
+                }
+            }
+            MirScalarExpr::Literal(..) | MirScalarExpr::CallUnmaterializable(..) => {
+                Some(root_expr.clone())
+            }
+            MirScalarExpr::If { cond, then, els } => try_build_expression_using_other(
+                cond,
+                other,
+                other_prov,
+                input_mapper,
             )
+            .and_then(|cond| {
+                try_build_expression_using_other(then, other, other_prov, input_mapper).and_then(
+                    |then| {
+                        try_build_expression_using_other(els, other, other_prov, input_mapper)
+                            .and_then(|els| {
+                                Some(MirScalarExpr::If {
+                                    cond: CheckedBox::new(cond),
+                                    then: CheckedBox::new(then),
+                                    els: CheckedBox::new(els),
+                                })
+                            })
+                    },
+                )
+            }),
         }
-    }
+    })
 }
 
 /// A context of `ProvInfo` vectors associated with bindings that might still be

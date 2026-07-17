@@ -214,22 +214,16 @@ impl<'a> TransformCtx<'a> {
         }
     }
 
-    /// Whether the scalar expression depth of plans needs to be measured for
-    /// [`Self::enforce_plan_depth_limits`]. Callers of the fused hash-and-depth walk use
-    /// this to skip the scalar measurement (the costly part of the walk) when the scalar
-    /// limit is disabled.
-    fn measure_scalar_depth(&self) -> bool {
-        self.features.optimizer_scalar_expr_depth_limit != 0
-    }
-
-    /// Enforces `features.optimizer_plan_depth_limit` on the relation nesting depth and
-    /// `features.optimizer_scalar_expr_depth_limit` on the scalar expression nesting
-    /// depth of a plan, given the depths that the caller obtains from the fused
-    /// hash-and-depth walk ([`MirRelationExpr::hash_and_depths_to_u64`]).
+    /// Hashes the plan (one fused iterative walk that also measures the plan's nesting
+    /// depths), enforces the depth limits on the measured depths, and records the hash
+    /// as the plan's last hash. Returns the hash.
     ///
-    /// Returns a [`TransformError::RecursionLimit`] error (surfaced to users as "query is
-    /// too complex") if either depth exceeds its limit. A limit of 0 disables that
-    /// dimension's check.
+    /// Enforced are `features.optimizer_plan_depth_limit` on the relation nesting depth
+    /// and `features.optimizer_scalar_expr_depth_limit` on the scalar expression nesting
+    /// depth. A limit of 0 disables that dimension's check (the scalar measurement, the
+    /// costly part of the walk, is skipped when the scalar limit is disabled). On a
+    /// tripped limit, returns a [`TransformError::RecursionLimit`] error (surfaced to
+    /// users as "query is too complex") without recording the hash.
     ///
     /// `context` names the transform (or pipeline stage) that produced the plan, for the
     /// internal log only.
@@ -239,37 +233,46 @@ impl<'a> TransformCtx<'a> {
     /// so those traversals can use bare `maybe_grow` instead of a counted recursion
     /// guard. It also acts as a bug detector for transforms that blow up the depth of a
     /// reasonable plan.
-    fn enforce_plan_depth_limits(
-        &self,
-        depths: mz_expr::PlanDepths,
+    ///
+    /// NOTE: the scalar depth measurement does not see recursive `UnaryFunc` payloads
+    /// (e.g. `cast_expr`), see the contract note on [`MirScalarExpr::depth`] for why
+    /// that is safe.
+    fn check_limits_and_record_hash(
+        &mut self,
+        relation: &MirRelationExpr,
         context: &str,
-    ) -> Result<(), TransformError> {
-        let relation_limit = self.features.optimizer_plan_depth_limit;
+    ) -> Result<u64, TransformError> {
         let scalar_limit = self.features.optimizer_scalar_expr_depth_limit;
-        let tripped_limit = if relation_limit != 0 && depths.relation_depth > relation_limit {
-            tracing::info!(
-                context,
-                relation_depth = depths.relation_depth,
-                limit = relation_limit,
-                global_id = ?self.global_id,
-                "plan exceeds the optimizer plan depth limit",
-            );
-            relation_limit
-        } else if scalar_limit != 0 && depths.scalar_depth > scalar_limit {
-            tracing::info!(
-                context,
-                scalar_depth = depths.scalar_depth,
-                limit = scalar_limit,
-                global_id = ?self.global_id,
-                "plan exceeds the optimizer scalar expression depth limit",
-            );
-            scalar_limit
-        } else {
-            return Ok(());
-        };
-        Err(TransformError::RecursionLimit(RecursionLimitError::new(
-            tripped_limit,
-        )))
+        let (hash, depths) = relation.hash_and_depths_to_u64(scalar_limit != 0);
+
+        let relation_limit = self.features.optimizer_plan_depth_limit;
+        let mut tripped = None;
+        for (dimension, depth, limit) in [
+            ("relation", depths.relation_depth, relation_limit),
+            ("scalar expression", depths.scalar_depth, scalar_limit),
+        ] {
+            if limit != 0 && depth > limit {
+                tracing::info!(
+                    context,
+                    dimension,
+                    depth,
+                    limit,
+                    global_id = ?self.global_id,
+                    "plan exceeds an optimizer depth limit",
+                );
+                // If both dimensions trip, the returned error deterministically carries
+                // the relation limit (the first tripped dimension). Both are logged.
+                tripped.get_or_insert(limit);
+            }
+        }
+        if let Some(limit) = tripped {
+            return Err(TransformError::RecursionLimit(RecursionLimitError::new(
+                limit,
+            )));
+        }
+
+        self.record_last_hash(hash);
+        Ok(hash)
     }
 }
 
@@ -300,14 +303,12 @@ pub trait Transform: fmt::Debug {
         }
 
         // On failure, return without hashing the plan: the hash walk is what the depth
-        // limit protects.
+        // limit protects. NOTE: failing applications are therefore timed (above) but
+        // not counted by `inc_transform` below, whose "changed" flag needs the result's
+        // hash.
         res?;
 
-        // One fused iterative walk computes both the new plan hash and the depths for
-        // the limit checks.
-        let (hash_after, depths) = relation.hash_and_depths_to_u64(args.measure_scalar_depth());
-        args.enforce_plan_depth_limits(depths, self.name())?;
-        args.record_last_hash(hash_after);
+        let hash_after = args.check_limits_and_record_hash(relation, self.name())?;
 
         if let Some(metrics) = &mut args.metrics {
             metrics.inc_transform(hash_before != hash_after, self.name());
@@ -1114,13 +1115,11 @@ impl Optimizer {
         relation: &mut MirRelationExpr,
         args: &mut TransformCtx,
     ) -> Result<(), TransformError> {
-        // Enforce the plan depth limit on the incoming plan, before the transforms
+        // Enforce the plan depth limits on the incoming plan, before the transforms
         // recurse over it. Plans this deep can arrive here from lowering, whose own
         // recursion limit counts HIR nodes, while e.g. `Let` chains make the
         // corresponding MIR tree deeper. The depths come for free with the hash walk.
-        let (hash, depths) = relation.hash_and_depths_to_u64(args.measure_scalar_depth());
-        args.enforce_plan_depth_limits(depths, self.name)?;
-        args.record_last_hash(hash);
+        args.check_limits_and_record_hash(relation, self.name)?;
 
         for transform in self.transforms.iter() {
             transform.transform(relation, args)?;
@@ -1140,12 +1139,7 @@ pub(crate) mod deep_plan_test_support {
     /// recursion over a deep plan reliably overflows instead of fitting into the
     /// generously sized default test stack.
     pub(crate) fn on_small_stack(f: impl FnOnce() + Send + 'static) {
-        std::thread::Builder::new()
-            .stack_size(4 << 20)
-            .spawn(f)
-            .expect("thread spawns")
-            .join()
-            .expect("no crash");
+        mz_ore::stack::run_on_small_stack(4 << 20, f).expect("no crash");
     }
 
     /// A chain of `depth` nodes produced by `wrap`, over a single-row boolean constant.

@@ -69,6 +69,8 @@ impl LiteralConstraints {
     ) -> Result<(), crate::TransformError> {
         // This method recurses per tree level (through the `try_visit_mut_children`
         // closure), so grow the stack as needed instead of overflowing on deep plans.
+        // The body stays a named method (rather than being inlined into the closure)
+        // because it is over a hundred lines long.
         mz_ore::stack::maybe_grow(|| self.action_inner(relation, transform_ctx))
     }
 

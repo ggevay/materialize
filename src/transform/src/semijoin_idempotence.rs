@@ -323,92 +323,84 @@ fn list_replacements(
 ) -> Vec<Replacement> {
     // This function recurses per tree level (down Project/Reduce/ArrangeBy chains), so
     // grow the stack as needed instead of overflowing on deep plans.
-    mz_ore::stack::maybe_grow(|| list_replacements_inner(expr, let_replacements, gets_behind_gets))
-}
-
-/// The body of [`list_replacements`]. Must only be called through it, which ensures
-/// sufficient stack space for the recursion.
-fn list_replacements_inner(
-    expr: &MirRelationExpr,
-    let_replacements: &BTreeMap<LocalId, Vec<Replacement>>,
-    gets_behind_gets: &BTreeMap<LocalId, Vec<(Id, Vec<MirScalarExpr>)>>,
-) -> Vec<Replacement> {
-    let mut results = Vec::new();
-    match expr {
-        MirRelationExpr::Get {
-            id: Id::Local(lid), ..
-        } => {
-            // The `Get` may reference an `id` that offers semijoin replacements.
-            if let Some(replacements) = let_replacements.get(lid) {
-                results.extend(replacements.iter().cloned());
+    mz_ore::stack::maybe_grow(|| {
+        let mut results = Vec::new();
+        match expr {
+            MirRelationExpr::Get {
+                id: Id::Local(lid), ..
+            } => {
+                // The `Get` may reference an `id` that offers semijoin replacements.
+                if let Some(replacements) = let_replacements.get(lid) {
+                    results.extend(replacements.iter().cloned());
+                }
             }
-        }
-        MirRelationExpr::Join {
-            inputs,
-            equivalences,
-            ..
-        } => {
-            results.extend(list_replacements_join(
+            MirRelationExpr::Join {
                 inputs,
                 equivalences,
-                gets_behind_gets,
-            ));
+                ..
+            } => {
+                results.extend(list_replacements_join(
+                    inputs,
+                    equivalences,
+                    gets_behind_gets,
+                ));
+            }
+            MirRelationExpr::Project { input, outputs } => {
+                // If the columns are preserved by projection ..
+                results.extend(
+                    list_replacements(input, let_replacements, gets_behind_gets)
+                        .into_iter()
+                        .filter_map(|mut replacement| {
+                            let new_cols = replacement
+                                .columns
+                                .iter()
+                                .filter_map(|(c0, c1, c2)| {
+                                    outputs.iter().position(|o| o == c1).map(|c| (*c0, c, *c2))
+                                })
+                                .collect::<Vec<_>>();
+                            if new_cols.len() == replacement.columns.len() {
+                                replacement.columns = new_cols;
+                                Some(replacement)
+                            } else {
+                                None
+                            }
+                        }),
+                );
+            }
+            MirRelationExpr::Reduce {
+                input, group_key, ..
+            } => {
+                // If the columns are preserved by `group_key` ..
+                results.extend(
+                    list_replacements(input, let_replacements, gets_behind_gets)
+                        .into_iter()
+                        .filter_map(|mut replacement| {
+                            let new_cols = replacement
+                                .columns
+                                .iter()
+                                .filter_map(|(c0, c1, c2)| {
+                                    group_key
+                                        .iter()
+                                        .position(|o| o.as_column() == Some(*c1))
+                                        .map(|c| (*c0, c, *c2))
+                                })
+                                .collect::<Vec<_>>();
+                            if new_cols.len() == replacement.columns.len() {
+                                replacement.columns = new_cols;
+                                Some(replacement)
+                            } else {
+                                None
+                            }
+                        }),
+                );
+            }
+            MirRelationExpr::ArrangeBy { input, .. } => {
+                results.extend(list_replacements(input, let_replacements, gets_behind_gets));
+            }
+            _ => {}
         }
-        MirRelationExpr::Project { input, outputs } => {
-            // If the columns are preserved by projection ..
-            results.extend(
-                list_replacements(input, let_replacements, gets_behind_gets)
-                    .into_iter()
-                    .filter_map(|mut replacement| {
-                        let new_cols = replacement
-                            .columns
-                            .iter()
-                            .filter_map(|(c0, c1, c2)| {
-                                outputs.iter().position(|o| o == c1).map(|c| (*c0, c, *c2))
-                            })
-                            .collect::<Vec<_>>();
-                        if new_cols.len() == replacement.columns.len() {
-                            replacement.columns = new_cols;
-                            Some(replacement)
-                        } else {
-                            None
-                        }
-                    }),
-            );
-        }
-        MirRelationExpr::Reduce {
-            input, group_key, ..
-        } => {
-            // If the columns are preserved by `group_key` ..
-            results.extend(
-                list_replacements(input, let_replacements, gets_behind_gets)
-                    .into_iter()
-                    .filter_map(|mut replacement| {
-                        let new_cols = replacement
-                            .columns
-                            .iter()
-                            .filter_map(|(c0, c1, c2)| {
-                                group_key
-                                    .iter()
-                                    .position(|o| o.as_column() == Some(*c1))
-                                    .map(|c| (*c0, c, *c2))
-                            })
-                            .collect::<Vec<_>>();
-                        if new_cols.len() == replacement.columns.len() {
-                            replacement.columns = new_cols;
-                            Some(replacement)
-                        } else {
-                            None
-                        }
-                    }),
-            );
-        }
-        MirRelationExpr::ArrangeBy { input, .. } => {
-            results.extend(list_replacements(input, let_replacements, gets_behind_gets));
-        }
-        _ => {}
-    }
-    results
+        results
+    })
 }
 
 /// Return a list of potential semijoin replacements for `expr`.

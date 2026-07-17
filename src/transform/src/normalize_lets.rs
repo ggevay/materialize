@@ -513,36 +513,32 @@ mod let_motion {
     /// the `LetRec` nesting depth rather than the total plan depth. `maybe_grow` guards
     /// against pathologically deep `LetRec` nesting anyway.
     fn post_order_harvest_lets(expr: &mut MirRelationExpr) {
-        mz_ore::stack::maybe_grow(|| post_order_harvest_lets_inner(expr))
-    }
-
-    /// The body of [`post_order_harvest_lets`]. Must only be called through it, which
-    /// ensures sufficient stack space for the recursion.
-    fn post_order_harvest_lets_inner(expr: &mut MirRelationExpr) {
-        if let MirRelationExpr::LetRec {
-            ids,
-            values,
-            limits,
-            body,
-        } = expr
-        {
-            // Only recursively descend through `LetRec` stages.
-            for value in values.iter_mut() {
-                post_order_harvest_lets(value);
-            }
-
-            let mut bindings = BTreeMap::new();
-            for ((id, mut value), max_iter) in ids
-                .drain(..)
-                .zip_eq(values.drain(..))
-                .zip_eq(limits.drain(..))
+        mz_ore::stack::maybe_grow(|| {
+            if let MirRelationExpr::LetRec {
+                ids,
+                values,
+                limits,
+                body,
+            } = expr
             {
-                bindings.extend(harvest_non_recursive(&mut value));
-                bindings.insert(id, (value, max_iter));
+                // Only recursively descend through `LetRec` stages.
+                for value in values.iter_mut() {
+                    post_order_harvest_lets(value);
+                }
+
+                let mut bindings = BTreeMap::new();
+                for ((id, mut value), max_iter) in ids
+                    .drain(..)
+                    .zip_eq(values.drain(..))
+                    .zip_eq(limits.drain(..))
+                {
+                    bindings.extend(harvest_non_recursive(&mut value));
+                    bindings.insert(id, (value, max_iter));
+                }
+                bindings.extend(harvest_non_recursive(body));
+                replace_bindings_from_map(bindings, ids, values, limits);
             }
-            bindings.extend(harvest_non_recursive(body));
-            replace_bindings_from_map(bindings, ids, values, limits);
-        }
+        })
     }
 
     /// Harvest any safe-to-lift non-recursive bindings from a `LetRec`

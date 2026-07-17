@@ -130,7 +130,8 @@ impl EquivalencePropagation {
         ctx: &mut TransformCtx,
     ) {
         // This method recurses per tree level, so grow the stack as needed instead of
-        // overflowing on deep plans.
+        // overflowing on deep plans. The body stays a named method (rather than being
+        // inlined into the closure) because it is several hundred lines long.
         mz_ore::stack::maybe_grow(|| {
             self.apply_inner(expr, derived, outer_equivalences, get_equivalences, ctx)
         })

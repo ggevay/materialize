@@ -894,8 +894,9 @@ mod non_negative {
     /// can be found here: <https://github.com/MaterializeInc/database-issues/issues/4044>.
     fn is_superset_of(mut lhs: &MirRelationExpr, mut rhs: &MirRelationExpr) -> bool {
         // This implementation is iterative.
-        // Before converting this implementation to recursive (e.g. to improve its accuracy)
-        // make sure to use the `CheckedRecursion` struct to avoid blowing the stack.
+        // Before converting this implementation to recursive (e.g. to improve its
+        // accuracy), guard the recursion with `mz_ore::stack::maybe_grow`. The uniform
+        // optimizer depth limits bound how deep the recursion can get.
         while lhs != rhs {
             match rhs {
                 MirRelationExpr::Filter { input, .. } => rhs = &**input,
