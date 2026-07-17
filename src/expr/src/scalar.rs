@@ -1408,6 +1408,12 @@ impl MirScalarExpr {
     /// Recursive, but growing the stack as needed, so safe on expressions of any depth.
     /// Deliberately not worklist-based: this runs once per scalar expression per
     /// transform application, and the recursion avoids a heap allocation per call.
+    ///
+    /// NOTE: `children()` does not descend into recursive `UnaryFunc` payloads (e.g.
+    /// `cast_expr`), so payload nesting is not counted here and thus not bounded by the
+    /// optimizer's scalar depth limit. That is safe: payload depth comes from type
+    /// nesting rather than query text depth, and all payload-descending traversals go
+    /// through the guarded impls of the `CheckedBox` payload fields.
     pub fn depth(&self) -> usize {
         mz_ore::stack::maybe_grow(|| 1 + self.children().map(|c| c.depth()).max().unwrap_or(0))
     }

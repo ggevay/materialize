@@ -659,8 +659,9 @@ pub static OPTIMIZER_PLAN_DEPTH_LIMIT: VarDefinition = VarDefinition::new(
     value!(usize; mz_ore::stack::RECURSION_LIMIT),
     "The maximum nesting depth of relation operators that the optimizer accepts in a \
     plan, checked at optimizer entry and after each transform. Queries whose plans \
-    exceed it fail with a 'query is too complex' error. Setting this to 0 disables \
-    the check (Materialize).",
+    exceed it fail with a 'query is too complex' error. Setting this to 0 disables the \
+    check and leaves optimizer recursion depth-unbounded (the stack grows on the heap \
+    as needed), which is intended for emergencies (Materialize).",
     false,
 );
 
@@ -668,12 +669,13 @@ pub static OPTIMIZER_SCALAR_EXPR_DEPTH_LIMIT: VarDefinition = VarDefinition::new
     "optimizer_scalar_expr_depth_limit",
     // 4x the plan depth limit: covers deep CASE chains and stacked-view scalar
     // inlining, while staying far below the stack ceiling of the remaining
-    // recursive derived scalar walks.
-    value!(usize; 8192),
+    // recursive scalar walks.
+    value!(usize; 4 * mz_ore::stack::RECURSION_LIMIT),
     "The maximum nesting depth of scalar expressions that the optimizer accepts in a \
     plan, checked at optimizer entry and after each transform. Queries whose plans \
-    exceed it fail with a 'query is too complex' error. Setting this to 0 disables \
-    the check (Materialize).",
+    exceed it fail with a 'query is too complex' error. Setting this to 0 disables the \
+    check and leaves optimizer recursion depth-unbounded (the stack grows on the heap \
+    as needed), which is intended for emergencies (Materialize).",
     false,
 );
 

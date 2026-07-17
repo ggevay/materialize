@@ -77,7 +77,8 @@ fn test_deep_relation_clone_eq_hash_debug_drop() {
         assert_eq!(expr.hash_to_u64(), clone.hash_to_u64());
         let rendered = format!("{expr:?}");
         assert!(rendered.starts_with("Union"));
-        // Plain drops, with no dismantling helper such as destroy_carefully.
+        // Plain drops. The guarded Drop of the recursive fields makes any eager
+        // dismantling helper unnecessary.
         drop(expr);
         drop(clone);
     });

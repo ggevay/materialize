@@ -4313,21 +4313,18 @@ mod tests {
         assert_ne!(hash1, mutated.hash_to_u64());
     }
 
-    /// Cloning, hashing, and dropping a very deep plan must not overflow the stack.
-    /// Regression test for the stack overflow in `Fixpoint::actually_perform_transform`'s
-    /// per-iteration `relation.clone()` on ~27k-deep plans.
+    /// The fused hash+depth walk over a very deep plan must not overflow the stack, and
+    /// must measure the depths correctly. (Clone/eq/hash/drop coverage for deep plans
+    /// lives in tests/deep_plan.rs. What is unique here: the `PlanDepths` measurement
+    /// and the scalar-carrying `Filter` branch of the fused walk.)
     #[mz_ore::test]
     #[cfg_attr(miri, ignore)] // too slow
-    fn deep_plan_clone_and_hash() {
-        std::thread::Builder::new()
-            .stack_size(4 << 20)
-            .spawn(deep_plan_clone_and_hash_inner)
-            .expect("thread spawns")
-            .join()
+    fn deep_plan_hash_and_depths() {
+        mz_ore::stack::run_on_small_stack(4 << 20, deep_plan_hash_and_depths_inner)
             .expect("no crash");
     }
 
-    fn deep_plan_clone_and_hash_inner() {
+    fn deep_plan_hash_and_depths_inner() {
         let typ = ReprRelationType::new(vec![ReprColumnType {
             scalar_type: ReprScalarType::Bool,
             nullable: false,
@@ -4341,14 +4338,11 @@ mod tests {
             };
         }
 
-        let cloned = plan.clone();
-        assert_eq!(plan.hash_to_u64(), cloned.hash_to_u64());
-        let (_hash, depths) = plan.hash_and_depths_to_u64(true);
+        let (hash, depths) = plan.hash_and_depths_to_u64(true);
         assert_eq!(depths.relation_depth, 50_001);
         assert_eq!(depths.scalar_depth, 1);
-        // The comparison (including the guarded `Ord` walk in `PartialEq`'s soft
-        // assertion) and the implicit drops of both plans must also fit the small stack.
-        assert!(plan == cloned, "clone differs from the original");
+        // The hash must not depend on whether the scalar depth is measured.
+        assert_eq!(hash, plan.hash_to_u64());
     }
 
     #[mz_ore::test]
