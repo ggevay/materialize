@@ -1378,6 +1378,7 @@ impl SessionClient {
                 | Command::LookupConnection { .. }
                 | Command::RegisterFrontendPeek { .. }
                 | Command::UnregisterFrontendPeek { .. }
+                | Command::InstallPeekWatchSets { .. }
                 | Command::ExplainTimestamp { .. }
                 | Command::FrontendStatementLogging(..)
                 | Command::InjectAuditEvents { .. }
