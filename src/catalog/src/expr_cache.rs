@@ -27,8 +27,8 @@ use mz_persist_client::cli::admin::{
 };
 use mz_persist_types::codec_impls::VecU8Schema;
 use mz_persist_types::{Codec, ShardId};
-use mz_repr::GlobalId;
 use mz_repr::optimize::OptimizerFeatures;
+use mz_repr::{GlobalId, RelationVersion};
 use mz_transform::dataflow::DataflowMetainfo;
 use mz_transform::notice::OptimizerNotice;
 use semver::Version;
@@ -57,6 +57,8 @@ enum ExpressionType {
 pub struct LocalExpressions {
     pub local_mir: OptimizedMirRelationExpr,
     pub optimizer_features: OptimizerFeatures,
+    /// See [`item_version`].
+    pub item_version: RelationVersion,
 }
 
 /// The data that is cached per catalog object as a result of global optimizations.
@@ -66,6 +68,8 @@ pub struct GlobalExpressions {
     pub physical_plan: DataflowDescription<mz_compute_types::plan::LirRelationExpr>,
     pub dataflow_metainfos: DataflowMetainfo<Arc<OptimizerNotice>>,
     pub optimizer_features: OptimizerFeatures,
+    /// See [`item_version`].
+    pub item_version: RelationVersion,
 }
 
 impl GlobalExpressions {
@@ -75,6 +79,29 @@ impl GlobalExpressions {
             .keys()
             .chain(self.physical_plan.index_imports.keys())
     }
+}
+
+/// The version to record with the expressions of an item whose versions are `versions`.
+///
+/// Entries are keyed by `GlobalId`, but applying a materialized view replacement changes the
+/// item's definition while the item keeps its `GlobalId`s, bumping its [`RelationVersion`]
+/// instead. Recording the item's latest version with each entry lets [`ExpressionCache::open`]
+/// drop entries optimized for an earlier definition regardless of who wrote them. That matters
+/// because the invalidation performed on apply only reaches entries under the applying
+/// process's build version: a 0dt deployment in its read-only phase caches under its own build
+/// version and reads those entries again when it reboots after promotion.
+///
+/// A replacement materialized view's own entries are recorded at its root version, so once the
+/// apply makes its id a later version of the target they are dropped as well, at the cost of one
+/// re-optimization.
+pub fn item_version<'a>(
+    versions: impl IntoIterator<Item = &'a RelationVersion>,
+) -> RelationVersion {
+    versions
+        .into_iter()
+        .max()
+        .copied()
+        .unwrap_or_else(RelationVersion::root)
 }
 
 #[derive(
@@ -129,7 +156,9 @@ pub struct ExpressionCacheConfig {
     pub build_version: Version,
     pub persist: PersistClient,
     pub shard_id: ShardId,
-    pub current_ids: BTreeSet<GlobalId>,
+    /// Every `GlobalId` that may have entries, mapped to the latest version of the item it
+    /// belongs to.
+    pub current_items: BTreeMap<GlobalId, RelationVersion>,
     pub remove_prior_versions: bool,
     pub compact_shard: bool,
     pub dyncfgs: ConfigSet,
@@ -143,8 +172,9 @@ pub struct ExpressionCache {
 
 impl ExpressionCache {
     /// Creates a new [`ExpressionCache`] and reconciles all entries in current build version.
-    /// Reconciliation will remove all entries that are not in `current_ids` and remove all
-    /// entries that have optimizer features that are not equal to `optimizer_features`.
+    /// Reconciliation removes entries whose id is not in `current_items` or whose recorded
+    /// item version differs from the current one, and global entries that import an index
+    /// that is not in `current_items`.
     ///
     /// If `remove_prior_versions` is `true`, then all previous versions are durably removed from the
     /// cache.
@@ -158,7 +188,7 @@ impl ExpressionCache {
             build_version,
             persist,
             shard_id,
-            current_ids,
+            current_items,
             remove_prior_versions,
             compact_shard,
             dyncfgs,
@@ -177,7 +207,12 @@ impl ExpressionCache {
         const RETRIES: usize = 100;
         for _ in 0..RETRIES {
             match cache
-                .try_open(&current_ids, remove_prior_versions, compact_shard, &dyncfgs)
+                .try_open(
+                    &current_items,
+                    remove_prior_versions,
+                    compact_shard,
+                    &dyncfgs,
+                )
                 .await
             {
                 Ok((local_expressions, global_expressions)) => {
@@ -192,7 +227,7 @@ impl ExpressionCache {
 
     async fn try_open(
         &mut self,
-        current_ids: &BTreeSet<GlobalId>,
+        current_items: &BTreeMap<GlobalId, RelationVersion>,
         remove_prior_versions: bool,
         compact_shard: bool,
         dyncfgs: &ConfigSet,
@@ -227,11 +262,15 @@ impl ExpressionCache {
                                 soft_panic_or_log!(
                                     "unable to deserialize local expressions: ({key:?}, {expressions:?}): {err:?}"
                                 );
+                                // An entry this build cannot read is useless; drop it rather
+                                // than report it on every boot.
+                                keys_to_remove.push((key.clone(), None));
                                 continue;
                             }
                         };
-                        // Remove dropped IDs.
-                        if !current_ids.contains(&key.id) {
+                        // Remove dropped IDs and expressions optimized for an earlier version of
+                        // the item.
+                        if current_items.get(&key.id) != Some(&expressions.item_version) {
                             keys_to_remove.push((key.clone(), None));
                         } else {
                             local_expressions.insert(key.id, expressions);
@@ -245,14 +284,16 @@ impl ExpressionCache {
                                 soft_panic_or_log!(
                                     "unable to deserialize global expressions: ({key:?}, {expressions:?}): {err:?}"
                                 );
+                                keys_to_remove.push((key.clone(), None));
                                 continue;
                             }
                         };
-                        // Remove dropped IDs and expressions that rely on dropped indexes.
-                        let index_dependencies: BTreeSet<_> =
-                            expressions.index_imports().cloned().collect();
-                        if !current_ids.contains(&key.id)
-                            || !index_dependencies.is_subset(current_ids)
+                        // Remove dropped IDs, expressions optimized for an earlier version of the
+                        // item, and expressions that rely on dropped indexes.
+                        if current_items.get(&key.id) != Some(&expressions.item_version)
+                            || !expressions
+                                .index_imports()
+                                .all(|id| current_items.contains_key(id))
                         {
                             keys_to_remove.push((key.clone(), None));
                         } else {
@@ -464,7 +505,7 @@ mod tests {
         let persist = PersistClient::new_for_tests().await;
         let shard_id = ShardId::new();
 
-        let mut current_ids = BTreeSet::new();
+        let mut current_items = BTreeMap::new();
         let mut remove_prior_versions = false;
         // Compacting the shard takes too long, so we leave it to integration tests.
         let compact_shard = false;
@@ -479,7 +520,7 @@ mod tests {
                     build_version: first_version.clone(),
                     persist: persist.clone(),
                     shard_id,
-                    current_ids: current_ids.clone(),
+                    current_items: current_items.clone(),
                     remove_prior_versions,
                     compact_shard,
                     dyncfgs: dyncfgs.clone(),
@@ -504,8 +545,12 @@ mod tests {
                     )
                     .await;
 
-                current_ids.insert(id);
-                current_ids.extend(global_exp.index_imports());
+                current_items.insert(id, RelationVersion::root());
+                current_items.extend(
+                    global_exp
+                        .index_imports()
+                        .map(|id| (*id, RelationVersion::root())),
+                );
                 local_exps.insert(id, local_exp);
                 global_exps.insert(id, global_exp);
 
@@ -521,7 +566,7 @@ mod tests {
                     build_version: first_version.clone(),
                     persist: persist.clone(),
                     shard_id,
-                    current_ids: current_ids.clone(),
+                    current_items: current_items.clone(),
                     remove_prior_versions,
                     compact_shard,
                     dyncfgs: dyncfgs.clone(),
@@ -540,7 +585,7 @@ mod tests {
         {
             // Simulate dropping an object.
             let id_to_remove = local_exps.keys().next().expect("not empty").clone();
-            current_ids.remove(&id_to_remove);
+            current_items.remove(&id_to_remove);
             let _removed_local_exp = local_exps.remove(&id_to_remove);
             let _removed_global_exp = global_exps.remove(&id_to_remove);
 
@@ -550,7 +595,7 @@ mod tests {
                     build_version: first_version.clone(),
                     persist: persist.clone(),
                     shard_id,
-                    current_ids: current_ids.clone(),
+                    current_items: current_items.clone(),
                     remove_prior_versions,
                     compact_shard,
                     dyncfgs: dyncfgs.clone(),
@@ -567,6 +612,57 @@ mod tests {
         }
 
         {
+            // Simulate applying a replacement: the item keeps its id at a bumped version.
+            let id_to_bump = global_exps.keys().next_back().expect("not empty").clone();
+            current_items.insert(id_to_bump, RelationVersion::root().bump());
+            let _removed_local_exp = local_exps.remove(&id_to_bump);
+            let _removed_global_exp = global_exps.remove(&id_to_bump);
+
+            // Re-open the cache.
+            let (_cache, local_entries, global_entries) =
+                ExpressionCacheHandle::spawn_expression_cache(ExpressionCacheConfig {
+                    build_version: first_version.clone(),
+                    persist: persist.clone(),
+                    shard_id,
+                    current_items: current_items.clone(),
+                    remove_prior_versions,
+                    compact_shard,
+                    dyncfgs: dyncfgs.clone(),
+                })
+                .await;
+            assert_eq!(
+                local_entries, local_exps,
+                "local expressions of an earlier item version should be removed during reconciliation"
+            );
+            assert_eq!(
+                global_entries, global_exps,
+                "global expressions of an earlier item version should be removed during reconciliation"
+            );
+
+            // The removal is durable: restoring the version does not bring the entries back.
+            current_items.insert(id_to_bump, RelationVersion::root());
+            let (_cache, local_entries, global_entries) =
+                ExpressionCacheHandle::spawn_expression_cache(ExpressionCacheConfig {
+                    build_version: first_version.clone(),
+                    persist: persist.clone(),
+                    shard_id,
+                    current_items: current_items.clone(),
+                    remove_prior_versions,
+                    compact_shard,
+                    dyncfgs: dyncfgs.clone(),
+                })
+                .await;
+            assert_eq!(
+                local_entries, local_exps,
+                "local expressions of an earlier item version should be durably removed"
+            );
+            assert_eq!(
+                global_entries, global_exps,
+                "global expressions of an earlier item version should be durably removed"
+            );
+        }
+
+        {
             // Simulate dropping an object dependency.
             let global_exp_to_remove = global_exps.keys().next().expect("not empty").clone();
             let removed_global_exp = global_exps
@@ -576,7 +672,7 @@ mod tests {
                 .index_imports()
                 .next()
                 .expect("generator always makes non-empty index imports");
-            current_ids.remove(dependency_to_remove);
+            current_items.remove(dependency_to_remove);
 
             // If the dependency is also tracked in the cache remove it.
             let _removed_local_exp = local_exps.remove(dependency_to_remove);
@@ -593,7 +689,7 @@ mod tests {
                     build_version: first_version.clone(),
                     persist: persist.clone(),
                     shard_id,
-                    current_ids: current_ids.clone(),
+                    current_items: current_items.clone(),
                     remove_prior_versions,
                     compact_shard,
                     dyncfgs: dyncfgs.clone(),
@@ -616,7 +712,7 @@ mod tests {
                     build_version: second_version.clone(),
                     persist: persist.clone(),
                     shard_id,
-                    current_ids: current_ids.clone(),
+                    current_items: current_items.clone(),
                     remove_prior_versions,
                     compact_shard,
                     dyncfgs: dyncfgs.clone(),
@@ -649,8 +745,12 @@ mod tests {
                     )
                     .await;
 
-                current_ids.insert(id);
-                current_ids.extend(global_exp.index_imports());
+                current_items.insert(id, RelationVersion::root());
+                current_items.extend(
+                    global_exp
+                        .index_imports()
+                        .map(|id| (*id, RelationVersion::root())),
+                );
                 local_exps.insert(id, local_exp);
                 global_exps.insert(id, global_exp);
 
@@ -666,7 +766,7 @@ mod tests {
                     build_version: first_version.clone(),
                     persist: persist.clone(),
                     shard_id,
-                    current_ids: current_ids.clone(),
+                    current_items: current_items.clone(),
                     remove_prior_versions,
                     compact_shard,
                     dyncfgs: dyncfgs.clone(),
@@ -690,7 +790,7 @@ mod tests {
                     build_version: second_version.clone(),
                     persist: persist.clone(),
                     shard_id,
-                    current_ids: current_ids.clone(),
+                    current_items: current_items.clone(),
                     remove_prior_versions,
                     compact_shard,
                     dyncfgs: dyncfgs.clone(),
@@ -713,7 +813,7 @@ mod tests {
                     build_version: first_version.clone(),
                     persist: persist.clone(),
                     shard_id,
-                    current_ids: current_ids.clone(),
+                    current_items: current_items.clone(),
                     remove_prior_versions,
                     compact_shard,
                     dyncfgs: dyncfgs.clone(),
@@ -784,6 +884,7 @@ mod tests {
                 ReprRelationType::new(vec![ReprScalarType::UInt64.nullable(false)]),
             )),
             optimizer_features: Default::default(),
+            item_version: RelationVersion::root(),
         }
     }
 
@@ -819,6 +920,7 @@ mod tests {
             physical_plan,
             dataflow_metainfos: Default::default(),
             optimizer_features: Default::default(),
+            item_version: RelationVersion::root(),
         }
     }
 }

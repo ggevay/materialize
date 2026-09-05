@@ -4645,6 +4645,79 @@ fn test_replacement_materialized_view_invalidates_expression_cache() {
     }
 }
 
+// A process that applies the replacement with the expression cache disabled
+// neither reads nor invalidates the entries the first process wrote, standing
+// in for a writer the apply-time invalidation cannot reach (see
+// `mz_catalog::expr_cache::item_version`). The next boot with the cache
+// enabled must not use the entries recorded before the apply.
+#[mz_ore::test]
+#[cfg_attr(miri, ignore)] // too slow
+#[allow(clippy::disallowed_methods)]
+fn test_replacement_materialized_view_stale_expression_cache_entry_dropped_on_open() {
+    let data_dir = tempfile::tempdir().unwrap();
+    let harness = test_util::TestHarness::default()
+        .data_directory(data_dir.path())
+        .with_system_parameter_default(
+            "enable_replacement_materialized_views".to_string(),
+            "true".to_string(),
+        )
+        .with_system_parameter_default(
+            "enable_logical_compaction_window".to_string(),
+            "true".to_string(),
+        );
+
+    {
+        let server = harness.clone().start_blocking();
+        let mut client = server.connect(postgres::NoTls).unwrap();
+        // Retaining history keeps the inputs' read frontiers far behind, so a
+        // restart cannot trip the as-of hard constraint of CPU-95.
+        client
+            .batch_execute("CREATE TABLE t1 (a int) WITH (RETAIN HISTORY FOR '1 hour')")
+            .unwrap();
+        client.batch_execute("INSERT INTO t1 VALUES (1)").unwrap();
+        client
+            .batch_execute("CREATE VIEW v1 AS SELECT a FROM t1")
+            .unwrap();
+        client
+            .batch_execute("CREATE MATERIALIZED VIEW mv AS SELECT a FROM v1")
+            .unwrap();
+        client
+            .batch_execute("CREATE TABLE t2 (a int) WITH (RETAIN HISTORY FOR '1 hour')")
+            .unwrap();
+        client.batch_execute("INSERT INTO t2 VALUES (2)").unwrap();
+        client
+            .batch_execute("CREATE VIEW v2 AS SELECT a FROM t2")
+            .unwrap();
+        client
+            .batch_execute("CREATE REPLACEMENT MATERIALIZED VIEW rp FOR mv AS SELECT a FROM v2")
+            .unwrap();
+    }
+
+    {
+        let server = harness
+            .clone()
+            .with_system_parameter_default(
+                "enable_expression_cache".to_string(),
+                "false".to_string(),
+            )
+            .start_blocking();
+        let mut client = server.connect(postgres::NoTls).unwrap();
+        client
+            .batch_execute("ALTER MATERIALIZED VIEW mv APPLY REPLACEMENT rp")
+            .unwrap();
+        client.batch_execute("DROP VIEW v1").unwrap();
+        let row = client.query_one("SELECT a FROM mv", &[]).unwrap();
+        assert_eq!(row.get::<_, i32>(0), 2, "pre-restart");
+    }
+
+    {
+        let server = harness.start_blocking();
+        let mut client = server.connect(postgres::NoTls).unwrap();
+        let row = client.query_one("SELECT a FROM mv", &[]).unwrap();
+        assert_eq!(row.get::<_, i32>(0), 2);
+    }
+}
+
 #[mz_ore::test(tokio::test(flavor = "multi_thread", worker_threads = 1))]
 #[cfg_attr(miri, ignore)] // too slow
 #[allow(clippy::disallowed_methods)]
