@@ -940,6 +940,16 @@ impl CatalogState {
         }
     }
 
+    /// The optimizer configuration for dataflows on `cluster_id`: the system
+    /// configuration, overridden by the cluster's `FEATURES`, overridden by
+    /// the cluster-scoped rules. A cluster-scoped LaunchDarkly rule beats a
+    /// manual `FEATURES` pin.
+    pub fn cluster_optimizer_config(&self, cluster_id: ClusterId) -> optimize::OptimizerConfig {
+        optimize::OptimizerConfig::from(self.system_config())
+            .override_from(&self.get_cluster(cluster_id).config.features())
+            .override_from(&self.cluster_scoped_optimizer_overrides(cluster_id))
+    }
+
     pub fn get_entry(&self, id: &CatalogItemId) -> &CatalogEntry {
         self.entry_by_id
             .get(id)

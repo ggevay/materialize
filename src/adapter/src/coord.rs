@@ -144,7 +144,7 @@ use mz_persist_client::usage::{ShardsUsageReferenced, StorageUsageClient};
 use mz_repr::adt::numeric::Numeric;
 use mz_repr::explain::{ExplainConfig, ExplainFormat};
 use mz_repr::global_id::TransientIdGen;
-use mz_repr::optimize::{OptimizerFeatureOverrides, OptimizerFeatures, OverrideFrom};
+use mz_repr::optimize::{OptimizerFeatureOverrides, OptimizerFeatures};
 use mz_repr::role_id::RoleId;
 use mz_repr::{
     CatalogItemId, Diff, GlobalId, RelationDesc, RelationVersion, SqlRelationType, Timestamp,
@@ -214,7 +214,7 @@ use crate::explain::insights::PlanInsightsContext;
 use crate::explain::optimizer_trace::{DispatchGuard, OptimizerTrace};
 use crate::metrics::Metrics;
 use crate::optimize::dataflows::{ComputeInstanceSnapshot, DataflowBuilder};
-use crate::optimize::{self, Optimize, OptimizerConfig};
+use crate::optimize::{self, Optimize};
 use crate::session::{EndTransactionAction, Session};
 use crate::statement_logging::{
     StatementEndedExecutionReason, StatementLifecycleEvent, StatementLoggingId,
@@ -3740,20 +3740,6 @@ impl Coordinator {
         let mut instance_snapshots = BTreeMap::new();
         let mut uncached_expressions = BTreeMap::new();
 
-        let optimizer_config = |catalog: &Catalog, cluster_id| {
-            let system_config = catalog.system_config();
-            let overrides = catalog.get_cluster(cluster_id).config.features();
-            OptimizerConfig::from(system_config)
-                .override_from(&overrides)
-                // A cluster-scoped LaunchDarkly rule beats a manual `FEATURES`
-                // pin.
-                .override_from(
-                    &catalog
-                        .state()
-                        .cluster_scoped_optimizer_overrides(cluster_id),
-                )
-        };
-
         for entry in ordered_catalog_entries {
             match entry.item() {
                 CatalogItem::Index(idx) => {
@@ -3771,7 +3757,10 @@ impl Coordinator {
                         continue;
                     }
 
-                    let optimizer_config = optimizer_config(&self.catalog, idx.cluster_id);
+                    let optimizer_config = self
+                        .catalog()
+                        .state()
+                        .cluster_optimizer_config(idx.cluster_id);
 
                     let (optimized_plan, physical_plan, metainfo) =
                         match cached_global_exprs.remove(&global_id) {
@@ -3857,7 +3846,10 @@ impl Coordinator {
                         });
                     let global_id = mv.global_id_writes();
 
-                    let optimizer_config = optimizer_config(&self.catalog, mv.cluster_id);
+                    let optimizer_config = self
+                        .catalog()
+                        .state()
+                        .cluster_optimizer_config(mv.cluster_id);
 
                     let (optimized_plan, physical_plan, metainfo) = match cached_global_exprs
                         .remove(&global_id)
@@ -3956,7 +3948,10 @@ impl Coordinator {
                                 .expect("compute instance exists")
                         });
                     let global_id = metric_sink.global_id;
-                    let optimizer_config = optimizer_config(&self.catalog, metric_sink.cluster_id);
+                    let optimizer_config = self
+                        .catalog()
+                        .state()
+                        .cluster_optimizer_config(metric_sink.cluster_id);
 
                     let (optimized_plan, physical_plan, metainfo) = match cached_global_exprs
                         .remove(&global_id)

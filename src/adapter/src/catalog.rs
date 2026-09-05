@@ -190,6 +190,18 @@ impl Clone for Catalog {
     }
 }
 
+/// Clears the results of timestamp selection from plans about to be cached:
+/// they would almost certainly be wrong when the dataflow is re-installed later.
+pub(crate) fn scrub_timestamp_selection(
+    global_mir: &mut DataflowDescription<OptimizedMirRelationExpr>,
+    physical_plan: &mut DataflowDescription<mz_compute_types::plan::LirRelationExpr>,
+) {
+    global_mir.as_of = None;
+    global_mir.until = Default::default();
+    physical_plan.as_of = None;
+    physical_plan.until = Default::default();
+}
+
 impl Catalog {
     /// Set the optimized plan for the item identified by `id`.
     ///
@@ -1581,13 +1593,7 @@ impl Catalog {
         dataflow_metainfos: DataflowMetainfo<Arc<OptimizerNotice>>,
         optimizer_features: OptimizerFeatures,
     ) -> BoxFuture<'static, ()> {
-        // Make sure we're not caching the result of timestamp selection, as
-        // it will almost certainly be wrong if we re-install the dataflow at
-        // a later time.
-        global_mir.as_of = None;
-        global_mir.until = Default::default();
-        physical_plan.as_of = None;
-        physical_plan.until = Default::default();
+        scrub_timestamp_selection(&mut global_mir, &mut physical_plan);
 
         let mut local_exprs = Vec::new();
         if let Some(local_mir) = local_mir {

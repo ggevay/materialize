@@ -25,6 +25,7 @@ use mz_adapter_types::dyncfgs::{
     ENABLE_EXPRESSION_CACHE, ENABLE_PASSWORD_AUTH, FRONTEND_READ_THEN_WRITE,
     READ_THEN_WRITE_MAX_DEPENDENCIES,
 };
+use mz_catalog::expr_cache::{GlobalExpressions, LocalExpressions, item_version};
 use mz_catalog::memory::error::ErrorKind;
 use mz_catalog::memory::objects::{
     CatalogItem, Connection, DataSourceDesc, Sink, Source, Table, TableDataSource, Type,
@@ -38,6 +39,7 @@ use mz_expr::{
 use mz_ore::cast::CastFrom;
 use mz_ore::collections::{CollectionExt, HashSet};
 use mz_ore::future::OreFutureExt;
+use mz_ore::soft_panic_or_log;
 use mz_ore::task::{self, JoinHandle, spawn};
 use mz_ore::tracing::OpenTelemetryContext;
 use mz_ore::{assert_none, instrument};
@@ -5052,26 +5054,89 @@ impl Coordinator {
             "finishing materialized view replacement application",
         );
 
-        // Applying a replacement changes the target's definition while it
-        // keeps its GlobalIds, so the cached expressions under those ids are
-        // stale. Entries record the item's version and `ExpressionCache::open`
-        // drops them on the next boot; invalidating here only reclaims them
-        // eagerly.
-        let invalidate_ids = self.catalog().get_entry(&id).global_ids().collect();
-        self.catalog()
-            .update_expression_cache(Vec::new(), Vec::new(), invalidate_ids)
-            .await;
-
         let ops = vec![catalog::Op::AlterMaterializedViewApplyReplacement { id, replacement_id }];
         match self
             .catalog_transact(Some(ctx.ctx().session_mut()), ops)
             .await
         {
-            Ok(()) => ctx.retire(Ok(ExecuteResponse::AlteredObject(
-                ObjectType::MaterializedView,
-            ))),
+            Ok(()) => {
+                // The item that survives the apply carries the replacement's
+                // item id and the target's global ids. Crashing before this
+                // write is fine: the entries recorded before the apply carry
+                // the old version, so the next open drops them and
+                // re-optimizes the view once.
+                self.cache_applied_replacement_expressions(replacement_id)
+                    .await;
+                ctx.retire(Ok(ExecuteResponse::AlteredObject(
+                    ObjectType::MaterializedView,
+                )))
+            }
             Err(err) => ctx.retire(Err(err)),
         }
+    }
+
+    /// Replaces the expression cache entries of a materialized view that just
+    /// had a replacement applied with the expressions it holds now, recorded
+    /// at its new version.
+    ///
+    /// The entries recorded before the apply are stale, and the version check
+    /// at open would drop them. The in-memory item already carries the
+    /// replacement's local expression and dataflow plans, which its running
+    /// dataflow uses, so caching them lets the next boot hit instead of
+    /// re-optimizing the view. Awaited so that a boot cannot observe the stale
+    /// entries once the apply is visible.
+    async fn cache_applied_replacement_expressions(&self, id: CatalogItemId) {
+        let entry = self.catalog().get_entry(&id);
+        let CatalogItem::MaterializedView(mv) = entry.item() else {
+            soft_panic_or_log!(
+                "replacement applied to an item that is not a materialized view: {id}"
+            );
+            return;
+        };
+        let item_version = item_version(mv.collections.keys());
+        let optimizer_features = self
+            .catalog()
+            .state()
+            .cluster_optimizer_config(mv.cluster_id)
+            .features;
+        let root_id = *mv
+            .collections
+            .first_key_value()
+            .expect("at least one version of a materialized view")
+            .1;
+        let local_exprs = vec![(
+            root_id,
+            LocalExpressions {
+                local_mir: (*mv.locally_optimized_expr).clone(),
+                optimizer_features: optimizer_features.clone(),
+                item_version,
+            },
+        )];
+        let global_exprs = match (&mv.optimized_plan, &mv.physical_plan, &mv.dataflow_metainfo) {
+            (Some(global_mir), Some(physical_plan), Some(dataflow_metainfos)) => {
+                let mut global_mir = (**global_mir).clone();
+                let mut physical_plan = (**physical_plan).clone();
+                catalog::scrub_timestamp_selection(&mut global_mir, &mut physical_plan);
+                vec![(
+                    mv.global_id_writes(),
+                    GlobalExpressions {
+                        global_mir,
+                        physical_plan,
+                        dataflow_metainfos: dataflow_metainfos.clone(),
+                        optimizer_features,
+                        item_version,
+                    },
+                )]
+            }
+            _ => Vec::new(),
+        };
+        // The entries of all of the item's ids are removed, except that the
+        // new entries replace the root id's local entry and the writing id's
+        // global entry.
+        let invalidate_ids = entry.global_ids().collect();
+        self.catalog()
+            .update_expression_cache(local_exprs, global_exprs, invalidate_ids)
+            .await;
     }
 
     pub(super) async fn statistics_oracle(
