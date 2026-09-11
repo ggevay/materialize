@@ -133,6 +133,7 @@ pub const ENABLE_SESSION_LOCAL_COMMIT: Config<bool> = Config::new(
     "enable_session_local_commit",
     false,
     "Enable committing single-peek transactions in the session task, without a Coordinator round-trip.",
+    ParameterScope::Environment,
 );
 
 /// The plan insights notice will not investigate fast path clusters if plan optimization took longer than this.
