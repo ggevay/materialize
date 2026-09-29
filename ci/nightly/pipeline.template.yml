@@ -1750,7 +1750,6 @@ steps:
             ci-builder: stable
             run-timeout: 60m
       branches: "main v*.* *gcp* *tf* *terraform* *helm* *self-managed* *orchestratord*"
-      skip: "materialize-terraform-self-managed#157"
 
     - id: terraform-azure
       topics: [self-managed]
@@ -1772,7 +1771,6 @@ steps:
             ci-builder: stable
             run-timeout: 60m
       branches: "main v*.* *azure* *tf* *terraform* *helm* *self-managed* *orchestratord*"
-      skip: "Not enough capacity on Azure currently, see #operations"
       # Unreliable port-forward to Azure
       retry:
         automatic:
