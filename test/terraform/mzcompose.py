@@ -118,10 +118,10 @@ COMPATIBLE_TESTDRIVE_FILES = [
 ]
 
 # Testdrive files of this composition, which run after the requested files.
-# They live outside test/testdrive, so the testdrive suite does not pick them
-# up, and are mounted into the testdrive container here.
-TERRAFORM_TESTDRIVE_DIR = "/terraform-testdrive"
-TERRAFORM_TESTDRIVE_FILES = [f"{TERRAFORM_TESTDRIVE_DIR}/hedged-blob-gets.td"]
+# They live in a subdirectory of test/testdrive: testdrive only finds files
+# below its working directory, and the testdrive suite's `*.td` glob
+# (test/testdrive/mzcompose.py) does not descend into subdirectories.
+TERRAFORM_TESTDRIVE_FILES = ["terraform/hedged-blob-gets.td"]
 
 
 def add_arguments_temporary_test(parser: WorkflowArgumentParser) -> None:
@@ -195,7 +195,6 @@ def testdrive(no_reset: bool) -> Testdrive:
         set_persist_urls=False,
         network_mode="host",
         volume_workdir="../testdrive:/workdir",
-        volumes_extra=[f"./testdrive:{TERRAFORM_TESTDRIVE_DIR}"],
         no_reset=no_reset,
         default_timeout="360s",
         # For full testdrive support we'll need:
