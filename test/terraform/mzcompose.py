@@ -18,13 +18,11 @@ import json
 import os
 import re
 import signal
-import socket
 import subprocess
 import sys
 import tempfile
 import threading
 import time
-import urllib.request
 from collections.abc import Sequence
 from pathlib import Path
 from textwrap import dedent
@@ -119,6 +117,12 @@ COMPATIBLE_TESTDRIVE_FILES = [
     # "webhook.td",
 ]
 
+# Testdrive files of this composition, which run after the requested files.
+# They live outside test/testdrive, so the testdrive suite does not pick them
+# up, and are mounted into the testdrive container here.
+TERRAFORM_TESTDRIVE_DIR = "/terraform-testdrive"
+TERRAFORM_TESTDRIVE_FILES = [f"{TERRAFORM_TESTDRIVE_DIR}/hedged-blob-gets.td"]
+
 
 def add_arguments_temporary_test(parser: WorkflowArgumentParser) -> None:
     parser.add_argument(
@@ -191,6 +195,7 @@ def testdrive(no_reset: bool) -> Testdrive:
         set_persist_urls=False,
         network_mode="host",
         volume_workdir="../testdrive:/workdir",
+        volumes_extra=[f"./testdrive:{TERRAFORM_TESTDRIVE_DIR}"],
         no_reset=no_reset,
         default_timeout="360s",
         # For full testdrive support we'll need:
@@ -254,50 +259,6 @@ def run_mz_debug(env: dict[str, str] | None = None) -> None:
         )
     except:
         pass
-
-
-MZ_SYSTEM_URL = "postgres://mz_system:materialize@127.0.0.1:6877/materialize"
-MATERIALIZE_URL = "postgres://materialize@127.0.0.1:6875/materialize"
-
-# Per-process series read by the hedged blob gets check: name, and a label
-# matcher that the summed label sets must contain.
-HEDGE_SERIES = {
-    "blob_gets": ("mz_persist_external_succeeded_count", 'op="blob_get"'),
-    "armed": ("mz_persist_blob_hedge_armed", ""),
-    "rtt": ("mz_persist_blob_hedge_rtt_latency", ""),
-    "warm_errors": ("mz_persist_blob_hedge_warm_errors", ""),
-    "fired": ("mz_persist_blob_hedges_fired", ""),
-    "won": ("mz_persist_blob_hedges_won", ""),
-    "errors": ("mz_persist_blob_hedge_errors", ""),
-    "skipped": ("mz_persist_blob_hedges_skipped", ""),
-}
-
-
-def parse_hedge_series(text: str) -> dict[str, float] | None:
-    """Reads HEDGE_SERIES from a Prometheus text exposition, or returns None
-    for a process without persist metrics."""
-    values: dict[str, float] = {}
-    for line in text.splitlines():
-        if not line or line.startswith("#"):
-            continue
-        name, _, rest = line.partition("{")
-        if rest:
-            labels, _, sample = rest.rpartition("}")
-        else:
-            name, _, sample = line.partition(" ")
-            labels = ""
-        for key, (series, matcher) in HEDGE_SERIES.items():
-            if name == series and matcher in labels:
-                values[key] = values.get(key, 0.0) + float(sample.split()[0])
-    return values if "armed" in values else None
-
-
-def print_hedge_series(by_pod: dict[str, dict[str, float]]) -> None:
-    for pod, values in sorted(by_pod.items()):
-        print(
-            f"{pod}: "
-            + " ".join(f"{key}={values.get(key, 0.0):g}" for key in HEDGE_SERIES)
-        )
 
 
 class State:
@@ -665,225 +626,10 @@ class State:
                     f", helm chart: {helm_chart_version})"
                 ), f"Actual version: {version}, expected to contain {helm_chart_version}"
 
-        hedging_checked = self.check_hedged_gets()
-
         if run_testdrive_files:
             with c.override(testdrive(no_reset=False)):
                 c.up(Service("testdrive", idle=True))
-                c.run_testdrive_files(*TD_CMD, *files)
-
-        if hedging_checked:
-            self.check_hedge_errors()
-
-    def check_hedged_gets(self) -> bool:
-        """Checks hedged blob gets against the deployment's real blob store.
-        Returns False, checking nothing, if this version has hedging off.
-
-        At the default settings, every process that has read from the store
-        must have opened its second store client and completed a keep-warm
-        cycle through it without errors. Then every get is hedged, and the
-        second client must win some races, i.e. serve reads from the store.
-        """
-        print("--- Checking hedged blob gets")
-        with psycopg.connect(MZ_SYSTEM_URL, autocommit=True) as conn:
-            with conn.cursor() as cur:
-                try:
-                    cur.execute("SHOW persist_blob_hedged_get_enabled")
-                    enabled = str(cur.fetchall()[0][0])
-                except psycopg.Error as e:
-                    print(f"Hedged blob gets unknown to this version, skipping: {e}")
-                    return False
-        if enabled not in ("on", "true"):
-            print(f"Hedged blob gets are off in this version ({enabled}), skipping")
-            return False
-
-        unavailable = self._hedge_log_lines("hedged blob gets unavailable")
-        assert not unavailable, f"Second store client failed to open: {unavailable}"
-
-        deadline = time.time() + 180
-        while True:
-            before = self._hedge_series_by_pod()
-            print_hedge_series(before)
-            warm_errors = [p for p, v in before.items() if v.get("warm_errors", 0) > 0]
-            assert not warm_errors, f"Keep-warm gets failed on {warm_errors}"
-            pending = [
-                p
-                for p, v in before.items()
-                if v.get("blob_gets", 0) > 0
-                and (v["armed"] != 1 or v.get("rtt", 0) <= 0)
-            ]
-            if not pending:
-                break
-            assert time.time() < deadline, f"Hedging not armed and warm on {pending}"
-            time.sleep(10)
-
-        print("--- Hedging every blob get")
-        with psycopg.connect(MZ_SYSTEM_URL, autocommit=True) as conn:
-            with conn.cursor() as cur:
-                cur.execute("ALTER SYSTEM SET persist_blob_hedged_get_delay = '0s'")
-                cur.execute("ALTER SYSTEM SET persist_blob_hedged_get_budget_ratio = 1")
-
-        deadline = time.time() + 300
-        with psycopg.connect(MATERIALIZE_URL, autocommit=True) as conn:
-            with conn.cursor() as cur:
-                while True:
-                    # environmentd writes the table's parts, and the replica
-                    # computing the view reads them back from the store.
-                    cur.execute("DROP TABLE IF EXISTS hedge_check CASCADE")
-                    cur.execute("CREATE TABLE hedge_check (a int)")
-                    cur.execute(
-                        "INSERT INTO hedge_check SELECT generate_series(1, 100000)"
-                    )
-                    cur.execute(
-                        "CREATE MATERIALIZED VIEW hedge_check_mv AS SELECT count(*) FROM hedge_check"
-                    )
-                    cur.execute("SELECT * FROM hedge_check_mv")
-                    assert cur.fetchall() == [(100000,)]
-                    after = self._hedge_series_by_pod()
-
-                    def delta(key: str) -> float:
-                        return sum(
-                            v.get(key, 0.0) - before.get(p, {}).get(key, 0.0)
-                            for p, v in after.items()
-                        )
-
-                    print(f"hedges fired: {delta('fired'):g}, won: {delta('won'):g}")
-                    if delta("fired") > 0 and delta("won") > 0:
-                        break
-                    assert time.time() < deadline, "No hedge won against the store"
-                    time.sleep(10)
-                cur.execute("DROP TABLE hedge_check CASCADE")
-        print_hedge_series(after)
-        return True
-
-    def check_hedge_errors(self) -> None:
-        """Checks that no hedge or keep-warm get failed during the tests, and
-        that every process that read from the store, including at least one
-        cluster replica, had hedging armed.
-
-        NOTE: testdrive starts with `ALTER SYSTEM RESET ALL`, so the tests run
-        at the default hedging settings, not with every get hedged."""
-        print("--- Checking hedge errors")
-        by_pod = self._hedge_series_by_pod()
-        print_hedge_series(by_pod)
-        failed = [
-            p
-            for p, v in by_pod.items()
-            if v.get("errors", 0) > 0 or v.get("warm_errors", 0) > 0
-        ]
-        assert not failed, f"Hedge or keep-warm gets failed on {failed}"
-        reading = [p for p, v in by_pod.items() if v.get("blob_gets", 0) > 0]
-        unarmed = [p for p in reading if by_pod[p]["armed"] != 1]
-        assert not unarmed, f"Hedging not armed on {unarmed}"
-        assert any(
-            "environmentd" not in p for p in reading
-        ), f"No cluster replica read from the store: {reading}"
-        unavailable = self._hedge_log_lines("hedged blob gets unavailable")
-        assert not unavailable, f"Second store client failed to open: {unavailable}"
-
-    def _hedge_series_by_pod(self) -> dict[str, dict[str, float]]:
-        """HEDGE_SERIES of every running persist process, keyed by pod."""
-        pods = json.loads(
-            spawn.capture(
-                [
-                    "kubectl",
-                    "get",
-                    "pods",
-                    "-n",
-                    "materialize-environment",
-                    "-o",
-                    "json",
-                ],
-                cwd=self.path,
-            )
-        )["items"]
-        by_pod = {}
-        for pod in pods:
-            if pod["status"].get("phase") != "Running":
-                continue
-            ports = [
-                port["containerPort"]
-                for container in pod["spec"]["containers"]
-                for port in container.get("ports", [])
-                if port.get("name") == "internal-http"
-            ]
-            if not ports:
-                continue
-            name = pod["metadata"]["name"]
-            values = parse_hedge_series(self._scrape_metrics(name, ports[0]))
-            if values is not None:
-                by_pod[name] = values
-        return by_pod
-
-    def _scrape_metrics(self, pod: str, port: int) -> str:
-        with socket.socket() as s:
-            s.bind(("127.0.0.1", 0))
-            local_port = s.getsockname()[1]
-        forward: subprocess.Popen[bytes] | None = None
-        try:
-            for _ in range(30):
-                # A port-forward exits on the first connection error, so
-                # restart it until a read succeeds.
-                if forward is None or forward.poll() is not None:
-                    forward = subprocess.Popen(
-                        [
-                            "kubectl",
-                            "port-forward",
-                            f"pod/{pod}",
-                            f"{local_port}:{port}",
-                            "-n",
-                            "materialize-environment",
-                        ],
-                        cwd=self.path,
-                        stdout=subprocess.DEVNULL,
-                        stderr=subprocess.DEVNULL,
-                    )
-                try:
-                    with urllib.request.urlopen(
-                        f"http://127.0.0.1:{local_port}/metrics", timeout=10
-                    ) as response:
-                        return response.read().decode()
-                except OSError:
-                    time.sleep(1)
-            raise RuntimeError(f"Could not read /metrics from pod {pod}")
-        finally:
-            if forward is not None:
-                forward.terminate()
-                forward.wait()
-
-    def _hedge_log_lines(self, needle: str) -> list[str]:
-        """Log lines containing `needle` from every pod in the environment."""
-        pods = spawn.capture(
-            [
-                "kubectl",
-                "get",
-                "pods",
-                "-n",
-                "materialize-environment",
-                "-o",
-                "jsonpath={.items[*].metadata.name}",
-            ],
-            cwd=self.path,
-        ).split()
-        lines = []
-        for pod in pods:
-            try:
-                logs = spawn.capture(
-                    [
-                        "kubectl",
-                        "logs",
-                        pod,
-                        "-n",
-                        "materialize-environment",
-                        "--all-containers",
-                    ],
-                    cwd=self.path,
-                )
-            except subprocess.CalledProcessError as e:
-                print(f"Could not read the logs of pod {pod}: {e}")
-                continue
-            lines += [f"{pod}: {line}" for line in logs.splitlines() if needle in line]
-        return lines
+                c.run_testdrive_files(*TD_CMD, *files, *TERRAFORM_TESTDRIVE_FILES)
 
     def _find_service(self, pattern: str) -> str:
         """Find a service in materialize-environment namespace by name pattern."""
