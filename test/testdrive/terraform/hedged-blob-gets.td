@@ -9,8 +9,14 @@
 
 # Hedged blob gets against the deployment's real blob store: every replica
 # process that reads from it has a working second client, a forced hedge can
-# win, and nothing failed. The terraform tests run this file after the other
-# testdrive files, so their reads count toward the error checks.
+# win, and nothing failed.
+#
+# Only meant for the terraform tests (test/terraform/mzcompose.py). Against a
+# local blob store a hedge rarely wins, so the testdrive suite must not run
+# this file; its `*.td` glob does not descend into this directory.
+#
+# The terraform tests run it after their other testdrive files, so the error
+# checks also cover those files' reads.
 #
 # The hedge metrics come from mz_cluster_prometheus_metrics, i.e. from the
 # replicas of the clusters the materialize user can query. environmentd and
