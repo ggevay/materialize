@@ -83,87 +83,18 @@ def get_minimal_system_parameters(
     """Settings we need in order to have tests run at all, but otherwise stay
     with the defaults: not changing performance or increasing coverage."""
 
+    # EXPERIMENT, do not merge: every feature flag and implementation switch is
+    # removed, to see which tests fail with the code defaults. Kept are test
+    # harness settings and pins that only reach binaries older than this one.
     config = {
-        # -----
-        # Unsafe functions
-        "unsafe_enable_unsafe_functions": "true",
-        # -----
-        # Others (ordered by name)
-        "allow_real_time_recency": "true",
         "constraint_based_timestamp_selection": "verify",  # removed from main, keeping it here for old versions
-        "enable_compute_peek_response_stash": "true",
-        "enable_0dt_deployment_panic_after_timeout": "true",
-        "enable_0dt_deployment_sources": (
-            "true" if version >= MzVersion.parse_mz("v0.132.0-dev") else "false"
-        ),
-        "enable_alter_swap": "true",
-        "enable_arrangement_dictionary_compression_alpha": "false",
-        "enable_case_literal_transform": "true",
-        "enable_cast_elimination": "true",
-        "enable_coalesce_case_transform": "true",
-        "enable_columnation_lgalloc": "false",
-        "enable_compute_correction_v2": "true",
-        "enable_compute_logical_backpressure": "true",
-        "enable_connection_validation_syntax": "true",
-        "enable_create_table_from_source": "true",
-        "enable_eager_delta_joins": "true",
-        "enable_envelope_debezium_in_subscribe": "true",
-        "enable_exclude_constraints_option": "true",
-        "enable_expressions_in_limit_syntax": "true",
-        "enable_fixed_correlated_cte_lowering": "true",
-        "enable_introspection_subscribes": "true",
-        "enable_lgalloc": "false",
-        "enable_load_generator_counter": "true",
-        "enable_logical_compaction_window": "true",
-        "enable_mcp_protocol_2026_07_28": "true",
-        "enable_metric_sink": "true",
-        "enable_multi_worker_storage_persist_sink": "true",
-        "enable_rbac_checks": "true",
-        "enable_reduce_mfp_fusion": "true",
-        "enable_refresh_every_mvs": "true",
-        "enable_replacement_materialized_views": "true",
-        "enable_cluster_schedule_refresh": "true",
-        # Pinned explicitly so runs against older versions (which predate the
-        # flag or defaulted it off) behave like current ones, where it defaults
-        # on.
-        "enable_background_alter_cluster": (
-            "true" if version >= MzVersion.parse_mz("v26.29.0-dev") else "false"
-        ),
-        "enable_cluster_reconfiguration_lag_gate": (
-            "true" if version >= MzVersion.parse_mz("v26.44.0-dev") else "false"
-        ),
-        "enable_s3_tables_region_check": "false",
-        "enable_statement_lifecycle_logging": "true",
-        # Introspection goldens depend on the replica topology, so tests need
-        # one consistent value rather than a varying one.
-        "enable_unified_cluster": (
-            "true" if version >= MzVersion.parse_mz("v26.43.0-dev") else "false"
-        ),
-        "enable_compute_error_distinct": "true",
-        "enable_compute_temporal_bucketing": "true",
-        "enable_union_cancellation_after_relation_cse": "true",
-        "enable_variadic_left_join_lowering": "true",
-        "enable_worker_core_affinity": "true",
         "grpc_client_http2_keep_alive_timeout": "5s",
         "ore_overflowing_behavior": "panic",
-        "unsafe_enable_table_keys": "true",
         # Keep the 0dt stability soak out of the critical path for tests. The
         # production default is much higher. Dedicated workflows override this.
         "with_0dt_caught_up_check_stability_period": "0s",
         "with_0dt_deployment_max_wait": "1800s",
-        # End of list (ordered by name)
     }
-
-    if version >= MzVersion.parse_mz("v26.40.0-dev"):
-        # Exercise the row-limit check without constraining normal test queries.
-        config["compute_peek_row_iteration_limit"] = "1000000000"
-        config["enable_compute_peek_row_iteration_limit"] = "true"
-
-        # Exercise the peek offload path in tests. Binaries before v26.44
-        # default it off, so this keeps mixed-version runs on the path current
-        # versions take. The budgets stay at their code defaults so tests make
-        # the same placement decisions production makes.
-        config["enable_compute_index_peek_offload"] = "true"
 
     if version < MzVersion.parse_mz("v0.163.0-dev"):
         config["enable_compute_active_dataflow_cancelation"] = "true"
@@ -172,17 +103,6 @@ def get_minimal_system_parameters(
         config["enable_columnar_lgalloc"] = "false"
     if version < MzVersion.parse_mz("v26.25.0-dev"):
         config["enable_multi_replica_sources"] = "true"
-
-    if version >= MzVersion.parse_mz("v26.40.0-dev"):
-        config["hydration_history_collection_interval"] = "60s"
-
-    if version >= MzVersion.parse_mz("v26.45.0-dev"):
-        # Exercise the source persist sink's grouping of a snapshotting export's
-        # updates ahead of release to production. At least one default_timestamp_interval
-        # (1s by default). A Postgres source's snapshot and first CDC
-        # rows become visible about this much later, which the PgCdc feature
-        # benchmarks measure.
-        config["storage_persist_sink_description_lookahead"] = "2s"
 
     if sanitizer_enabled():
         config["with_0dt_deployment_max_wait"] = "18000s"
