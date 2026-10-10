@@ -93,6 +93,7 @@ def get_minimal_system_parameters(
         "unsafe_enable_unsafe_functions": "true",
         # -----
         # Others (ordered by name)
+        "allow_real_time_recency": "true",
         "enable_0dt_deployment_panic_after_timeout": "true",
         "enable_cluster_schedule_refresh": "true",
         # Plans in EXPLAIN goldens use delta joins.
@@ -346,7 +347,6 @@ def get_variable_system_parameters(
         # New code paths that CI exercises while production keeps the compiled
         # default; tests pass either way, so `CI_SYSTEM_PARAMETERS=minimal`
         # runs the compiled default that self-managed deployments ship with.
-        VariableSystemParameter("allow_real_time_recency", "true", ["true", "false"]),
         VariableSystemParameter(
             "enable_arrangement_dictionary_compression_alpha",
             "false",
