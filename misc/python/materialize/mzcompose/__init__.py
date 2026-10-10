@@ -103,6 +103,11 @@ def get_minimal_system_parameters(
         "enable_refresh_every_mvs": "true",
         "grpc_client_http2_keep_alive_timeout": "5s",
         "ore_overflowing_behavior": "panic",
+        # Tests that read source and sink statistics, or source hydration
+        # (derived from them), wait for a report; the compiled intervals exceed
+        # their retry budgets.
+        "storage_statistics_collection_interval": "1000",
+        "storage_statistics_interval": "2000",
         "unsafe_enable_table_keys": "true",
         # Keep the 0dt stability soak out of the critical path for tests. The
         # production default is much higher. Dedicated workflows override this.
@@ -689,14 +694,6 @@ def get_variable_system_parameters(
             "storage_source_decode_fuel",
             "100000",
             ["10000", "100000", "1000000"],
-        ),
-        VariableSystemParameter(
-            "storage_statistics_collection_interval",
-            "1000",
-            ["100", "1000", "10000"],
-        ),
-        VariableSystemParameter(
-            "storage_statistics_interval", "2000", ["100", "1000", "10000"]
         ),
         VariableSystemParameter(
             "storage_use_continual_feedback_upsert", "true", ["true", "false"]
