@@ -18,7 +18,8 @@ from pathlib import Path
 from materialize.mz_version import MzVersion
 from materialize.mzcompose import (
     UNINTERESTING_SYSTEM_PARAMETERS,
-    get_default_system_parameters,
+    get_minimal_system_parameters,
+    get_variable_system_parameters,
 )
 from materialize.parallel_workload.action import FlipFlagsAction
 
@@ -55,9 +56,21 @@ def main() -> int:
     parallel_workload_known_flags = set(action.flags_with_values).union(
         action.uninteresting_flags
     )
-    mzcompose_known_flags = set(
-        get_default_system_parameters(MzVersion.parse_cargo()).keys()
-    ).union(UNINTERESTING_SYSTEM_PARAMETERS)
+    # Both lists regardless of `CI_SYSTEM_PARAMETERS`, which drops the
+    # variable list in minimal mode.
+    version = MzVersion.parse_cargo()
+    mzcompose_known_flags = (
+        set(get_minimal_system_parameters(version))
+        .union(
+            param.key
+            for param in get_variable_system_parameters(
+                version,
+                force_source_table_syntax=False,
+                metadata_store="postgres-metadata",
+            )
+        )
+        .union(UNINTERESTING_SYSTEM_PARAMETERS)
+    )
     found = False
 
     for config in configs:
