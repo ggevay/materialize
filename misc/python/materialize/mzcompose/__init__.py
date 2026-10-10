@@ -80,8 +80,12 @@ def sanitizer_enabled() -> bool:
 def get_minimal_system_parameters(
     version: MzVersion,
 ) -> dict[str, str]:
-    """Settings we need in order to have tests run at all, but otherwise stay
-    with the defaults: not changing performance or increasing coverage."""
+    """Settings tests need in every CI mode, including
+    `CI_SYSTEM_PARAMETERS=minimal`, which otherwise runs the compiled defaults
+    that self-managed deployments ship with. An entry belongs here only if tests
+    fail with the compiled default. A setting that tests pass either way, for
+    example a new code path CI should exercise, belongs in
+    `get_variable_system_parameters` instead."""
 
     config = {
         # -----
@@ -89,61 +93,14 @@ def get_minimal_system_parameters(
         "unsafe_enable_unsafe_functions": "true",
         # -----
         # Others (ordered by name)
-        "allow_real_time_recency": "true",
-        "constraint_based_timestamp_selection": "verify",  # removed from main, keeping it here for old versions
-        "enable_compute_peek_response_stash": "true",
         "enable_0dt_deployment_panic_after_timeout": "true",
-        "enable_0dt_deployment_sources": (
-            "true" if version >= MzVersion.parse_mz("v0.132.0-dev") else "false"
-        ),
-        "enable_alter_swap": "true",
-        "enable_arrangement_dictionary_compression_alpha": "false",
-        "enable_case_literal_transform": "true",
-        "enable_cast_elimination": "true",
-        "enable_coalesce_case_transform": "true",
-        "enable_columnation_lgalloc": "false",
-        "enable_compute_correction_v2": "true",
-        "enable_compute_logical_backpressure": "true",
-        "enable_connection_validation_syntax": "true",
-        "enable_create_table_from_source": "true",
+        "enable_cluster_schedule_refresh": "true",
+        # Plans in EXPLAIN goldens use delta joins.
         "enable_eager_delta_joins": "true",
-        "enable_envelope_debezium_in_subscribe": "true",
-        "enable_exclude_constraints_option": "true",
-        "enable_expressions_in_limit_syntax": "true",
-        "enable_fixed_correlated_cte_lowering": "true",
-        "enable_introspection_subscribes": "true",
-        "enable_lgalloc": "false",
         "enable_load_generator_counter": "true",
         "enable_logical_compaction_window": "true",
-        "enable_mcp_protocol_2026_07_28": "true",
-        "enable_metric_sink": "true",
-        "enable_multi_worker_storage_persist_sink": "true",
-        "enable_rbac_checks": "true",
-        "enable_reduce_mfp_fusion": "true",
+        "enable_password_auth": "true",
         "enable_refresh_every_mvs": "true",
-        "enable_replacement_materialized_views": "true",
-        "enable_cluster_schedule_refresh": "true",
-        # Pinned explicitly so runs against older versions (which predate the
-        # flag or defaulted it off) behave like current ones, where it defaults
-        # on.
-        "enable_background_alter_cluster": (
-            "true" if version >= MzVersion.parse_mz("v26.29.0-dev") else "false"
-        ),
-        "enable_cluster_reconfiguration_lag_gate": (
-            "true" if version >= MzVersion.parse_mz("v26.44.0-dev") else "false"
-        ),
-        "enable_s3_tables_region_check": "false",
-        "enable_statement_lifecycle_logging": "true",
-        # Introspection goldens depend on the replica topology, so tests need
-        # one consistent value rather than a varying one.
-        "enable_unified_cluster": (
-            "true" if version >= MzVersion.parse_mz("v26.43.0-dev") else "false"
-        ),
-        "enable_compute_error_distinct": "true",
-        "enable_compute_temporal_bucketing": "true",
-        "enable_union_cancellation_after_relation_cse": "true",
-        "enable_variadic_left_join_lowering": "true",
-        "enable_worker_core_affinity": "true",
         "grpc_client_http2_keep_alive_timeout": "5s",
         "ore_overflowing_behavior": "panic",
         "unsafe_enable_table_keys": "true",
@@ -154,16 +111,42 @@ def get_minimal_system_parameters(
         # End of list (ordered by name)
     }
 
-    if version >= MzVersion.parse_mz("v26.40.0-dev"):
-        # Exercise the row-limit check without constraining normal test queries.
-        config["compute_peek_row_iteration_limit"] = "1000000000"
-        config["enable_compute_peek_row_iteration_limit"] = "true"
+    if sanitizer_enabled():
+        config["with_0dt_deployment_max_wait"] = "18000s"
 
-        # Exercise the peek offload path in tests. Binaries before v26.44
-        # default it off, so this keeps mixed-version runs on the path current
-        # versions take. The budgets stay at their code defaults so tests make
-        # the same placement decisions production makes.
+    # Pins for older binaries, used as upgrade sources and benchmark baselines.
+    # Each pins the value CI ran that version with, where its compiled default
+    # differed. Current binaries default to these values, so they need no entry.
+    if version < MzVersion.parse_mz("v26.4.0-dev"):
+        config["enable_compute_peek_response_stash"] = "true"
+    if version < MzVersion.parse_mz("v26.8.0-dev"):
+        config["enable_compute_correction_v2"] = "true"
+    if version < MzVersion.parse_mz("v26.11.0-dev"):
+        config["enable_replacement_materialized_views"] = "true"
+    if version < MzVersion.parse_mz("v26.15.0-dev"):
+        config["enable_cast_elimination"] = "true"
+    if version < MzVersion.parse_mz("v26.16.0-dev"):
+        config["constraint_based_timestamp_selection"] = "verify"
+    if version < MzVersion.parse_mz("v26.26.0-dev"):
+        config["enable_create_table_from_source"] = "true"
+    if version < MzVersion.parse_mz("v26.35.0-dev"):
+        config["enable_background_alter_cluster"] = (
+            "true" if version >= MzVersion.parse_mz("v26.29.0-dev") else "false"
+        )
+    if (
+        MzVersion.parse_mz("v26.40.0-dev")
+        <= version
+        < MzVersion.parse_mz("v26.43.0-dev")
+    ):
+        config["hydration_history_collection_interval"] = "60s"
+    if (
+        MzVersion.parse_mz("v26.40.0-dev")
+        <= version
+        < MzVersion.parse_mz("v26.44.0-dev")
+    ):
         config["enable_compute_index_peek_offload"] = "true"
+    if version < MzVersion.parse_mz("v26.46.0-dev"):
+        config["enable_metric_sink"] = "true"
 
     if version < MzVersion.parse_mz("v0.163.0-dev"):
         config["enable_compute_active_dataflow_cancelation"] = "true"
@@ -172,20 +155,6 @@ def get_minimal_system_parameters(
         config["enable_columnar_lgalloc"] = "false"
     if version < MzVersion.parse_mz("v26.25.0-dev"):
         config["enable_multi_replica_sources"] = "true"
-
-    if version >= MzVersion.parse_mz("v26.40.0-dev"):
-        config["hydration_history_collection_interval"] = "60s"
-
-    if version >= MzVersion.parse_mz("v26.45.0-dev"):
-        # Exercise the source persist sink's grouping of a snapshotting export's
-        # updates ahead of release to production. At least one default_timestamp_interval
-        # (1s by default). A Postgres source's snapshot and first CDC
-        # rows become visible about this much later, which the PgCdc feature
-        # benchmarks measure.
-        config["storage_persist_sink_description_lookahead"] = "2s"
-
-    if sanitizer_enabled():
-        config["with_0dt_deployment_max_wait"] = "18000s"
 
     # Keep older baselines and mixed-version runs on the same read-then-write
     # path as current binaries, where frontend OCC is unconditional.
@@ -369,13 +338,74 @@ def get_variable_system_parameters(
             "true",
             ["true", "false"],
         ),
+        # New code paths that CI exercises while production keeps the compiled
+        # default; tests pass either way, so `CI_SYSTEM_PARAMETERS=minimal`
+        # runs the compiled default that self-managed deployments ship with.
+        VariableSystemParameter("allow_real_time_recency", "true", ["true", "false"]),
         VariableSystemParameter(
-            "enable_compute_sync_mv_sink",
-            "true",
-            ["true", "false"],
+            "enable_arrangement_dictionary_compression_alpha",
+            "false",
+            ["false", "true"],
         ),
         VariableSystemParameter(
-            "enable_password_auth",
+            "enable_columnation_lgalloc", "false", ["false", "true"]
+        ),
+        VariableSystemParameter(
+            "enable_compute_logical_backpressure", "true", ["true", "false"]
+        ),
+        VariableSystemParameter(
+            "enable_compute_temporal_bucketing", "true", ["true", "false"]
+        ),
+        VariableSystemParameter(
+            "enable_envelope_debezium_in_subscribe", "true", ["true", "false"]
+        ),
+        VariableSystemParameter("enable_lgalloc", "false", ["false", "true"]),
+        VariableSystemParameter(
+            "enable_mcp_protocol_2026_07_28", "true", ["true", "false"]
+        ),
+        VariableSystemParameter(
+            "enable_unified_cluster",
+            "true" if version >= MzVersion.parse_mz("v26.43.0-dev") else "false",
+            (
+                ["true", "false"]
+                if version >= MzVersion.parse_mz("v26.43.0-dev")
+                else ["false"]
+            ),
+        ),
+        VariableSystemParameter(
+            "enable_worker_core_affinity", "true", ["true", "false"]
+        ),
+        *(
+            [
+                # Exercise the row-limit check without constraining normal
+                # test queries.
+                VariableSystemParameter(
+                    "enable_compute_peek_row_iteration_limit",
+                    "true",
+                    ["true", "false"],
+                ),
+                VariableSystemParameter(
+                    "compute_peek_row_iteration_limit", "1000000000", ["1000000000"]
+                ),
+            ]
+            if version >= MzVersion.parse_mz("v26.40.0-dev")
+            else []
+        ),
+        *(
+            [
+                # Exercise the source persist sink's grouping of a snapshotting
+                # export's updates ahead of release to production. A Postgres
+                # source's snapshot and first CDC rows become visible about this
+                # much later, which the PgCdc feature benchmarks measure.
+                VariableSystemParameter(
+                    "storage_persist_sink_description_lookahead", "2s", ["2s", "0s"]
+                ),
+            ]
+            if version >= MzVersion.parse_mz("v26.45.0-dev")
+            else []
+        ),
+        VariableSystemParameter(
+            "enable_compute_sync_mv_sink",
             "true",
             ["true", "false"],
         ),
@@ -751,6 +781,20 @@ def get_default_system_parameters(
 # all. Only add it in UNINTERESTING_SYSTEM_PARAMETERS if none of the above
 # apply.
 UNINTERESTING_SYSTEM_PARAMETERS = [
+    # CI runs these at their compiled defaults. Older binaries that defaulted
+    # differently get version pins in get_minimal_system_parameters.
+    "enable_0dt_deployment_sources",
+    "enable_background_alter_cluster",
+    "enable_cluster_reconfiguration_lag_gate",
+    "enable_compute_correction_v2",
+    "enable_compute_error_distinct",
+    "enable_compute_index_peek_offload",
+    "enable_compute_peek_response_stash",
+    "enable_introspection_subscribes",
+    "enable_s3_tables_region_check",
+    "enable_statement_lifecycle_logging",
+    "hydration_history_collection_interval",
+    # End of compiled-default group
     "enable_compute_half_join2",
     "enable_mz_join_core",
     "linear_join_yielding",
