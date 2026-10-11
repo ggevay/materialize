@@ -199,7 +199,7 @@ EXPLAIN PLAN INSIGHTS AS JSON FOR SELECT * FROM t
       }
     },
     "fast_path_clusters": {},
-    "fast_path_limit": 1000,
+    "fast_path_limit": 25,
     "persist_count": []
   },
   "cluster": {
@@ -906,7 +906,7 @@ EXPLAIN PLAN INSIGHTS AS JSON FOR SELECT * FROM t
         }
       }
     },
-    "fast_path_limit": 1000,
+    "fast_path_limit": 25,
     "persist_count": []
   },
   "cluster": {

@@ -9,6 +9,13 @@
 
 mode cockroach
 
+# The fast path for queries with a matching ordering or a literal constraint is
+# off by default; this file tests it.
+simple conn=mz_system,user=mz_system
+ALTER SYSTEM SET persist_fast_path_order = true
+----
+COMPLETE 0
+
 # Verify that the persist fast path only kicks in when it's expected to do so.
 
 # Generate a table, with multiple batches of data and some partial overlaps

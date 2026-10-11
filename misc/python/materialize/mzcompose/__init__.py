@@ -525,12 +525,6 @@ def get_variable_system_parameters(
             "persist_encoding_enable_dictionary", "true", ["true", "false"]
         ),
         VariableSystemParameter(
-            "persist_fast_path_limit",
-            "1000",
-            ["100", "1000", "10000"],
-        ),
-        VariableSystemParameter("persist_fast_path_order", "true", ["true", "false"]),
-        VariableSystemParameter(
             "persist_gc_use_active_gc",
             ("true" if version > MzVersion.parse_mz("v0.143.0-dev") else "false"),
             (
@@ -791,6 +785,7 @@ UNINTERESTING_SYSTEM_PARAMETERS = [
     "enable_s3_tables_region_check",
     "enable_statement_lifecycle_logging",
     "hydration_history_collection_interval",
+    "persist_fast_path_order",
     # End of compiled-default group
     "enable_compute_half_join2",
     "enable_mz_join_core",

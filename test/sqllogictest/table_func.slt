@@ -1819,6 +1819,7 @@ Explained Query:
       ReadStorage materialize.public.x
 
 Source materialize.public.x
+  filter=((#0{a} = 1))
 
 Target cluster: quickstart
 
@@ -1849,6 +1850,7 @@ Explained Query:
       ReadStorage materialize.public.x
 
 Source materialize.public.x
+  filter=((#0{a} = 1))
 
 Target cluster: quickstart
 
