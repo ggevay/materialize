@@ -11,6 +11,25 @@ mode cockroach
 
 reset-server
 
+# The operator goldens below include replica expiration, persist source flow
+# control and logical backpressure, which CI enables but the compiled defaults
+# that `CI_SYSTEM_PARAMETERS=minimal` runs with do not. All three are read when
+# the cluster and its dataflows are created below.
+simple conn=mz_system,user=mz_system
+ALTER SYSTEM SET compute_replica_expiration_offset = '3d'
+----
+COMPLETE 0
+
+simple conn=mz_system,user=mz_system
+ALTER SYSTEM SET compute_dataflow_max_inflight_bytes = 134217728
+----
+COMPLETE 0
+
+simple conn=mz_system,user=mz_system
+ALTER SYSTEM SET enable_compute_logical_backpressure = true
+----
+COMPLETE 0
+
 # Test contents of introspection relations
 
 statement ok

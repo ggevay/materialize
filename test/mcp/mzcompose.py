@@ -385,10 +385,12 @@ def workflow_endpoints(c: Composition) -> None:
                 AS SELECT 7::int AS id, 'routed'::text AS name;
             GRANT USAGE ON CLUSTER dex27_other TO anonymous_http_user;
             GRANT SELECT ON public.dex27_routed_mv TO anonymous_http_user;
-            -- Make sure statement logging fires for our read so we can
-            -- inspect mz_recent_activity_log without flakiness.
+            -- Make sure statement logging fires for our read, and is not
+            -- throttled away, so we can inspect mz_recent_activity_log
+            -- without flakiness.
             ALTER SYSTEM SET statement_logging_default_sample_rate = 1.0;
             ALTER SYSTEM SET statement_logging_max_sample_rate = 1.0;
+            ALTER SYSTEM SET statement_logging_target_data_rate = '';
             """,
             user="mz_system",
             port=6877,

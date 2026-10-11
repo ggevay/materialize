@@ -4234,6 +4234,8 @@ def workflow_statement_logging(c: Composition, parser: WorkflowArgumentParser) -
             """
             ALTER SYSTEM SET statement_logging_max_sample_rate = 1.0;
             ALTER SYSTEM SET statement_logging_default_sample_rate = 1.0;
+            ALTER SYSTEM SET statement_logging_target_data_rate = '';
+            ALTER SYSTEM SET statement_logging_max_data_credit = '';
         """,
             port=6877,
             user="mz_system",

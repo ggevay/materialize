@@ -9,9 +9,18 @@
 
 # Cloudtest is still running with RBAC off, while the mzcompose-based tests
 # have it enabled, so enable it explicitly for this test so that we have
-# consistent output in "SHOW ALL".
+# consistent output in "SHOW ALL". The settings below are pinned for the same
+# reason: their compiled defaults differ from CI's. `allow_real_time_recency`
+# makes the `real_time_recency` variables visible, and this session's
+# `statement_logging_sample_rate` was fixed from the system default when it
+# connected, before the `ALTER SYSTEM`.
 $ postgres-execute connection=postgres://mz_system:materialize@${testdrive.materialize-internal-sql-addr}
 ALTER SYSTEM SET enable_rbac_checks = true;
+ALTER SYSTEM SET allow_real_time_recency = true;
+ALTER SYSTEM SET statement_logging_default_sample_rate = 1.0;
+ALTER SYSTEM SET statement_logging_max_sample_rate = 1.0;
+
+> SET statement_logging_sample_rate = 1.0
 
 $ set-regex match="cluster1|^quickstart$|v\d+\.\d+\.\d+(-[a-z0-9]+)?(\.\d+)? \([a-f0-9]{9}\)" replacement=<VARIES>
 

@@ -18,6 +18,7 @@ class StatementLogging(Check):
         return Testdrive(dedent("""
                 $ postgres-execute connection=postgres://mz_system@${testdrive.materialize-internal-sql-addr}
                 ALTER SYSTEM SET statement_logging_max_sample_rate TO 1.0
+                ALTER SYSTEM SET statement_logging_target_data_rate = ''
                 """))
 
     def manipulate(self) -> list[Testdrive]:
