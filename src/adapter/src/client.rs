@@ -1070,6 +1070,14 @@ impl SessionClient {
         // here. It's safe to ignore the returned `TransactionStatus` because that doesn't contain
         // any data that the Coordinator must act on for correctness.
         let _ = self.session().clear_transaction();
+        if res.is_err() {
+            // The transaction is over even when ending it failed. Its `SET LOCAL` and uncommitted
+            // `SET` values would otherwise apply to the next transaction.
+            let _ = self
+                .session()
+                .vars_mut()
+                .end_transaction(EndTransactionAction::Rollback);
+        }
         res
     }
 
