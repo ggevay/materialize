@@ -553,14 +553,24 @@ impl Coordinator {
 
         // Validate the target up front, so a bad reshape errors at `ALTER` time
         // rather than silently parking an unconvergeable record.
+        // A size already in use stays valid after the allow-list changes. The
+        // size map and disabled checks still run, because the limit checks
+        // below expect to find the size.
+        let size_in_use = matches!(
+            &cluster.config.variant,
+            ClusterVariant::Managed(managed) if managed.size == target.size
+        ) || in_flight
+            .as_ref()
+            .is_some_and(|record| record.target.size == target.size);
         let role_id = session.role_metadata().current_role;
-        self.catalog.ensure_valid_replica_size(
-            &self
-                .catalog()
-                .get_role_allowed_cluster_sizes(&Some(role_id)),
-            &target.size,
-            false,
-        )?;
+        let allowed_sizes = if size_in_use {
+            Vec::new()
+        } else {
+            self.catalog()
+                .get_role_allowed_cluster_sizes(&Some(role_id))
+        };
+        self.catalog
+            .ensure_valid_replica_size(&allowed_sizes, &target.size, false)?;
         self.ensure_valid_azs(target.availability_zones.iter())?;
 
         let cancels = match &cluster.config.variant {
@@ -1507,11 +1517,15 @@ impl Coordinator {
         } = new_managed;
 
         let role_id = Some(session.role_metadata().current_role);
-        self.catalog.ensure_valid_replica_size(
-            &self.catalog().get_role_allowed_cluster_sizes(&role_id),
-            new_size,
-            false,
-        )?;
+        // As in `reshape_alter_cluster_managed`, an unchanged size skips only the
+        // allow-list.
+        let allowed_sizes = if new_size == size {
+            Vec::new()
+        } else {
+            self.catalog().get_role_allowed_cluster_sizes(&role_id)
+        };
+        self.catalog
+            .ensure_valid_replica_size(&allowed_sizes, new_size, false)?;
         if new_auto_scaling_strategy != auto_scaling_strategy {
             if let Some(on_hydration) = new_auto_scaling_strategy
                 .as_ref()
