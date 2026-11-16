@@ -1549,3 +1549,325 @@ mod tests {
         assert!(!safety.can_abort());
     }
 }
+
+/// Registration of a background peek whose catalog snapshot went stale while
+/// the coordinator shut down.
+#[cfg(test)]
+mod background_registration_tests {
+    use std::collections::{BTreeMap, BTreeSet};
+    use std::sync::{Arc, Mutex};
+    use std::time::Duration;
+
+    use async_trait::async_trait;
+    use futures::future::BoxFuture;
+    use futures::stream::BoxStream;
+    use mz_catalog::durable::test_bootstrap_args;
+    use mz_controller_types::ClusterId;
+    use mz_ore::metrics::MetricsRegistry;
+    use mz_ore::now::SYSTEM_TIME;
+    use mz_persist_client::PersistClient;
+    use mz_persist_client::stats::{SnapshotPartsStats, SnapshotStats};
+    use mz_persist_types::ShardId;
+    use mz_repr::global_id::TransientIdGen;
+    use mz_repr::{GlobalId, RelationDesc, RelationVersion, Row, Timestamp};
+    use mz_sql::optimizer_metrics::OptimizerMetrics;
+    use mz_sql::session::user::MZ_SYSTEM_ROLE_ID;
+    use mz_storage_client::client::TimestamplessUpdateBuilder;
+    use mz_storage_client::controller::{CollectionDescription, StorageMetadata, StorageTxn};
+    use mz_storage_client::storage_collections::{CollectionFrontiers, SnapshotCursor};
+    use mz_storage_types::StorageDiff;
+    use mz_storage_types::controller::{CollectionMetadata, StorageError};
+    use mz_storage_types::errors::CollectionMissing;
+    use mz_storage_types::parameters::StorageParameters;
+    use mz_storage_types::read_holds::ReadHold;
+    use mz_storage_types::read_policy::ReadPolicy;
+    use mz_storage_types::sources::SourceData;
+    use mz_storage_types::time_dependence::{TimeDependence, TimeDependenceError};
+    use rand::SeedableRng;
+    use timely::progress::Antichain;
+    use tokio::sync::Semaphore;
+    use uuid::Uuid;
+
+    use crate::catalog::{Catalog, Op};
+    use crate::metrics::Metrics;
+    use crate::statement_logging::{StatementLoggingFrontend, ThrottlingState};
+
+    use super::{CoordinatorClient, ExecutionLogging, PeekClient};
+
+    #[derive(Debug)]
+    struct UnusedStorage;
+
+    #[async_trait]
+    impl mz_storage_client::storage_collections::StorageCollections for UnusedStorage {
+        async fn initialize_state(
+            &self,
+            _txn: &mut (dyn StorageTxn + Send),
+            _init_ids: BTreeSet<GlobalId>,
+        ) -> Result<(), StorageError> {
+            unimplemented!()
+        }
+
+        fn update_parameters(&self, _config_params: StorageParameters) {
+            unimplemented!()
+        }
+
+        fn collection_metadata(
+            &self,
+            _id: GlobalId,
+        ) -> Result<CollectionMetadata, CollectionMissing> {
+            unimplemented!()
+        }
+
+        fn active_collection_metadatas(&self) -> Vec<(GlobalId, CollectionMetadata)> {
+            unimplemented!()
+        }
+
+        fn collections_frontiers(
+            &self,
+            _ids: Vec<GlobalId>,
+        ) -> Result<Vec<CollectionFrontiers>, CollectionMissing> {
+            unimplemented!("peek routing must not access storage")
+        }
+
+        fn active_collection_frontiers(&self) -> Vec<CollectionFrontiers> {
+            unimplemented!()
+        }
+
+        fn check_exists(&self, _id: GlobalId) -> Result<(), StorageError> {
+            unimplemented!()
+        }
+
+        async fn snapshot_stats(
+            &self,
+            _id: GlobalId,
+            _as_of: Antichain<Timestamp>,
+        ) -> Result<SnapshotStats, StorageError> {
+            unimplemented!()
+        }
+
+        async fn snapshot_parts_stats(
+            &self,
+            _id: GlobalId,
+            _as_of: Antichain<Timestamp>,
+        ) -> BoxFuture<'static, Result<SnapshotPartsStats, StorageError>> {
+            unimplemented!()
+        }
+
+        fn snapshot(
+            &self,
+            _id: GlobalId,
+            _as_of: Timestamp,
+        ) -> BoxFuture<'static, Result<Vec<(Row, StorageDiff)>, StorageError>> {
+            unimplemented!()
+        }
+
+        async fn snapshot_latest(&self, _id: GlobalId) -> Result<Vec<Row>, StorageError> {
+            unimplemented!()
+        }
+
+        fn snapshot_cursor(
+            &self,
+            _id: GlobalId,
+            _as_of: Timestamp,
+        ) -> BoxFuture<'static, Result<SnapshotCursor, StorageError>> {
+            unimplemented!()
+        }
+
+        fn snapshot_and_stream(
+            &self,
+            _id: GlobalId,
+            _as_of: Timestamp,
+        ) -> BoxFuture<
+            'static,
+            Result<BoxStream<'static, (SourceData, Timestamp, StorageDiff)>, StorageError>,
+        > {
+            unimplemented!()
+        }
+
+        fn create_update_builder(
+            &self,
+            _id: GlobalId,
+        ) -> BoxFuture<
+            'static,
+            Result<TimestamplessUpdateBuilder<SourceData, (), StorageDiff>, StorageError>,
+        > {
+            unimplemented!()
+        }
+
+        async fn prepare_state(
+            &self,
+            _txn: &mut (dyn StorageTxn + Send),
+            _ids_to_add: BTreeSet<GlobalId>,
+            _ids_to_drop: BTreeSet<GlobalId>,
+            _ids_to_register: BTreeMap<GlobalId, ShardId>,
+        ) -> Result<(), StorageError> {
+            unimplemented!()
+        }
+
+        async fn create_collections_for_bootstrap(
+            &self,
+            _storage_metadata: &StorageMetadata,
+            _register_ts: Option<Timestamp>,
+            _collections: Vec<(GlobalId, CollectionDescription)>,
+            _migrated_storage_collections: &BTreeSet<GlobalId>,
+        ) -> Result<(), StorageError> {
+            unimplemented!()
+        }
+
+        async fn alter_table_desc(
+            &self,
+            _existing_collection: GlobalId,
+            _new_collection: GlobalId,
+            _new_desc: RelationDesc,
+            _expected_version: RelationVersion,
+        ) -> Result<(), StorageError> {
+            unimplemented!()
+        }
+
+        fn drop_collections_unvalidated(
+            &self,
+            _storage_metadata: &StorageMetadata,
+            _identifiers: Vec<GlobalId>,
+        ) {
+            unimplemented!()
+        }
+
+        fn set_read_policies(&self, _policies: Vec<(GlobalId, ReadPolicy)>) {
+            unimplemented!()
+        }
+
+        fn acquire_read_holds(
+            &self,
+            _desired_holds: Vec<GlobalId>,
+        ) -> Result<Vec<ReadHold>, CollectionMissing> {
+            unimplemented!("peek routing must not access storage")
+        }
+
+        fn determine_time_dependence(
+            &self,
+            _id: GlobalId,
+        ) -> Result<Option<TimeDependence>, TimeDependenceError> {
+            unimplemented!()
+        }
+
+        fn dump(&self) -> Result<serde_json::Value, anyhow::Error> {
+            unimplemented!()
+        }
+    }
+
+    /// A background `PeekClient` whose coordinator has shut down, as
+    /// `Coordinator::background_peek_client` builds it. The storage
+    /// collections are a stub, since registration never touches them.
+    async fn background_client_without_coordinator(catalog: &Arc<Catalog>) -> PeekClient {
+        let registry = MetricsRegistry::new();
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+        drop(rx);
+        let now = SYSTEM_TIME.clone();
+        PeekClient::new(
+            CoordinatorClient::Background {
+                tx,
+                metrics: Metrics::register_into(&registry),
+            },
+            Arc::default(),
+            catalog,
+            Arc::new(UnusedStorage),
+            Arc::new(TransientIdGen::new()),
+            OptimizerMetrics::register_into(&MetricsRegistry::new(), Duration::from_secs(60)),
+            PersistClient::new_for_tests().await,
+            StatementLoggingFrontend {
+                throttling_state: Arc::new(ThrottlingState::new(&now)),
+                reproducible_rng: Arc::new(Mutex::new(rand::rngs::ChaCha8Rng::seed_from_u64(42))),
+                build_info_human_version: "test".into(),
+                now,
+            },
+            Arc::new(Semaphore::new(1)),
+            crate::coord::appends::notifier().0,
+            false,
+        )
+    }
+
+    async fn debug_catalog() -> Catalog {
+        Catalog::open_debug_catalog(
+            PersistClient::new_for_tests().await,
+            Uuid::new_v4(),
+            &test_bootstrap_args(),
+        )
+        .await
+        .expect("unable to open debug catalog")
+    }
+
+    /// Control: with a current catalog, registration succeeds without the
+    /// coordinator. This shows that the stale revision alone is what sends
+    /// the test below to the coordinator.
+    #[mz_ore::test(tokio::test)]
+    #[cfg_attr(miri, ignore)] // unsupported operation: can't call foreign function `TLS_client_method` on OS `linux`
+    async fn current_catalog_registers_without_coordinator() {
+        let catalog = debug_catalog().await;
+        let snapshot = Arc::new(catalog.clone());
+        assert!(snapshot.transient_revision_is_current());
+
+        let mut client = background_client_without_coordinator(&snapshot).await;
+        let conn_id = mz_ore::id_gen::IdHandle::Static(0);
+        let epoch = client.connection_peeks(&conn_id).cancellation_epoch();
+        let mut logging = ExecutionLogging::adopt(None, &client);
+        let result = client
+            .register_peek(
+                &conn_id,
+                ClusterId::User(1),
+                BTreeSet::<GlobalId>::new(),
+                Arc::clone(&snapshot),
+                epoch,
+                &mut logging,
+                true,
+            )
+            .await;
+        assert!(result.is_ok(), "current catalog must register: {result:?}");
+        drop(result);
+        catalog.expire().await;
+    }
+
+    /// A catalog transaction commits between a background peek's catalog
+    /// snapshot and its registration, and the coordinator is gone when the
+    /// peek refreshes the snapshot. The peek must fail, not panic.
+    #[mz_ore::test(tokio::test)]
+    #[cfg_attr(miri, ignore)] // unsupported operation: can't call foreign function `TLS_client_method` on OS `linux`
+    async fn stale_catalog_with_gone_coordinator_fails_registration() {
+        let mut catalog = debug_catalog().await;
+        // What `background_peek` fetched and planned against.
+        let snapshot = Arc::new(catalog.clone());
+        let commit_ts = catalog.current_upper().await;
+        catalog
+            .transact(
+                None,
+                commit_ts,
+                None,
+                vec![Op::CreateDatabase {
+                    name: "test".to_string(),
+                    owner_id: MZ_SYSTEM_ROLE_ID,
+                }],
+            )
+            .await
+            .expect("failed to transact");
+        // Not vacuous: registration will see `RegisterError::CatalogChanged`.
+        assert!(!snapshot.transient_revision_is_current());
+
+        let mut client = background_client_without_coordinator(&snapshot).await;
+        let conn_id = mz_ore::id_gen::IdHandle::Static(0);
+        let epoch = client.connection_peeks(&conn_id).cancellation_epoch();
+        let mut logging = ExecutionLogging::adopt(None, &client);
+        let result = client
+            .register_peek(
+                &conn_id,
+                ClusterId::User(1),
+                BTreeSet::<GlobalId>::new(),
+                Arc::clone(&snapshot),
+                epoch,
+                &mut logging,
+                true,
+            )
+            .await;
+        assert!(result.is_err(), "a gone coordinator must fail the peek");
+        drop(result);
+        catalog.expire().await;
+    }
+}
