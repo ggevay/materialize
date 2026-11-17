@@ -25,6 +25,9 @@
 //! Which mechanism to use is selected through entries in the `MIGRATIONS` list. In general, the
 //! `Evolution` mechanism should be used when possible, as it avoids data loss.
 //!
+//! New builtin materialized views get their shards from the migration shard that `Replacement`
+//! uses, so that a read-only environment can write them (see `Migration::plan_allocation`).
+//!
 //! For more context and details on the implementation, see
 //! `doc/developer/design/20251015_builtin_schema_migration.md`.
 
@@ -637,7 +640,8 @@ enum Mechanism {
 
 /// The result of a builtin schema migration.
 pub(super) struct MigrationResult {
-    /// IDs of items whose shards have been replaced using the `Replacement` mechanism.
+    /// IDs of items that got a new shard from the migration shard: `Replacement`-migrated items
+    /// and the materialized views in `Plan::allocate`.
     pub replaced_items: BTreeSet<CatalogItemId>,
     /// A cleanup action to take once the migration has been made durable.
     pub cleanup_action: BoxFuture<'static, ()>,
@@ -874,7 +878,7 @@ impl Migration {
             Some("replacement") => (true, self.plan_forced_migration(Mechanism::Replacement)),
             Some(other) => panic!("unknown force migration mechanism: {other}"),
         };
-        let plan = self.drop_shardless(plan);
+        let mut plan = self.drop_shardless(plan);
 
         if self.source_version == self.target_version && !force {
             info!("skipping migration: already at target version");
@@ -889,10 +893,12 @@ impl Migration {
             self.upgrade_migration_shard_version().await;
         }
 
+        plan.allocate = self.plan_allocation();
+
         info!("executing migration plan: {plan:?}");
 
         self.migrate_evolve(&plan.evolve).await?;
-        let new_shards = self.migrate_replace(&plan.replace).await?;
+        let new_shards = self.migrate_replace(&plan.replace, &plan.allocate).await?;
 
         let mut migrated_objects = BTreeSet::new();
         migrated_objects.extend(plan.evolve);
@@ -1054,10 +1060,11 @@ impl Migration {
     /// A builtin without a shard does not exist in persist yet: either it was added in the target
     /// version, or the source version predates it entirely (an upgrade from before the builtin
     /// was introduced can reach an `Evolution` step registered for a later version). In both
-    /// cases the leader allocates the shard during bootstrap, at the target schema, and there is
-    /// nothing to evolve or replace. Applied to every plan, forced or versioned, so that both
-    /// paths agree; a read-only process that reached `migrate_evolve_one` with such an object
-    /// would otherwise bail out and crash-loop.
+    /// cases the shard gets allocated at the target schema, from the migration shard for
+    /// materialized views (see `plan_allocation`), and there is nothing to evolve or replace.
+    /// Applied to every plan, forced or versioned, so that both paths agree; a read-only process
+    /// that reached `migrate_evolve_one` with such an object would otherwise bail out and
+    /// crash-loop.
     fn drop_shardless(&self, mut plan: Plan) -> Plan {
         let has_shard = |object: &SystemObjectDescription| {
             self.system_objects
@@ -1067,6 +1074,26 @@ impl Migration {
         plan.evolve.retain(has_shard);
         plan.replace.retain(has_shard);
         plan
+    }
+
+    /// Select the builtin materialized views without a registered shard, such as those added in
+    /// the target version.
+    ///
+    /// A read-only process never commits the shard the storage controller would allocate for
+    /// them, so the promoted leader would allocate another. A shard from the migration shard is
+    /// shared by every process of this version and deploy generation, so the read-only process can
+    /// write it and hydrate the view and its dependents before cut-over.
+    ///
+    /// Same-version boots skip the whole migration, so there a new builtin keeps the shard the
+    /// storage controller allocates.
+    fn plan_allocation(&self) -> Vec<SystemObjectDescription> {
+        self.system_objects
+            .iter()
+            .filter(|(_, info)| {
+                info.shard_id.is_none() && matches!(info.builtin, Builtin::MaterializedView(_))
+            })
+            .map(|(object, _)| object.clone())
+            .collect()
     }
 
     /// Upgrade the migration shard to the target version.
@@ -1224,12 +1251,38 @@ impl Migration {
         Ok(())
     }
 
-    /// Migrate the given objects using the `Replacement` mechanism.
+    /// Give the `replace` and `allocate` objects shards from the migration shard, inserting new
+    /// ones where it has none at this version and deploy generation.
+    ///
+    /// Entries for `replace` objects are keyed by their global id, which is durable. Entries for
+    /// `allocate` objects are keyed by the object itself: their global id was allocated in this
+    /// process's catalog transaction, which a read-only process never commits.
     async fn migrate_replace(
         &self,
-        objects: &[SystemObjectDescription],
+        replace: &[SystemObjectDescription],
+        allocate: &[SystemObjectDescription],
     ) -> anyhow::Result<BTreeMap<GlobalId, ShardId>> {
-        if objects.is_empty() {
+        let mut entries = BTreeMap::new();
+        for (objects, by_object) in [(replace, false), (allocate, true)] {
+            for object in objects {
+                let Some(info) = self.system_objects.get(object) else {
+                    bail!("missing id for builtin {object:?}");
+                };
+                let GlobalId::System(global_id) = info.global_id else {
+                    bail!(
+                        "attempt to migrate a non-system collection: {}",
+                        info.global_id
+                    );
+                };
+                let entry = if by_object {
+                    migration_shard::EntryId::Object(object.into())
+                } else {
+                    migration_shard::EntryId::Global(global_id)
+                };
+                entries.insert(entry, info.global_id);
+            }
+        }
+        if entries.is_empty() {
             return Ok(Default::default());
         }
 
@@ -1240,23 +1293,19 @@ impl Migration {
         let (mut persist_write, mut persist_read) =
             self.open_migration_shard(diagnostics.clone()).await;
 
-        let mut ids_to_replace = BTreeSet::new();
-        for object in objects {
-            if let Some(info) = self.system_objects.get(object) {
-                ids_to_replace.insert(info.global_id);
-            } else {
-                bail!("missing id for builtin {object:?}");
-            }
-        }
-
-        info!(?objects, ?ids_to_replace, "migrating by replacement");
+        info!(
+            ?replace,
+            ?allocate,
+            ids_to_replace = ?entries.values().collect::<Vec<_>>(),
+            "allocating shards from the migration shard"
+        );
 
         // Fetch replacement shard IDs from the migration shard, or insert new ones if none exist.
         // This can fail due to writes by concurrent processes, so we need to retry.
         let replaced_shards = loop {
             if let Some(shards) = self
                 .try_get_or_insert_replacement_shards(
-                    &ids_to_replace,
+                    &entries,
                     &mut persist_write,
                     &mut persist_read,
                 )
@@ -1269,8 +1318,9 @@ impl Migration {
         Ok(replaced_shards)
     }
 
-    /// Try to get or insert replacement shards for the given IDs into the migration shard, at
-    /// `target_version` and `deploy_generation`.
+    /// Try to get or insert replacement shards for the given entries into the migration shard, at
+    /// `target_version` and `deploy_generation`. `entries` maps each entry to the global id the
+    /// shard is for in this process.
     ///
     /// This method looks for existing entries in the migration shards and returns those if they
     /// are present. Otherwise it generates new shard IDs and tries to insert them.
@@ -1280,21 +1330,20 @@ impl Migration {
     /// expected to retry.
     async fn try_get_or_insert_replacement_shards(
         &self,
-        ids_to_replace: &BTreeSet<GlobalId>,
+        entries: &BTreeMap<migration_shard::EntryId, GlobalId>,
         persist_write: &mut WriteHandle<migration_shard::Key, ShardId, Timestamp, StorageDiff>,
         persist_read: &mut ReadHandle<migration_shard::Key, ShardId, Timestamp, StorageDiff>,
     ) -> anyhow::Result<Option<BTreeMap<GlobalId, ShardId>>> {
         let upper = persist_write.fetch_recent_upper().await;
         let write_ts = *upper.as_option().expect("migration shard not sealed");
 
-        let mut ids_to_replace = ids_to_replace.clone();
+        let mut todo = entries.clone();
         let mut replaced_shards = BTreeMap::new();
 
         // Another process might already have done a shard replacement at our version and
         // generation, in which case we can directly reuse the replacement shards.
         //
-        // Note that we can't assume that the previous process had the same `ids_to_replace` as we
-        // do. The set of migrations to run depends on both the source and the target version, and
+        // Note that we can't assume that the previous process had the same `entries` as we do. The set of migrations to run depends on both the source and the target version, and
         // the migration shard is not keyed by source version. The previous writer might have seen
         // a different source version, if there was a concurrent migration by a leader process.
         if let Some(read_ts) = write_ts.step_back() {
@@ -1304,19 +1353,18 @@ impl Migration {
             };
             if let Some(entries) = read_migration_shard(persist_read, read_ts, pred).await {
                 for (key, shard_id) in entries {
-                    let id = GlobalId::System(key.global_id);
-                    if ids_to_replace.remove(&id) {
+                    if let Some(id) = todo.remove(&key.entry_id()) {
                         replaced_shards.insert(id, shard_id);
                     }
                 }
 
                 debug!(
-                    %read_ts, ?replaced_shards, ?ids_to_replace,
+                    %read_ts, ?replaced_shards, ids_to_replace = ?todo.values().collect::<Vec<_>>(),
                     "found existing entries in migration shard",
                 );
             }
 
-            if ids_to_replace.is_empty() {
+            if todo.is_empty() {
                 return Ok(Some(replaced_shards));
             }
         }
@@ -1325,7 +1373,7 @@ impl Migration {
         // CaA failure at `write_ts` that means a concurrent process has inserted in the meantime
         // and we need to re-check the migration shard contents.
         let mut updates = Vec::new();
-        for id in ids_to_replace {
+        for (entry, id) in todo {
             let shard_id = ShardId::new();
             replaced_shards.insert(id, shard_id);
 
@@ -1336,6 +1384,10 @@ impl Migration {
                 global_id,
                 build_version: self.target_version.clone(),
                 deploy_generation: Some(self.deploy_generation),
+                object: match entry {
+                    migration_shard::EntryId::Object(object) => Some(object),
+                    migration_shard::EntryId::Global(_) => None,
+                },
             };
             updates.push(((key, shard_id), write_ts, 1));
         }
@@ -1497,10 +1549,10 @@ impl Migration {
             "cleaning migration shard up to version {}", self.target_version,
         );
 
-        let current_shards: BTreeMap<_, _> = self
+        let current_shards: BTreeSet<_> = self
             .system_objects
             .values()
-            .filter_map(|o| o.shard_id.map(|shard_id| (o.global_id, shard_id)))
+            .filter_map(|o| o.shard_id)
             .collect();
 
         let mut shards_to_finalize = BTreeSet::new();
@@ -1508,9 +1560,10 @@ impl Migration {
         for (key, shard_id) in stale_entries {
             // The migration shard contains both shards created during aborted upgrades and shards
             // created during successful upgrades. The latter may still be in use, so we have to
-            // check and only finalize those that aren't anymore.
-            let gid = GlobalId::System(key.global_id);
-            if current_shards.get(&gid) != Some(&shard_id) {
+            // check and only finalize those that aren't anymore. Check by shard, not by
+            // `key.global_id`: an entry keyed by object carries its writer's global id, which need
+            // not be the one the object got.
+            if !current_shards.contains(&shard_id) {
                 shards_to_finalize.insert(shard_id);
             }
 
@@ -1581,15 +1634,20 @@ struct Plan {
     evolve: Vec<SystemObjectDescription>,
     /// Objects to migrate using the `Replacement` mechanism.
     replace: Vec<SystemObjectDescription>,
+    /// Objects that get a shard from the migration shard like `replace`, but keep their
+    /// fingerprints, see `Migration::plan_allocation`.
+    allocate: Vec<SystemObjectDescription>,
 }
 
-/// Types and persist codec impls for the migration shard used by the `Replacement` mechanism.
+/// Types and persist codec impls for the migration shard used by the `Replacement` mechanism and
+/// for new builtin materialized views.
 mod migration_shard {
     use std::fmt;
     use std::str::FromStr;
 
     use arrow::array::{StringArray, StringBuilder};
     use bytes::{BufMut, Bytes};
+    use mz_catalog::durable::SystemObjectDescription;
     use mz_persist_types::Codec;
     use mz_persist_types::codec_impls::{
         SimpleColumnarData, SimpleColumnarDecoder, SimpleColumnarEncoder,
@@ -1607,6 +1665,48 @@ mod migration_shard {
         // encounter migration shard entries that don't have it, we need to keep this an `Option`
         // and keep supporting both key formats.
         pub(super) deploy_generation: Option<u64>,
+        /// The builtin of an entry that gives a shard to a builtin without one. Such entries are
+        /// matched by this, and `global_id` only records the writer's id for it.
+        ///
+        /// NOTE: entries with it still carry `global_id`, so that versions that don't know this
+        /// field can decode them. Those versions only use entries of their own build version.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pub(super) object: Option<ObjectKey>,
+    }
+
+    impl Key {
+        /// What this entry is matched by.
+        pub(super) fn entry_id(&self) -> EntryId {
+            match &self.object {
+                Some(object) => EntryId::Object(object.clone()),
+                None => EntryId::Global(self.global_id),
+            }
+        }
+    }
+
+    /// What a migration shard entry is matched by.
+    #[derive(Debug, Clone, Eq, Ord, PartialEq, PartialOrd)]
+    pub(super) enum EntryId {
+        Global(u64),
+        Object(ObjectKey),
+    }
+
+    /// A builtin as identified in the migration shard.
+    #[derive(Debug, Clone, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
+    pub(super) struct ObjectKey {
+        schema_name: String,
+        object_name: String,
+        object_type: String,
+    }
+
+    impl From<&SystemObjectDescription> for ObjectKey {
+        fn from(object: &SystemObjectDescription) -> Self {
+            Self {
+                schema_name: object.schema_name.clone(),
+                object_name: object.object_name.clone(),
+                object_type: object.object_type.to_string(),
+            }
+        }
     }
 
     impl fmt::Display for Key {
@@ -1644,6 +1744,7 @@ mod migration_shard {
                 global_id,
                 build_version,
                 deploy_generation: None,
+                object: None,
             })
         }
     }
@@ -1654,6 +1755,7 @@ mod migration_shard {
                 global_id: Default::default(),
                 build_version: Version::new(0, 0, 0),
                 deploy_generation: Some(0),
+                object: None,
             }
         }
     }
