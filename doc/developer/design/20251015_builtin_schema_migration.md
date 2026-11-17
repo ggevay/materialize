@@ -86,6 +86,10 @@ First, the leader must be at v26.17 or later, because every builtin materialized
 Second, the `enable_0dt_hydrate_migrated_builtin_mvs` feature flag must be on; it exists as a break-glass revert.
 When either condition does not hold, the migrated materialized views and their dependents are instead excluded from the 0dt caught-up check, which is the older behaviour: promotion proceeds without them and they hydrate at cut-over.
 
+New builtin materialized views get their shards from the migration shard in the same way, without a fingerprint change.
+Otherwise the read-only process would only have a shard in its uncommitted catalog savepoint, and the promoted leader would allocate a different one.
+The same two conditions decide whether the read-only process force-writes them.
+
 A leader process performing shard replacement performs the same steps as in read-only mode.
 Additionally, it cleans up durable state written by earlier versions and/or deploy generations by:
   - arranging for the previous shards used by the migrated storage collections to be finalized

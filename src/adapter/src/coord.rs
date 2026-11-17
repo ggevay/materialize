@@ -262,8 +262,8 @@ where
     future.boxed_local()
 }
 
-/// The oldest leader version against which a replacement-migrated builtin materialized view may
-/// write its new persist shard while this environment is still read-only.
+/// The oldest leader version against which a replacement-migrated or new builtin materialized
+/// view may write its persist shard while this environment is still read-only.
 ///
 /// Every builtin materialized view reads `mz_internal.mz_catalog_raw`, so its dataflow only makes
 /// progress up to the catalog shard's frontier. Holding that frontier at the current time is the
@@ -2268,7 +2268,7 @@ impl Coordinator {
         &mut self,
         boot_ts: Timestamp,
         migrated_storage_collections_0dt: BTreeSet<CatalogItemId>,
-        hydrate_migrated_mvs: bool,
+        read_only_writable_mvs: BTreeSet<CatalogItemId>,
         mut builtin_table_updates: Vec<BuiltinTableUpdate>,
         cached_global_exprs: BTreeMap<GlobalId, GlobalExpressions>,
         uncached_local_exprs: BTreeMap<GlobalId, LocalExpressions>,
@@ -2609,18 +2609,10 @@ impl Coordinator {
                     // builtin-migration `Replacement` mechanism below.
                     if mview.replacement_target.is_none() {
                         let gid = mview.global_id_writes();
-                        if hydrate_migrated_mvs
-                            && migrated_storage_collections_0dt.contains(&entry.id())
-                        {
-                            // `migrated_storage_collections_0dt` is `Replacement`-migrated items
-                            // only, so this is a fresh shard we own: nothing else writes it, and
-                            // writing it while read-only hydrates the MV and its dependents before
-                            // cut-over. An `Evolution`-migrated MV reuses the leader's live shard
-                            // and must never reach here.
-                            //
-                            // A *new* builtin MV gets no such treatment: its shard allocation
-                            // lives only in this read-only savepoint, so the promoted leader
-                            // allocates a different shard and discards whatever we wrote.
+                        if read_only_writable_mvs.contains(&entry.id()) {
+                            // The shard came from the builtin migration shard, so nothing else
+                            // writes it and the promoted leader keeps it. Writing it while
+                            // read-only hydrates the MV and its dependents before cut-over.
                             self.controller
                                 .compute
                                 .allow_writes_in_read_only(mview.cluster_id, gid)
@@ -4917,21 +4909,30 @@ pub fn serve(
             catalog_open_start.elapsed()
         );
 
-        // Whether replacement-migrated builtin MVs may write their new shards before cut-over.
-        // Both `bootstrap` and the readiness gate below read this, and they have to agree.
-        // `MIN_LEADER_VERSION_FOR_MIGRATED_MV_WRITES` explains why the leader's version settles it.
+        // The builtin MVs that write their shards while read-only, so that they hydrate before
+        // cut-over: those whose shard came from the builtin migration shard. `bootstrap`
+        // write-enables exactly these, and the readiness gate below excludes the migrated and new
+        // builtin MVs outside the set. `MIN_LEADER_VERSION_FOR_MIGRATED_MV_WRITES` explains why the
+        // leader's version settles it.
         //
         // While we are read-only, `last_seen_version` is that leader's version: our catalog
         // transaction is a savepoint, so our own bump of the setting never lands. `None` means a
         // freshly initialized catalog, with nothing migrated and no leader to be compatible with.
         //
-        // `ENABLE_0DT_HYDRATE_MIGRATED_BUILTIN_MVS` is the break-glass revert: off falls back to
-        // excluding migrated MVs from the caught-up gate, no redeploy needed.
+        // `ENABLE_0DT_HYDRATE_MIGRATED_BUILTIN_MVS` is the break-glass revert: off leaves the set
+        // empty, and the readiness gate excludes these MVs and every other new builtin, no
+        // redeploy needed.
         let hydrate_migrated_mvs = ENABLE_0DT_HYDRATE_MIGRATED_BUILTIN_MVS
             .get(catalog.system_config().dyncfgs())
             && last_seen_version
                 .as_ref()
                 .is_none_or(|version| *version >= MIN_LEADER_VERSION_FOR_MIGRATED_MV_WRITES);
+        let read_only_writable_mvs: BTreeSet<CatalogItemId> = migrated_storage_collections_0dt
+            .iter()
+            .copied()
+            .filter(|_| hydrate_migrated_mvs)
+            .filter(|id| catalog.state().get_entry(id).is_materialized_view())
+            .collect();
 
         let coord_thread_start = Instant::now();
         info!("startup: coordinator init: coordinator thread start beginning");
@@ -4958,36 +4959,38 @@ pub fn serve(
 
         let clusters_caught_up_check =
             clusters_caught_up_trigger.map(|trigger| {
-                let mut exclude_collections: BTreeSet<GlobalId> =
-                    new_builtin_collections.iter().copied().collect();
-
                 // A collection that can't advance its write frontier in read-only mode
                 // stalls its transitive dependents too, so exclude those from the caught-up
-                // check as well. That's every *new* builtin collection, whose fresh shard has no
-                // writer until this deployment promotes, plus migrated MVs whenever the leader is
-                // too old for them to write. An excluded dependent may still be hydrating right
-                // after promotion, a brief blip we accept because these collections are small and
-                // get a writer at cut-over.
+                // check as well. That's every new builtin storage collection and migrated MV
+                // outside `read_only_writable_mvs`. An excluded dependent may still be hydrating
+                // right after promotion, a brief blip we accept because these collections are
+                // small and get a writer at cut-over.
                 //
-                // Seeded from all of `new_builtin_collections`, not just the MVs: a new builtin
-                // table or source has no read-only writer either (`register_table_collections`
-                // retains only *migrated* tables), so an MV reading one never advances past its
-                // empty frontier. A *migrated* table is the opposite case, even though a builtin
-                // MV can read one (`mz_clusters` joins `mz_cluster_replica_size_internal`):
-                // `read_only_mode_table_worker` keeps advancing migrated tables' uppers.
-                let new_builtin_items = new_builtin_collections.iter().map(|global_id| {
-                    catalog
+                // A new builtin table or source has no read-only writer
+                // (`register_table_collections` retains only *migrated* tables), so it stays at the
+                // minimum frontier and an MV reading one never advances. A *migrated* table is the
+                // opposite case, even though a builtin MV can read one (`mz_clusters` joins
+                // `mz_cluster_replica_size_internal`): `read_only_mode_table_worker` keeps
+                // advancing migrated tables' uppers. Other new builtins, such as views, indexes and
+                // logs, have no shard, so only their inputs can freeze them. With the break-glass
+                // flag off they are excluded too, so that the flag reverts their gating as well.
+                let new_builtin_seeds = new_builtin_collections.iter().filter_map(|global_id| {
+                    let entry = catalog
                         .state()
                         .try_get_entry_by_global_id(global_id)
-                        .expect("new builtin collections have catalog entries")
-                        .id()
+                        .expect("new builtin collections have catalog entries");
+                    (entry.item().is_storage_collection() || !hydrate_migrated_mvs)
+                        .then(|| entry.id())
                 });
-                let frozen_migrated_mvs = migrated_storage_collections_0dt
+                let migrated_mvs = migrated_storage_collections_0dt
                     .iter()
                     .copied()
-                    .filter(|_| !hydrate_migrated_mvs)
                     .filter(|id| catalog.state().get_entry(id).is_materialized_view());
-                let mut todo: Vec<_> = new_builtin_items.chain(frozen_migrated_mvs).collect();
+                let mut exclude_collections = BTreeSet::new();
+                let mut todo: Vec<_> = new_builtin_seeds
+                    .chain(migrated_mvs)
+                    .filter(|id| !read_only_writable_mvs.contains(id))
+                    .collect();
                 while let Some(item_id) = todo.pop() {
                     let entry = catalog.state().get_entry(&item_id);
                     exclude_collections.extend(entry.global_ids());
@@ -5154,7 +5157,7 @@ pub fn serve(
                         .bootstrap(
                             boot_ts,
                             migrated_storage_collections_0dt,
-                            hydrate_migrated_mvs,
+                            read_only_writable_mvs,
                             builtin_table_updates,
                             cached_global_exprs,
                             uncached_local_exprs,

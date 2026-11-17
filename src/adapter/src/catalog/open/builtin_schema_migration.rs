@@ -25,6 +25,9 @@
 //! Which mechanism to use is selected through entries in the `MIGRATIONS` list. In general, the
 //! `Evolution` mechanism should be used when possible, as it avoids data loss.
 //!
+//! New builtin materialized views get their shards from the migration shard that `Replacement`
+//! uses, so that a read-only environment can write them (see `Migration::plan_allocation`).
+//!
 //! For more context and details on the implementation, see
 //! `doc/developer/design/20251015_builtin_schema_migration.md`.
 
@@ -637,7 +640,8 @@ enum Mechanism {
 
 /// The result of a builtin schema migration.
 pub(super) struct MigrationResult {
-    /// IDs of items whose shards have been replaced using the `Replacement` mechanism.
+    /// IDs of items that got a new shard from the migration shard: `Replacement`-migrated items
+    /// and the materialized views in `Plan::allocate`.
     pub replaced_items: BTreeSet<CatalogItemId>,
     /// A cleanup action to take once the migration has been made durable.
     pub cleanup_action: BoxFuture<'static, ()>,
@@ -874,7 +878,7 @@ impl Migration {
             Some("replacement") => (true, self.plan_forced_migration(Mechanism::Replacement)),
             Some(other) => panic!("unknown force migration mechanism: {other}"),
         };
-        let plan = self.drop_shardless(plan);
+        let mut plan = self.drop_shardless(plan);
 
         if self.source_version == self.target_version && !force {
             info!("skipping migration: already at target version");
@@ -889,10 +893,14 @@ impl Migration {
             self.upgrade_migration_shard_version().await;
         }
 
+        plan.allocate = self.plan_allocation();
+
         info!("executing migration plan: {plan:?}");
 
         self.migrate_evolve(&plan.evolve).await?;
-        let new_shards = self.migrate_replace(&plan.replace).await?;
+        let replace_or_allocate: Vec<_> =
+            plan.replace.iter().chain(&plan.allocate).cloned().collect();
+        let new_shards = self.migrate_replace(&replace_or_allocate).await?;
 
         let mut migrated_objects = BTreeSet::new();
         migrated_objects.extend(plan.evolve);
@@ -1054,10 +1062,11 @@ impl Migration {
     /// A builtin without a shard does not exist in persist yet: either it was added in the target
     /// version, or the source version predates it entirely (an upgrade from before the builtin
     /// was introduced can reach an `Evolution` step registered for a later version). In both
-    /// cases the leader allocates the shard during bootstrap, at the target schema, and there is
-    /// nothing to evolve or replace. Applied to every plan, forced or versioned, so that both
-    /// paths agree; a read-only process that reached `migrate_evolve_one` with such an object
-    /// would otherwise bail out and crash-loop.
+    /// cases the shard gets allocated at the target schema, from the migration shard for
+    /// materialized views (see `plan_allocation`), and there is nothing to evolve or replace.
+    /// Applied to every plan, forced or versioned, so that both paths agree; a read-only process
+    /// that reached `migrate_evolve_one` with such an object would otherwise bail out and
+    /// crash-loop.
     fn drop_shardless(&self, mut plan: Plan) -> Plan {
         let has_shard = |object: &SystemObjectDescription| {
             self.system_objects
@@ -1067,6 +1076,31 @@ impl Migration {
         plan.evolve.retain(has_shard);
         plan.replace.retain(has_shard);
         plan
+    }
+
+    /// Select the builtin materialized views without a registered shard, such as those added in
+    /// the target version.
+    ///
+    /// A read-only process never commits the shard the storage controller would allocate for
+    /// them, so the promoted leader would allocate another. A shard from the migration shard is
+    /// shared by every process of this version and deploy generation, so the read-only process can
+    /// write it and hydrate the view and its dependents before cut-over.
+    ///
+    /// NOTE: the migration shard keys these entries by global id, so the read-only process and
+    /// the promoted leader must give a new builtin the same id. They do as long as no process
+    /// commits system item ids between the two boots (see
+    /// `Transaction::allocate_introspection_source_index_id`).
+    ///
+    /// Same-version boots skip the whole migration, so there a new builtin keeps the shard the
+    /// storage controller allocates.
+    fn plan_allocation(&self) -> Vec<SystemObjectDescription> {
+        self.system_objects
+            .iter()
+            .filter(|(_, info)| {
+                info.shard_id.is_none() && matches!(info.builtin, Builtin::MaterializedView(_))
+            })
+            .map(|(object, _)| object.clone())
+            .collect()
     }
 
     /// Upgrade the migration shard to the target version.
@@ -1224,7 +1258,8 @@ impl Migration {
         Ok(())
     }
 
-    /// Migrate the given objects using the `Replacement` mechanism.
+    /// Give the given objects shards from the migration shard, inserting new ones where it has
+    /// none at this version and deploy generation.
     async fn migrate_replace(
         &self,
         objects: &[SystemObjectDescription],
@@ -1249,7 +1284,11 @@ impl Migration {
             }
         }
 
-        info!(?objects, ?ids_to_replace, "migrating by replacement");
+        info!(
+            ?objects,
+            ?ids_to_replace,
+            "allocating shards from the migration shard"
+        );
 
         // Fetch replacement shard IDs from the migration shard, or insert new ones if none exist.
         // This can fail due to writes by concurrent processes, so we need to retry.
@@ -1581,9 +1620,13 @@ struct Plan {
     evolve: Vec<SystemObjectDescription>,
     /// Objects to migrate using the `Replacement` mechanism.
     replace: Vec<SystemObjectDescription>,
+    /// Objects that get a shard from the migration shard like `replace`, but keep their
+    /// fingerprints, see `Migration::plan_allocation`.
+    allocate: Vec<SystemObjectDescription>,
 }
 
-/// Types and persist codec impls for the migration shard used by the `Replacement` mechanism.
+/// Types and persist codec impls for the migration shard used by the `Replacement` mechanism and
+/// for new builtin materialized views.
 mod migration_shard {
     use std::fmt;
     use std::str::FromStr;
