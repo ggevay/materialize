@@ -1252,10 +1252,10 @@ impl ComputeController {
     /// Like [`Self::allow_writes`], but takes effect even in read-only mode.
     ///
     /// The caller must guarantee that no leader environment writes the collection's output shard.
-    /// In a 0dt deployment that means a shard this environment created for itself, the replacement
-    /// shard of a `Replacement`-migrated builtin collection, never one the leader is still serving
-    /// from. `Evolution` migrates in place and reuses the leader's shard, so it must not reach this
-    /// path. Violating the guarantee races two writers on one shard.
+    /// In a 0dt deployment that means a shard this environment created for itself, such as the
+    /// replacement shard of a `Replacement`-migrated builtin collection, never one the leader is
+    /// still serving from. `Evolution` migrates in place and reuses the leader's shard, so it must
+    /// not reach this path. Violating the guarantee races two writers on one shard.
     ///
     /// NOTE: ownership is exclusive per (build version, deploy generation), not per process: the
     /// migration shard entry naming the shard is keyed by that pair and a read-only catalog open is
