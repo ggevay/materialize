@@ -345,31 +345,27 @@ WITH (
     ASSERT NOT NULL sink_progress_topic
 ) AS
 SELECT
-    mz_internal.parse_catalog_id(r.data->'key'->'gid') AS id,
+    i.id,
     ARRAY(
         SELECT b.value
-        FROM jsonb_array_elements_text(details->'brokers')
+        FROM jsonb_array_elements_text(d.conn->'brokers')
              WITH ORDINALITY AS b(value, ord)
         ORDER BY b.ord
     ) AS brokers,
     COALESCE(
-        details->>'progress_topic',
-        '_materialize-progress-' || mz_environment_id() || '-'
-            || mz_internal.parse_catalog_id(r.data->'key'->'gid')
+        d.conn->>'progress_topic',
+        '_materialize-progress-' || mz_environment_id() || '-' || i.id
     ) AS sink_progress_topic
 FROM
-    mz_internal.mz_catalog_raw r,
+    mz_internal.mz_catalog_items i,
     LATERAL (
-        SELECT mz_internal.parse_connection_details(
-            r.data->'value'->'definition'->'V1'->>'create_sql')
-    ) AS d(details)
+        SELECT mz_internal.parse_connection_details(i.create_sql)
+    ) AS d(conn)
 WHERE
-    r.data->>'kind' = 'Item' AND
     -- The connection_type filter selects the kind. A non-matching row yields a
-    -- NULL connection_type and is dropped here, so no `details IS NOT NULL` is
+    -- NULL connection_type and is dropped here, so no `conn IS NOT NULL` is
     -- needed (parse_connection_details returns jsonb null, which passes it).
-    mz_internal.parse_catalog_create_sql(
-        r.data->'value'->'definition'->'V1'->>'create_sql')->>'connection_type' = 'kafka'",
+    i.details->>'connection_type' = 'kafka'",
         is_retained_metrics_object: false,
         access: vec![PUBLIC_SELECT],
         ontology: Some(Ontology {
