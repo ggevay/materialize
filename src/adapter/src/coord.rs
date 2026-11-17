@@ -2612,15 +2612,13 @@ impl Coordinator {
                         if hydrate_migrated_mvs
                             && migrated_storage_collections_0dt.contains(&entry.id())
                         {
-                            // `migrated_storage_collections_0dt` is `Replacement`-migrated items
-                            // only, so this is a fresh shard we own: nothing else writes it, and
-                            // writing it while read-only hydrates the MV and its dependents before
-                            // cut-over. An `Evolution`-migrated MV reuses the leader's live shard
-                            // and must never reach here.
-                            //
-                            // A *new* builtin MV gets no such treatment: its shard allocation
-                            // lives only in this read-only savepoint, so the promoted leader
-                            // allocates a different shard and discards whatever we wrote.
+                            // `migrated_storage_collections_0dt` only holds items whose shard came
+                            // from the builtin migration shard, such as `Replacement`-migrated MVs
+                            // and new builtin MVs. So this is a fresh shard we own, and the
+                            // promoted leader keeps it: nothing else writes it, and writing it
+                            // while read-only hydrates the MV and its dependents before cut-over.
+                            // An `Evolution`-migrated MV reuses the leader's live shard and must
+                            // never reach here.
                             self.controller
                                 .compute
                                 .allow_writes_in_read_only(mview.cluster_id, gid)
@@ -4958,36 +4956,39 @@ pub fn serve(
 
         let clusters_caught_up_check =
             clusters_caught_up_trigger.map(|trigger| {
-                let mut exclude_collections: BTreeSet<GlobalId> =
-                    new_builtin_collections.iter().copied().collect();
-
                 // A collection that can't advance its write frontier in read-only mode
                 // stalls its transitive dependents too, so exclude those from the caught-up
-                // check as well. That's every *new* builtin collection, whose fresh shard has no
-                // writer until this deployment promotes, plus migrated MVs whenever the leader is
-                // too old for them to write. An excluded dependent may still be hydrating right
-                // after promotion, a brief blip we accept because these collections are small and
-                // get a writer at cut-over.
+                // check as well. That's every new builtin storage collection that `bootstrap`
+                // does not write-enable, plus migrated MVs whenever the leader is too old for
+                // them to write. An excluded dependent may still be hydrating right after
+                // promotion, a brief blip we accept because these collections are small and get
+                // a writer at cut-over.
                 //
-                // Seeded from all of `new_builtin_collections`, not just the MVs: a new builtin
-                // table or source has no read-only writer either (`register_table_collections`
+                // `bootstrap` write-enables the new builtin MVs that got a migration-shard shard,
+                // as it does migrated ones, and the predicate below must stay in step with it. A
+                // new builtin table or source has no read-only writer (`register_table_collections`
                 // retains only *migrated* tables), so an MV reading one never advances past its
-                // empty frontier. A *migrated* table is the opposite case, even though a builtin
-                // MV can read one (`mz_clusters` joins `mz_cluster_replica_size_internal`):
-                // `read_only_mode_table_worker` keeps advancing migrated tables' uppers.
-                let new_builtin_items = new_builtin_collections.iter().map(|global_id| {
-                    catalog
+                // empty frontier. A *migrated* table is the opposite case, even though a builtin MV
+                // can read one (`mz_clusters` joins `mz_cluster_replica_size_internal`):
+                // `read_only_mode_table_worker` keeps advancing migrated tables' uppers. New
+                // builtin views and indexes have no shard, so only their inputs can freeze them.
+                let frozen_new_builtins = new_builtin_collections.iter().filter_map(|global_id| {
+                    let entry = catalog
                         .state()
                         .try_get_entry_by_global_id(global_id)
-                        .expect("new builtin collections have catalog entries")
-                        .id()
+                        .expect("new builtin collections have catalog entries");
+                    let write_enabled = entry.is_materialized_view()
+                        && hydrate_migrated_mvs
+                        && migrated_storage_collections_0dt.contains(&entry.id());
+                    (entry.item().is_storage_collection() && !write_enabled).then(|| entry.id())
                 });
                 let frozen_migrated_mvs = migrated_storage_collections_0dt
                     .iter()
                     .copied()
                     .filter(|_| !hydrate_migrated_mvs)
                     .filter(|id| catalog.state().get_entry(id).is_materialized_view());
-                let mut todo: Vec<_> = new_builtin_items.chain(frozen_migrated_mvs).collect();
+                let mut exclude_collections = BTreeSet::new();
+                let mut todo: Vec<_> = frozen_new_builtins.chain(frozen_migrated_mvs).collect();
                 while let Some(item_id) = todo.pop() {
                     let entry = catalog.state().get_entry(&item_id);
                     exclude_collections.extend(entry.global_ids());

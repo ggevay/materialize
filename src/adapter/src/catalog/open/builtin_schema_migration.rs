@@ -637,7 +637,8 @@ enum Mechanism {
 
 /// The result of a builtin schema migration.
 pub(super) struct MigrationResult {
-    /// IDs of items whose shards have been replaced using the `Replacement` mechanism.
+    /// IDs of items that got a new shard from the migration shard: `Replacement`-migrated items
+    /// and the materialized views in `Plan::allocate`.
     pub replaced_items: BTreeSet<CatalogItemId>,
     /// A cleanup action to take once the migration has been made durable.
     pub cleanup_action: BoxFuture<'static, ()>,
@@ -874,7 +875,7 @@ impl Migration {
             Some("replacement") => (true, self.plan_forced_migration(Mechanism::Replacement)),
             Some(other) => panic!("unknown force migration mechanism: {other}"),
         };
-        let plan = self.drop_shardless(plan);
+        let mut plan = self.drop_shardless(plan);
 
         if self.source_version == self.target_version && !force {
             info!("skipping migration: already at target version");
@@ -889,10 +890,14 @@ impl Migration {
             self.upgrade_migration_shard_version().await;
         }
 
+        plan.allocate = self.plan_allocation();
+
         info!("executing migration plan: {plan:?}");
 
         self.migrate_evolve(&plan.evolve).await?;
-        let new_shards = self.migrate_replace(&plan.replace).await?;
+        let replace_or_allocate: Vec<_> =
+            plan.replace.iter().chain(&plan.allocate).cloned().collect();
+        let new_shards = self.migrate_replace(&replace_or_allocate).await?;
 
         let mut migrated_objects = BTreeSet::new();
         migrated_objects.extend(plan.evolve);
@@ -1069,6 +1074,32 @@ impl Migration {
         plan
     }
 
+    /// Select the builtin materialized views without a registered shard, such as those added in
+    /// the target version.
+    ///
+    /// A shard the storage controller allocates for them lives in the catalog transaction, which
+    /// a read-only process never commits. A shard from the migration shard is reused by the leader
+    /// the process gets promoted to, so the read-only process can write it and hydrate the view
+    /// and its dependents before cut-over.
+    ///
+    /// NOTE: the leader finds the read-only process's entries only under the same global ids.
+    /// Both take new builtins' ids from `add_new_remove_old_builtin_items_migration`, a function
+    /// of durable state, and only bootstrap allocates system item ids (asserted in
+    /// `Transaction::get_and_increment_id_by`). A restarting old leader has all its builtins
+    /// mapped already, so nothing allocates any between the two boots.
+    ///
+    /// Same-version boots skip this with the rest of the migration. Only dev builds that share a
+    /// version string add builtins there, and those keep a storage-allocated shard.
+    fn plan_allocation(&self) -> Vec<SystemObjectDescription> {
+        self.system_objects
+            .iter()
+            .filter(|(_, info)| {
+                info.shard_id.is_none() && matches!(info.builtin, Builtin::MaterializedView(_))
+            })
+            .map(|(object, _)| object.clone())
+            .collect()
+    }
+
     /// Upgrade the migration shard to the target version.
     async fn upgrade_migration_shard_version(&self) {
         let persist = &self.config.persist_client;
@@ -1224,7 +1255,8 @@ impl Migration {
         Ok(())
     }
 
-    /// Migrate the given objects using the `Replacement` mechanism.
+    /// Give the given objects shards from the migration shard, inserting new ones where it has
+    /// none at this version and deploy generation.
     async fn migrate_replace(
         &self,
         objects: &[SystemObjectDescription],
@@ -1249,7 +1281,11 @@ impl Migration {
             }
         }
 
-        info!(?objects, ?ids_to_replace, "migrating by replacement");
+        info!(
+            ?objects,
+            ?ids_to_replace,
+            "allocating shards from the migration shard"
+        );
 
         // Fetch replacement shard IDs from the migration shard, or insert new ones if none exist.
         // This can fail due to writes by concurrent processes, so we need to retry.
@@ -1581,6 +1617,9 @@ struct Plan {
     evolve: Vec<SystemObjectDescription>,
     /// Objects to migrate using the `Replacement` mechanism.
     replace: Vec<SystemObjectDescription>,
+    /// Objects that get a shard from the migration shard like `replace`, but keep their
+    /// fingerprints, see `Migration::plan_allocation`.
+    allocate: Vec<SystemObjectDescription>,
 }
 
 /// Types and persist codec impls for the migration shard used by the `Replacement` mechanism.
